@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Settings — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:600px; margin:0 auto;">
+
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px;">Settings</h1>
+  <p style="color:#64748b; font-size:0.875rem; margin-bottom:32px;">Manage your MyWealthLens preferences</p>
+
+  <!-- Settings sections -->
+  <div style="display:flex; flex-direction:column; gap:16px;">
+
+    <!-- Life Stage -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-weight:600; margin-bottom:4px;">Life Stage</div>
+      <div style="color:#64748b; font-size:0.875rem; margin-bottom:16px;">Personalises your dashboard and goal suggestions</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button style="background:#00d4aa22; border:1px solid #00d4aa; color:#00d4aa; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Single ✓</button>
+        <button style="background:#1a1e2d; border:1px solid #1e2130; color:#64748b; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Married</button>
+        <button style="background:#1a1e2d; border:1px solid #1e2130; color:#64748b; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Family</button>
+      </div>
+    </div>
+
+    <!-- Currency -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-weight:600; margin-bottom:4px;">Currency</div>
+      <div style="color:#64748b; font-size:0.875rem; margin-bottom:16px;">All values displayed in</div>
+      <div style="background:#1a1e2d; border:1px solid #1e2130; border-radius:8px; padding:10px 14px; color:#e2e8f0; font-size:0.9rem; width:fit-content;">
+        ₹ Indian Rupee (INR)
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-weight:600; margin-bottom:4px;">Notifications</div>
+      <div style="color:#64748b; font-size:0.875rem;">Coming soon — monthly net worth summary emails</div>
+    </div>
+
+    <!-- Data & Privacy -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-weight:600; margin-bottom:4px;">Data & Privacy</div>
+      <div style="color:#64748b; font-size:0.875rem; margin-bottom:16px;">Your data is stored locally on this server only. Never shared or sold.</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button style="background:#1a1e2d; border:1px solid #1e2130; color:#e2e8f0; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Export my data</button>
+        <button style="background:#ef444411; border:1px solid #ef444433; color:#ef4444; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Delete account</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
