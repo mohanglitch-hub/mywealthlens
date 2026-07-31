@@ -1,14 +1,15 @@
 {% extends "base.html" %}
-{% block title %}Login — MyWealthLens{% endblock %}
+{% block title %}Log In — MyWealthLens{% endblock %}
 
 {% block content %}
 <div class="auth-card">
 
-  <div style="text-align:center; margin-bottom:28px;">
-    <div style="font-family:'Roboto Mono',monospace; font-size:1.1rem; font-weight:600;">
-      <span style="color:#00d4aa;">MyWealth</span><span style="color:#64748b;">Lens</span>
+  <!-- Branding -->
+  <div style="text-align:center; margin-bottom:32px;">
+    <div style="font-family:'Roboto Mono',monospace; font-size:1.15rem; font-weight:700; letter-spacing:0.04em;">
+      <span style="color:var(--accent);">MyWealth</span><span style="color:var(--muted2);">Lens</span>
     </div>
-    <div style="color:#64748b; font-size:0.75rem; margin-top:4px; letter-spacing:0.08em; text-transform:uppercase;">
+    <div style="color:var(--muted2); font-size:0.72rem; margin-top:6px; letter-spacing:0.1em; text-transform:uppercase;">
       Your complete financial picture
     </div>
   </div>
@@ -16,41 +17,91 @@
   <div class="auth-title">Welcome back</div>
   <div class="auth-subtitle">Log in to your account to continue</div>
 
-  <form method="POST" action="/login">
+  <form method="POST" action="/login" id="loginForm" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
 
     <div class="form-group">
       <label for="email">Email</label>
-      <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+      <input type="email" id="email" name="email"
+             placeholder="you@example.com"
+             required autocomplete="email"
+             oninput="clearErr('email')" />
+      <div class="field-error" id="err-email"></div>
     </div>
 
     <div class="form-group">
-      <label for="password">Password</label>
-      <div class="input-wrapper">
-        <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password" />
-        <button type="button" class="toggle-pw" onclick="togglePassword('password', this)">Show</button>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <label for="password" style="margin-bottom:0;">Password</label>
+        <a href="/forgot-password"
+           style="font-size:0.8rem; color:var(--muted); text-decoration:none; font-weight:500; transition:color 0.2s;"
+           onmouseover="this.style.color='var(--accent)'"
+           onmouseout="this.style.color='var(--muted)'">
+          Forgot password?
+        </a>
       </div>
+      <div class="input-wrapper">
+        <input type="password" id="password" name="password"
+               placeholder="••••••••"
+               required autocomplete="current-password"
+               oninput="clearErr('password')" />
+        <button type="button" class="toggle-pw" onclick="togglePw('password',this)">Show</button>
+      </div>
+      <div class="field-error" id="err-password"></div>
     </div>
 
-    <button type="submit" class="btn-primary">Log in</button>
+    <button type="submit" class="btn-primary" id="loginBtn" style="margin-top:8px;">
+      Log in
+    </button>
 
   </form>
 
-  <div class="auth-footer">
+  <div class="auth-footer" style="margin-top:24px;">
     Don't have an account? <a href="/signup">Sign up free</a>
   </div>
 
 </div>
 
+<style>
+  .field-error { font-size:0.78rem; color:var(--down); margin-top:5px; min-height:16px; }
+  #loginBtn:disabled { opacity:0.6; cursor:not-allowed; }
+</style>
+
 <script>
-  function togglePassword(id, btn) {
-    const input = document.getElementById(id);
-    if (input.type === "password") {
-      input.type = "text";
-      btn.textContent = "Hide";
-    } else {
-      input.type = "password";
-      btn.textContent = "Show";
-    }
+  function togglePw(id, btn) {
+    const inp = document.getElementById(id);
+    const hidden = inp.type === 'password';
+    inp.type = hidden ? 'text' : 'password';
+    btn.textContent = hidden ? 'Hide' : 'Show';
   }
+
+  function clearErr(field) {
+    const el = document.getElementById('err-' + field);
+    if (el) el.textContent = '';
+  }
+
+  document.getElementById('loginForm').addEventListener('submit', function(e) {
+    let valid = true;
+    const email = document.getElementById('email').value.trim();
+    const pw    = document.getElementById('password').value;
+
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      document.getElementById('err-email').textContent = 'Please enter a valid email address.';
+      valid = false;
+    }
+    if (!pw) {
+      document.getElementById('err-password').textContent = 'Please enter your password.';
+      valid = false;
+    }
+    if (!valid) { e.preventDefault(); return; }
+
+    const btn = document.getElementById('loginBtn');
+    btn.textContent = 'Logging in…';
+    btn.disabled = true;
+  });
+
+  window.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('email').focus();
+  });
 </script>
 {% endblock %}

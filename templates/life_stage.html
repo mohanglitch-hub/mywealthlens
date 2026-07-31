@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}Life Stage — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:1000px; margin:0 auto;">
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Life Stage Planner</h1>
+      <p class="page-sub">See how your portfolio compares to ideal allocations for your life stage</p>
+    </div>
+    <button onclick="toggleProfilePanel()" class="btn-accent-pill">
+      {% if profile %}✏️ Edit Profile{% else %}+ Set My Profile{% endif %}
+    </button>
+  </div>
+
+  <!-- Profile Form -->
+  <div id="profilePanel" style="display:{% if not profile %}block{% else %}none{% endif %};" class="panel">
+    <div class="panel-title">Your Life Stage Profile</div>
+    <form method="POST" action="/life-stage/save-profile">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+      <div class="form-grid-3">
+        <div class="form-group">
+          <label>Your Age</label>
+          <input type="number" name="age" min="18" max="100" placeholder="e.g. 32" value="{{ profile.age if profile else '' }}" required />
+        </div>
+        <div class="form-group">
+          <label>Marital Status</label>
+          <select name="marital_status">
+            <option value="single"  {% if profile and profile.marital_status == 'single'  %}selected{% endif %}>Single</option>
+            <option value="married" {% if profile and profile.marital_status == 'married' %}selected{% endif %}>Married</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Number of Dependents</label>
+          <input type="number" name="dependents" min="0" max="10" placeholder="e.g. 2" value="{{ profile.dependents if profile else 0 }}" required />
+        </div>
+      </div>
+      <button type="submit" class="btn-primary" style="width:auto; padding:10px 28px;">Save & Analyse</button>
+    </form>
+  </div>
+
+  {% if profile and stage %}
+
+  <!-- Life Stage Badge -->
+  <div class="panel" style="margin-bottom:24px;">
+    <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+      <div style="font-size:3rem;">{{ stage.icon }}</div>
+      <div style="flex:1; min-width:180px;">
+        <div style="font-size:1.2rem; font-weight:700; color:var(--accent);">{{ stage.name }}</div>
+        <div style="color:var(--muted); font-size:0.875rem; margin-top:4px;">{{ stage.description }}</div>
+        <div style="display:flex; gap:12px; margin-top:10px; font-size:0.8rem; color:var(--muted2); flex-wrap:wrap;">
+          <span>Age {{ profile.age }}</span>
+          <span>·</span>
+          <span>{{ profile.marital_status.title() }}</span>
+          <span>·</span>
+          <span>{{ profile.dependents }} dependent{% if profile.dependents != 1 %}s{% endif %}</span>
+        </div>
+      </div>
+      <div class="health-score-box">
+        <div class="health-label">Portfolio Health</div>
+        <div class="health-value" style="color:{{ 'var(--up)' if health_score >= 75 else 'var(--warning)' if health_score >= 50 else 'var(--down)' }};">
+          {{ health_score }}<span style="font-size:1rem; color:var(--muted);">/100</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Allocation vs Benchmark -->
+  <div class="panel" style="margin-bottom:24px;">
+    <div style="font-weight:600; margin-bottom:6px; color:var(--text);">Allocation vs Benchmark</div>
+    <div style="color:var(--muted); font-size:0.82rem; margin-bottom:20px;">SEBI-aligned ideal allocation for your life stage</div>
+
+    {% for bucket in allocation %}
+    <div style="margin-bottom:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:1.1rem;">{{ bucket.icon }}</span>
+          <span style="font-weight:600; font-size:0.9rem; color:var(--text);">{{ bucket.label }}</span>
+          {% if bucket.gap > 5 %}
+          <span class="badge badge-red">Under by {{ bucket.gap }}%</span>
+          {% elif bucket.gap < -5 %}
+          <span class="badge badge-amber">Over by {{ (bucket.gap * -1)|round(1) }}%</span>
+          {% else %}
+          <span class="badge badge-green">✓ On track</span>
+          {% endif %}
+        </div>
+        <div style="font-size:0.82rem; color:var(--muted2); white-space:nowrap;">
+          <span style="color:var(--text); font-weight:600;">{{ bucket.actual }}%</span> actual &nbsp;·&nbsp;
+          <span style="color:var(--muted);">{{ bucket.target }}%</span> target
+        </div>
+      </div>
+      <div style="position:relative; height:10px; background:var(--border); border-radius:5px; overflow:hidden;">
+        <div style="position:absolute; left:{{ bucket.target }}%; top:0; width:2px; height:100%; background:var(--muted); z-index:2;"></div>
+        <div style="height:10px; border-radius:5px; width:{{ [bucket.actual, 100]|min }}%;
+             background:{{ 'var(--up)' if bucket.gap > -5 and bucket.gap < 5 else 'var(--down)' if bucket.gap > 5 else 'var(--warning)' }};
+             transition:width 0.5s;"></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--muted2); margin-top:3px;">
+        <span>0%</span>
+        <span>│ target: {{ bucket.target }}%</span>
+        <span>100%</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Recommendations -->
+  <div class="panel" style="margin-bottom:24px;">
+    <div style="font-weight:600; margin-bottom:6px; color:var(--text);">Actionable Recommendations</div>
+    <div style="color:var(--muted); font-size:0.82rem; margin-bottom:20px;">What to do based on your current gaps</div>
+    {% for rec in recommendations %}
+    <div class="rec-card rec-{{ rec.type }}">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+        <span style="font-size:1.2rem;">{{ rec.icon }}</span>
+        <span style="font-weight:600; color:{{ 'var(--down)' if rec.type == 'increase' else 'var(--warning)' if rec.type == 'reduce' else 'var(--up)' }};">
+          {{ rec.headline }}
+        </span>
+      </div>
+      <div style="color:var(--muted); font-size:0.85rem; margin-bottom:10px;">{{ rec.detail }}</div>
+      {% if rec.instruments %}
+      <div style="display:flex; flex-wrap:wrap; gap:8px;">
+        {% for inst in rec.instruments %}
+        <span class="instrument-tag">{{ inst }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Portfolio Breakdown Table -->
+  <div class="panel">
+    <div style="font-weight:600; margin-bottom:16px; color:var(--text);">Portfolio Breakdown (₹)</div>
+    <div style="overflow-x:auto; -webkit-overflow-scrolling:touch;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Asset Class</th>
+            <th style="text-align:right;">Current (₹)</th>
+            <th style="text-align:right;">Current %</th>
+            <th style="text-align:right;">Target %</th>
+            <th style="text-align:right;">Ideal (₹)</th>
+            <th style="text-align:right;">Δ (₹)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in table_rows %}
+          <tr>
+            <td><span style="margin-right:6px;">{{ row.icon }}</span>{{ row.label }}</td>
+            <td style="text-align:right; font-family:'Roboto Mono',monospace;">₹{{ "{:,.0f}".format(row.current_val) }}</td>
+            <td style="text-align:right; font-family:'Roboto Mono',monospace;">{{ row.actual }}%</td>
+            <td style="text-align:right; font-family:'Roboto Mono',monospace; color:var(--muted);">{{ row.target }}%</td>
+            <td style="text-align:right; font-family:'Roboto Mono',monospace; color:var(--muted);">₹{{ "{:,.0f}".format(row.ideal_val) }}</td>
+            <td style="text-align:right; font-family:'Roboto Mono',monospace; color:{{ 'var(--up)' if row.delta >= 0 else 'var(--down)' }};">
+              {{ '+' if row.delta >= 0 else '' }}₹{{ "{:,.0f}".format(row.delta) }}
+            </td>
+          </tr>
+          {% endfor %}
+          <tr class="table-total">
+            <td>Total</td>
+            <td style="text-align:right; font-family:'Roboto Mono',monospace;">₹{{ "{:,.0f}".format(total_value) }}</td>
+            <td style="text-align:right;">100%</td>
+            <td style="text-align:right; color:var(--muted);">100%</td>
+            <td style="text-align:right; font-family:'Roboto Mono',monospace;">₹{{ "{:,.0f}".format(total_value) }}</td>
+            <td style="text-align:right;">—</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% else %}
+  <div style="text-align:center; padding:60px 20px; color:var(--muted);">
+    <div style="font-size:3rem; margin-bottom:12px;">🧭</div>
+    <div style="font-weight:600; font-size:1rem; margin-bottom:6px; color:var(--text);">Set your profile to get started</div>
+    <div style="font-size:0.875rem;">Enter your age, marital status and dependents above to see your life stage analysis</div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .page-header  { display:flex; align-items:center; justify-content:space-between; margin-bottom:32px; flex-wrap:wrap; gap:12px; }
+  .page-title   { font-size:1.4rem; font-weight:700; margin-bottom:4px; color:var(--text); }
+  .page-sub     { color:var(--muted); font-size:0.875rem; }
+  .btn-accent-pill {
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:10px 20px; font-weight:700; font-size:0.875rem; cursor:pointer;
+    transition:opacity 0.2s; white-space:nowrap;
+  }
+  .btn-accent-pill:hover { opacity:0.88; }
+
+  .panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); }
+  .panel-title { font-weight:600; margin-bottom:20px; color:var(--text); }
+
+  .form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+
+  .health-score-box { text-align:right; min-width:80px; }
+  .health-label { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px; }
+  .health-value { font-size:2rem; font-weight:700; }
+
+  .badge { border-radius:12px; font-size:0.7rem; padding:2px 8px; border:1px solid; }
+  .badge-red   { background:var(--down-bg);    color:var(--down);    border-color:var(--down); }
+  .badge-amber { background:var(--warning-bg); color:var(--warning); border-color:var(--warning); }
+  .badge-green { background:var(--up-bg);      color:var(--up);      border-color:var(--up); }
+
+  .rec-card { border-radius:10px; padding:16px; margin-bottom:14px; border:1px solid; }
+  .rec-increase { border-color:var(--down);    background:var(--down-bg); }
+  .rec-reduce   { border-color:var(--warning); background:var(--warning-bg); }
+  .rec-ok       { border-color:var(--up);      background:var(--up-bg); }
+
+  .instrument-tag {
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:6px; padding:4px 10px; font-size:0.78rem; color:var(--text2);
+  }
+
+  .data-table { width:100%; border-collapse:collapse; font-size:0.85rem; min-width:520px; }
+  .data-table th {
+    text-align:left; padding:10px 12px; color:var(--muted);
+    font-weight:500; border-bottom:1px solid var(--border);
+  }
+  .data-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); }
+  .data-table tr:last-child td { border-bottom:none; }
+  .table-total td { background:var(--surface2); font-weight:700; }
+
+  /* Mobile */
+  @media (max-width: 768px) {
+    .form-grid-3 { grid-template-columns:1fr; }
+    .panel { padding:16px; }
+    .page-header { flex-direction:column; align-items:flex-start; }
+    .btn-accent-pill { width:100%; text-align:center; }
+    .health-score-box { text-align:left; }
+  }
+</style>
+
+<script>
+  function toggleProfilePanel() {
+    const p = document.getElementById("profilePanel");
+    p.style.display = p.style.display === "none" ? "block" : "none";
+  }
+</script>
+{% endblock %}

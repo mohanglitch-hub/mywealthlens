@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Insurance — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:0 auto;">
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Insurance Tracker</h1>
+      <p class="page-sub">Keep all your policies in one place with renewal alerts</p>
+    </div>
+    <button onclick="togglePanel()" class="btn-accent-pill">+ Add Policy</button>
+  </div>
+
+  <!-- Summary -->
+  {% if policies %}
+  <div class="summary-row">
+    <div class="sum-card">
+      <div class="sum-label">Total Policies</div>
+      <div class="sum-value">{{ policies | length }}</div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-label">Total Cover</div>
+      <div class="sum-value" style="color:var(--accent);">₹{{ "{:,.0f}".format(total_cover) }}</div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-label">Annual Premium</div>
+      <div class="sum-value" style="color:var(--warning);">₹{{ "{:,.0f}".format(total_premium) }}</div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-label">Renewals Due Soon</div>
+      <div class="sum-value" style="color:{{ 'var(--down)' if due_soon > 0 else 'var(--up)' }};">{{ due_soon }} policy{% if due_soon != 1 %}s{% endif %}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Add Policy Panel -->
+  <div id="addPanel" style="display:none;" class="panel">
+    <div class="panel-title">Add Insurance Policy</div>
+    <form method="POST" action="/insurance/add">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>Insurance Type</label>
+          <select name="insurance_type" class="form-select">
+            <option value="term">🛡️ Term Life Insurance</option>
+            <option value="health">🏥 Health Insurance</option>
+            <option value="vehicle">🚗 Vehicle Insurance</option>
+            <option value="home">🏠 Home Insurance</option>
+            <option value="other">📦 Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Insurance Company</label>
+          <input type="text" name="insurer" placeholder="e.g. LIC, Star Health, HDFC Ergo" required />
+        </div>
+      </div>
+
+      <div class="form-grid-3">
+        <div class="form-group">
+          <label>Policy Number</label>
+          <input type="text" name="policy_number" placeholder="e.g. LIC-123456789" />
+        </div>
+        <div class="form-group">
+          <label>Sum Assured / Cover (₹)</label>
+          <input type="number" name="cover_amount" step="1" min="0" placeholder="e.g. 10000000" required />
+        </div>
+        <div class="form-group">
+          <label>Annual Premium (₹)</label>
+          <input type="number" name="annual_premium" step="1" min="0" placeholder="e.g. 15000" required />
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>Renewal Date</label>
+          <input type="date" name="renewal_date" />
+        </div>
+        <div class="form-group">
+          <label>Notes (optional)</label>
+          <input type="text" name="notes" placeholder="e.g. Family floater, cashless hospitals" />
+        </div>
+      </div>
+
+      <button type="submit" class="btn-primary" style="width:auto; padding:10px 28px;">Save Policy</button>
+    </form>
+  </div>
+
+  <!-- Policies List -->
+  {% if policies %}
+  {% set type_icons = {'term':'🛡️','health':'🏥','vehicle':'🚗','home':'🏠','other':'📦'} %}
+  {% set type_labels = {'term':'Term Life','health':'Health','vehicle':'Vehicle','home':'Home','other':'Other'} %}
+
+  <div style="display:flex; flex-direction:column; gap:14px;">
+    {% for p in policies %}
+    {% set days_to_renewal = (p.renewal_date - today).days if p.renewal_date else 999 %}
+    <div class="policy-card {% if days_to_renewal <= 30 %}policy-alert{% endif %}">
+      <div class="policy-header">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="font-size:1.8rem;">{{ type_icons.get(p.insurance_type, '📦') }}</div>
+          <div>
+            <div style="font-weight:700; color:var(--text);">{{ p.insurer }}</div>
+            <div style="font-size:0.8rem; color:var(--muted);">{{ type_labels.get(p.insurance_type, 'Insurance') }}{% if p.policy_number %} · {{ p.policy_number }}{% endif %}</div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; margin-bottom:2px;">Cover Amount</div>
+          <div style="font-family:'Roboto Mono',monospace; font-size:1.2rem; font-weight:700; color:var(--accent);">₹{{ "{:,.0f}".format(p.cover_amount) }}</div>
+        </div>
+      </div>
+
+      <div class="policy-stats">
+        <div class="p-stat">
+          <div class="stat-label">Annual Premium</div>
+          <div class="stat-val">₹{{ "{:,.0f}".format(p.annual_premium) }}</div>
+        </div>
+        {% if p.renewal_date %}
+        <div class="p-stat {% if days_to_renewal <= 30 %}p-stat-alert{% endif %}">
+          <div class="stat-label">Renewal Date</div>
+          <div class="stat-val">{{ p.renewal_date.strftime('%d %b %Y') }}</div>
+          {% if days_to_renewal <= 30 and days_to_renewal >= 0 %}
+          <div style="font-size:0.7rem; color:var(--down); margin-top:2px; font-weight:600;">⚠ Due in {{ days_to_renewal }} days</div>
+          {% elif days_to_renewal < 0 %}
+          <div style="font-size:0.7rem; color:var(--down); margin-top:2px; font-weight:600;">⚠ Overdue!</div>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% if p.notes %}
+        <div class="p-stat" style="flex:2;">
+          <div class="stat-label">Notes</div>
+          <div class="stat-val" style="font-family:'Inter',sans-serif; font-size:0.82rem;">{{ p.notes }}</div>
+        </div>
+        {% endif %}
+      </div>
+
+      <form method="POST" action="/insurance/delete/{{ p.id }}" onsubmit="return confirm('Delete this policy?')" style="margin-top:12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="btn-delete">Delete</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="empty-state">
+    <div style="font-size:3rem; margin-bottom:12px;">🛡️</div>
+    <div style="font-weight:600; font-size:1rem; margin-bottom:6px; color:var(--text);">No policies added yet</div>
+    <div style="font-size:0.875rem;">Add your insurance policies to track renewals and coverage</div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; flex-wrap:wrap; gap:12px; }
+  .page-title  { font-size:1.4rem; font-weight:700; margin-bottom:4px; color:var(--text); }
+  .page-sub    { color:var(--muted); font-size:0.875rem; }
+  .btn-accent-pill { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-weight:700; font-size:0.875rem; cursor:pointer; white-space:nowrap; }
+
+  .summary-row { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
+  .sum-card    { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; box-shadow:var(--shadow-sm); }
+  .sum-label   { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .sum-value   { font-family:'Roboto Mono',monospace; font-size:1.1rem; font-weight:700; color:var(--text); }
+
+  .panel       { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:24px; box-shadow:var(--shadow-sm); }
+  .panel-title { font-weight:600; margin-bottom:18px; color:var(--text); }
+  .form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .form-select { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; outline:none; }
+
+  .policy-card  { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
+  .policy-alert { border-color:var(--down); background:var(--down-bg); }
+  .policy-header{ display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:14px; }
+  .policy-stats { display:flex; flex-wrap:wrap; gap:10px; }
+  .p-stat       { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; flex:1; min-width:120px; }
+  .p-stat-alert { background:var(--down-bg); border-color:var(--down); }
+  .stat-label   { font-size:0.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px; }
+  .stat-val     { font-family:'Roboto Mono',monospace; font-size:0.9rem; font-weight:600; color:var(--text); }
+  .btn-delete   { background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted); padding:6px 14px; cursor:pointer; font-size:0.8rem; font-family:'Inter',sans-serif; transition:all 0.2s; }
+  .btn-delete:hover { border-color:var(--down); color:var(--down); }
+  .empty-state  { text-align:center; padding:60px 20px; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+
+  @media (max-width:768px) {
+    .summary-row { grid-template-columns:1fr 1fr; }
+    .form-grid-2, .form-grid-3 { grid-template-columns:1fr; }
+    .page-header { flex-direction:column; align-items:flex-start; }
+    .btn-accent-pill { width:100%; text-align:center; }
+  }
+  @media (max-width:480px) { .summary-row { grid-template-columns:1fr; } }
+</style>
+
+<script>
+  function togglePanel() {
+    const p = document.getElementById('addPanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  }
+</script>
+{% endblock %}

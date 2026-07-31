@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Loans & Liabilities — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:0 auto;">
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Loans & Liabilities</h1>
+      <p class="page-sub">Track all your outstanding loans in one place</p>
+    </div>
+    <button onclick="togglePanel()" class="btn-accent-pill">+ Add Loan</button>
+  </div>
+
+  <!-- Net position summary -->
+  {% if loans %}
+  <div class="summary-row">
+    <div class="sum-card">
+      <div class="sum-label">Total Outstanding</div>
+      <div class="sum-value" style="color:var(--down);">₹{{ "{:,.0f}".format(total_outstanding) }}</div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-label">Total Monthly EMI</div>
+      <div class="sum-value" style="color:var(--warning);">₹{{ "{:,.0f}".format(total_emi) }}</div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-label">Total Principal</div>
+      <div class="sum-value">₹{{ "{:,.0f}".format(total_principal) }}</div>
+    </div>
+    <div class="sum-card">
+      <div class="sum-label">Amount Repaid</div>
+      <div class="sum-value" style="color:var(--up);">₹{{ "{:,.0f}".format(total_principal - total_outstanding) }}</div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Add Loan Panel -->
+  <div id="addPanel" style="display:none;" class="panel">
+    <div class="panel-title">Add New Loan</div>
+    <form method="POST" action="/loans/add">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>Loan Type</label>
+          <select name="loan_type" class="form-select">
+            <option value="home">🏠 Home Loan</option>
+            <option value="car">🚗 Car Loan</option>
+            <option value="personal">💳 Personal Loan</option>
+            <option value="credit_card">💳 Credit Card</option>
+            <option value="education">🎓 Education Loan</option>
+            <option value="other">📦 Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Lender / Bank</label>
+          <input type="text" name="lender" placeholder="e.g. HDFC Bank" required />
+        </div>
+      </div>
+
+      <div class="form-grid-3">
+        <div class="form-group">
+          <label>Original Principal (₹)</label>
+          <input type="number" name="principal" step="1" min="1" placeholder="e.g. 5000000" required />
+        </div>
+        <div class="form-group">
+          <label>Outstanding Amount (₹)</label>
+          <input type="number" name="outstanding" step="1" min="0" placeholder="e.g. 3500000" required />
+        </div>
+        <div class="form-group">
+          <label>Monthly EMI (₹)</label>
+          <input type="number" name="emi" step="1" min="0" placeholder="e.g. 35000" />
+        </div>
+      </div>
+
+      <div class="form-grid-3">
+        <div class="form-group">
+          <label>Interest Rate (% p.a.)</label>
+          <input type="number" name="interest_rate" step="0.01" min="0" max="50" placeholder="e.g. 8.5" />
+        </div>
+        <div class="form-group">
+          <label>Tenure (months)</label>
+          <input type="number" name="tenure_months" step="1" min="1" placeholder="e.g. 240" />
+        </div>
+        <div class="form-group">
+          <label>Start Date</label>
+          <input type="date" name="start_date" />
+        </div>
+      </div>
+
+      <button type="submit" class="btn-primary" style="width:auto; padding:10px 28px;">Save Loan</button>
+    </form>
+  </div>
+
+  <!-- Loans List -->
+  {% if loans %}
+  <div style="display:flex; flex-direction:column; gap:16px;">
+    {% for loan in loans %}
+    {% set repaid_pct = ((loan.principal - loan.outstanding) / loan.principal * 100) | round(1) if loan.principal > 0 else 0 %}
+    <div class="loan-card">
+      <div class="loan-header">
+        <div>
+          <div style="font-size:1.2rem;">{{ {'home':'🏠','car':'🚗','personal':'👤','credit_card':'💳','education':'🎓'}.get(loan.loan_type, '📦') }}</div>
+          <div style="font-weight:700; color:var(--text);">{{ loan.lender }}</div>
+          <div style="font-size:0.8rem; color:var(--muted); margin-top:2px;">{{ loan.loan_type.replace('_',' ').title() }}</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;">Outstanding</div>
+          <div style="font-family:'Roboto Mono',monospace; font-size:1.3rem; font-weight:700; color:var(--down);">₹{{ "{:,.0f}".format(loan.outstanding) }}</div>
+        </div>
+      </div>
+
+      <!-- Repayment progress -->
+      <div style="margin:14px 0;">
+        <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:var(--muted); margin-bottom:5px;">
+          <span>Repaid {{ repaid_pct }}%</span>
+          <span>₹{{ "{:,.0f}".format(loan.principal - loan.outstanding) }} of ₹{{ "{:,.0f}".format(loan.principal) }}</span>
+        </div>
+        <div style="height:6px; background:var(--border); border-radius:3px;">
+          <div style="height:6px; background:var(--up); border-radius:3px; width:{{ repaid_pct }}%; transition:width 0.5s;"></div>
+        </div>
+      </div>
+
+      <!-- Key numbers -->
+      <div class="loan-stats">
+        {% if loan.emi %}<div class="loan-stat"><div class="stat-label">Monthly EMI</div><div class="stat-val">₹{{ "{:,.0f}".format(loan.emi) }}</div></div>{% endif %}
+        {% if loan.interest_rate %}<div class="loan-stat"><div class="stat-label">Interest Rate</div><div class="stat-val">{{ loan.interest_rate }}% p.a.</div></div>{% endif %}
+        {% if loan.tenure_months %}<div class="loan-stat"><div class="stat-label">Tenure</div><div class="stat-val">{{ loan.tenure_months }} months</div></div>{% endif %}
+        {% if loan.start_date %}<div class="loan-stat"><div class="stat-label">Started</div><div class="stat-val">{{ loan.start_date.strftime('%b %Y') }}</div></div>{% endif %}
+      </div>
+
+      <form method="POST" action="/loans/delete/{{ loan.id }}" onsubmit="return confirm('Delete this loan?')" style="margin-top:12px;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="btn-delete">Delete</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="empty-state">
+    <div style="font-size:3rem; margin-bottom:12px;">🏦</div>
+    <div style="font-weight:600; font-size:1rem; margin-bottom:6px; color:var(--text);">No loans added yet</div>
+    <div style="font-size:0.875rem;">Track your loans to see your true net worth (Assets − Liabilities)</div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; flex-wrap:wrap; gap:12px; }
+  .page-title  { font-size:1.4rem; font-weight:700; margin-bottom:4px; color:var(--text); }
+  .page-sub    { color:var(--muted); font-size:0.875rem; }
+  .btn-accent-pill { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-weight:700; font-size:0.875rem; cursor:pointer; white-space:nowrap; }
+
+  .summary-row { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
+  .sum-card    { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; box-shadow:var(--shadow-sm); }
+  .sum-label   { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .sum-value   { font-family:'Roboto Mono',monospace; font-size:1.1rem; font-weight:700; color:var(--text); }
+
+  .panel       { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:24px; box-shadow:var(--shadow-sm); }
+  .panel-title { font-weight:600; margin-bottom:18px; color:var(--text); }
+  .form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .form-select { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; outline:none; }
+  .form-select:focus { border-color:var(--accent); }
+
+  .loan-card   { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
+  .loan-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; }
+  .loan-stats  { display:flex; flex-wrap:wrap; gap:10px; }
+  .loan-stat   { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; flex:1; min-width:100px; }
+  .stat-label  { font-size:0.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px; }
+  .stat-val    { font-family:'Roboto Mono',monospace; font-size:0.9rem; font-weight:600; color:var(--text); }
+  .btn-delete  { background:none; border:1px solid var(--border); border-radius:6px; color:var(--muted); padding:6px 14px; cursor:pointer; font-size:0.8rem; font-family:'Inter',sans-serif; transition:all 0.2s; }
+  .btn-delete:hover { border-color:var(--down); color:var(--down); }
+  .empty-state { text-align:center; padding:60px 20px; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-radius:12px; }
+
+  @media (max-width:768px) {
+    .summary-row { grid-template-columns:1fr 1fr; }
+    .form-grid-2, .form-grid-3 { grid-template-columns:1fr; }
+    .page-header { flex-direction:column; align-items:flex-start; }
+    .btn-accent-pill { width:100%; text-align:center; }
+  }
+  @media (max-width:480px) { .summary-row { grid-template-columns:1fr; } }
+</style>
+
+<script>
+  function togglePanel() {
+    const p = document.getElementById('addPanel');
+    p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  }
+</script>
+{% endblock %}

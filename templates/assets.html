@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% block title %}Assets — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:0 auto;">
+
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:32px; flex-wrap:wrap; gap:12px;">
+    <div>
+      <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:4px;">My Assets</h1>
+      <p style="color:#64748b; font-size:0.875rem;">Add and manage all your physical and financial assets</p>
+    </div>
+    <button onclick="togglePanel()" style="background:#00d4aa; color:#0d0f14; border:none; border-radius:8px; padding:10px 20px; font-weight:700; font-size:0.875rem; cursor:pointer;">
+      + Add Asset
+    </button>
+  </div>
+
+  <!-- ── ADD ASSET PANEL ── -->
+  <div id="addPanel" style="display:none; background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:28px; margin-bottom:32px;">
+
+    <div style="font-weight:600; font-size:1rem; margin-bottom:20px;">Select asset type to add</div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:10px; margin-bottom:24px;">
+      <button class="type-btn" onclick="showForm('gold', this)">🥇 Gold</button>
+      <button class="type-btn" onclick="showForm('silver', this)">🥈 Silver</button>
+      <button class="type-btn" onclick="showForm('realty', this)">🏠 Real Estate</button>
+      <button class="type-btn" onclick="showForm('govt', this)">🏦 Govt Schemes</button>
+      <button class="type-btn" onclick="showForm('fd', this)">📄 Fixed Deposit</button>
+      <button class="type-btn" onclick="showForm('cash', this)">💵 Cash & Savings</button>
+      <button class="type-btn" onclick="showForm('other', this)">📦 Other</button>
+    </div>
+
+    <!-- ── GOLD FORM ── -->
+    <div class="asset-form" id="form-gold" style="display:none;">
+      <!-- Price helper banner -->
+      <div style="background:#1a1e2d; border:1px solid #00d4aa33; border-radius:8px; padding:12px 16px; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="font-size:0.82rem; color:#64748b;">
+          Check today's MCX gold rate, then enter it below
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a href="https://ibja.co/" target="_blank" style="font-size:0.78rem; color:#00d4aa; text-decoration:none; border:1px solid #00d4aa44; border-radius:6px; padding:4px 10px;">IBJA Rate ↗</a>
+          <a href="https://www.mcxindia.com/market-data/spot-market-price" target="_blank" style="font-size:0.78rem; color:#00d4aa; text-decoration:none; border:1px solid #00d4aa44; border-radius:6px; padding:4px 10px;">MCX Spot ↗</a>
+          <a href="https://economictimes.indiatimes.com/commoditysummary/symbol-GOLD.cms" target="_blank" style="font-size:0.78rem; color:#00d4aa; text-decoration:none; border:1px solid #00d4aa44; border-radius:6px; padding:4px 10px;">ET Markets ↗</a>
+        </div>
+      </div>
+      <form method="POST" action="/assets/add">
+        <input type="hidden" name="category" value="gold" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div class="form-group">
+            <label>Weight (grams)</label>
+            <input type="number" name="gold_grams" id="gold_grams" step="0.01" min="0.01" placeholder="e.g. 10.5" required oninput="calcValue('gold')" />
+          </div>
+          <div class="form-group">
+            <label>MCX Price per gram (₹)</label>
+            <input type="number" name="gold_price_per_gram" id="gold_price" step="0.01" min="1" placeholder="e.g. 7250" required oninput="calcValue('gold')" />
+          </div>
+        </div>
+        <!-- Live calculated value -->
+        <div style="background:#1a1e2d; border-radius:8px; padding:12px; margin-bottom:16px; font-size:0.85rem; color:#64748b;" id="gold-calc">
+          Enter grams and price to see total value
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save Gold</button>
+      </form>
+    </div>
+
+    <!-- ── SILVER FORM ── -->
+    <div class="asset-form" id="form-silver" style="display:none;">
+      <div style="background:#1a1e2d; border:1px solid #00d4aa33; border-radius:8px; padding:12px 16px; margin-bottom:18px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <div style="font-size:0.82rem; color:#64748b;">
+          Check today's MCX silver rate, then enter it below
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <a href="https://ibja.co/" target="_blank" style="font-size:0.78rem; color:#00d4aa; text-decoration:none; border:1px solid #00d4aa44; border-radius:6px; padding:4px 10px;">IBJA Rate ↗</a>
+          <a href="https://economictimes.indiatimes.com/commoditysummary/symbol-SILVER.cms" target="_blank" style="font-size:0.78rem; color:#00d4aa; text-decoration:none; border:1px solid #00d4aa44; border-radius:6px; padding:4px 10px;">ET Markets ↗</a>
+        </div>
+      </div>
+      <form method="POST" action="/assets/add">
+        <input type="hidden" name="category" value="silver" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div class="form-group">
+            <label>Weight (grams)</label>
+            <input type="number" name="silver_grams" id="silver_grams" step="0.01" min="0.01" placeholder="e.g. 500" required oninput="calcValue('silver')" />
+          </div>
+          <div class="form-group">
+            <label>MCX Price per gram (₹)</label>
+            <input type="number" name="silver_price_per_gram" id="silver_price" step="0.01" min="1" placeholder="e.g. 89" required oninput="calcValue('silver')" />
+          </div>
+        </div>
+        <div style="background:#1a1e2d; border-radius:8px; padding:12px; margin-bottom:16px; font-size:0.85rem; color:#64748b;" id="silver-calc">
+          Enter grams and price to see total value
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save Silver</button>
+      </form>
+    </div>
+
+    <!-- ── REAL ESTATE FORM ── -->
+    <div class="asset-form" id="form-realty" style="display:none;">
+      <form method="POST" action="/assets/add">
+        <div class="form-group">
+          <label>Property Type</label>
+          <select name="category" class="form-select" required>
+            <option value="">— Select type —</option>
+            <option value="real_estate_house">🏠 House / Flat</option>
+            <option value="real_estate_plot">🟫 Plot</option>
+            <option value="real_estate_farm">🌾 Farm / Agricultural Land</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Property Name / Location</label>
+          <input type="text" name="realty_name" placeholder="e.g. 2BHK Flat, Whitefield Bangalore" required />
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div class="form-group">
+            <label>Area (sq ft) — optional</label>
+            <input type="number" name="realty_sqft" step="0.01" min="0" placeholder="e.g. 1200" />
+          </div>
+          <div class="form-group">
+            <label>Current Market Value (₹)</label>
+            <input type="number" name="realty_value" step="1" min="1" placeholder="e.g. 5000000" required />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save Property</button>
+      </form>
+    </div>
+
+    <!-- ── GOVT SCHEMES FORM ── -->
+    <div class="asset-form" id="form-govt" style="display:none;">
+      <form method="POST" action="/assets/add">
+        <div class="form-group">
+          <label>Scheme Type</label>
+          <select name="category" class="form-select" required>
+            <option value="">— Select scheme —</option>
+            <option value="ppf">PPF — Public Provident Fund</option>
+            <option value="vpf">VPF — Voluntary Provident Fund</option>
+            <option value="ssy">SSY — Sukanya Samriddhi Yojana</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Bank / Organisation Name — optional</label>
+          <input type="text" name="govt_institution" placeholder="e.g. SBI, Post Office, EPFO" />
+        </div>
+        <div class="form-group">
+          <label>Current Balance (₹)</label>
+          <input type="number" name="govt_value" step="1" min="1" placeholder="e.g. 250000" required />
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save Scheme</button>
+      </form>
+    </div>
+
+    <!-- ── FD FORM ── -->
+    <div class="asset-form" id="form-fd" style="display:none;">
+      <form method="POST" action="/assets/add">
+        <input type="hidden" name="category" value="fd" />
+        <div class="form-group">
+          <label>Bank Name — optional</label>
+          <input type="text" name="fd_institution" placeholder="e.g. HDFC Bank, SBI, Post Office" />
+        </div>
+        <div class="form-group">
+          <label>FD Amount (₹)</label>
+          <input type="number" name="fd_value" step="1" min="1" placeholder="e.g. 100000" required />
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save FD</button>
+      </form>
+    </div>
+
+    <!-- ── CASH FORM ── -->
+    <div class="asset-form" id="form-cash" style="display:none;">
+      <form method="POST" action="/assets/add">
+        <input type="hidden" name="category" value="cash" />
+        <div class="form-group">
+          <label>Total Cash & Savings (₹)</label>
+          <input type="number" name="cash_value" step="1" min="1" placeholder="e.g. 50000" required />
+        </div>
+        <div style="font-size:0.8rem; color:#64748b; margin-bottom:16px;">Include savings account balance, cash at home, wallet balance etc.</div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save Cash</button>
+      </form>
+    </div>
+
+    <!-- ── OTHER FORM ── -->
+    <div class="asset-form" id="form-other" style="display:none;">
+      <div style="font-size:0.85rem; color:#64748b; margin-bottom:16px;">
+        Add any asset not listed above. Maximum 15 custom entries.
+      </div>
+      <form method="POST" action="/assets/add">
+        <input type="hidden" name="category" value="other" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div class="form-group">
+            <label>Asset Name</label>
+            <input type="text" name="other_name" placeholder="e.g. NPS, Bonds, Crypto, Chit Fund" required />
+          </div>
+          <div class="form-group">
+            <label>Current Value (₹)</label>
+            <input type="number" name="other_value" step="1" min="1" placeholder="e.g. 75000" required />
+          </div>
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save Asset</button>
+      </form>
+    </div>
+
+  </div><!-- /addPanel -->
+
+  <!-- ── ASSET LIST ── -->
+  {% if assets %}
+    {% set cat_labels = {
+      'gold': '🥇 Gold',
+      'silver': '🥈 Silver',
+      'real_estate_house': '🏠 House / Flat',
+      'real_estate_plot': '🟫 Plot',
+      'real_estate_farm': '🌾 Farm / Agricultural Land',
+      'ppf': '🏦 PPF',
+      'vpf': '🏦 VPF',
+      'ssy': '🏦 SSY',
+      'fd': '📄 Fixed Deposit',
+      'cash': '💵 Cash & Savings',
+      'other': '📦 Other'
+    } %}
+
+    <!-- Total bar -->
+    <div style="background:#13161f; border:1px solid #00d4aa33; border-radius:10px; padding:16px 20px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+      <div style="font-size:0.85rem; color:#64748b;">{{ assets|length }} asset{% if assets|length != 1 %}s{% endif %} tracked</div>
+      <div style="font-family:'Roboto Mono',monospace; font-weight:700; color:#00d4aa;">
+        ₹{{ "{:,.0f}".format(assets|sum(attribute='value')) }} total
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      {% for asset in assets %}
+      <div style="background:#13161f; border:1px solid #1e2130; border-radius:10px; padding:16px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+        <div style="flex:1; min-width:200px;">
+          <div style="font-size:0.72rem; color:#64748b; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:3px;">
+            {{ cat_labels.get(asset.category, asset.category) }}
+          </div>
+          <div style="font-weight:600; font-size:0.95rem; margin-bottom:3px;">
+            {{ asset.name or '—' }}
+            {% if asset.institution %}
+              <span style="color:#64748b; font-weight:400; font-size:0.85rem;"> · {{ asset.institution }}</span>
+            {% endif %}
+          </div>
+          <div style="font-size:0.78rem; color:#64748b;">
+            {% if asset.grams %}{{ asset.grams }}g{% if asset.price_per_gram %} @ ₹{{ "{:,.2f}".format(asset.price_per_gram) }}/g{% endif %}{% endif %}
+            {% if asset.sq_ft %}{{ asset.sq_ft | int }} sq ft · {% endif %}
+          </div>
+        </div>
+        <div style="font-family:'Roboto Mono',monospace; font-size:1.1rem; font-weight:600; color:#00d4aa; white-space:nowrap;">
+          ₹{{ "{:,.0f}".format(asset.value) }}
+        </div>
+        <form method="POST" action="/assets/delete/{{ asset.id }}" onsubmit="return confirm('Delete this asset?')">
+          <button type="submit" style="background:none; border:1px solid #1e2130; border-radius:6px; color:#64748b; padding:6px 12px; cursor:pointer; font-size:0.8rem; font-family:'Inter',sans-serif;" onmouseover="this.style.borderColor='#ef4444';this.style.color='#ef4444'" onmouseout="this.style.borderColor='#1e2130';this.style.color='#64748b'">Delete</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+
+  {% else %}
+    <div style="text-align:center; padding:60px 20px; color:#64748b;">
+      <div style="font-size:2.5rem; margin-bottom:12px;">📂</div>
+      <div style="font-weight:600; font-size:1rem; margin-bottom:6px; color:#e2e8f0;">No assets added yet</div>
+      <div style="font-size:0.875rem;">Click "+ Add Asset" above to start building your portfolio</div>
+    </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .type-btn {
+    background: #1a1e2d;
+    border: 1px solid #1e2130;
+    border-radius: 8px;
+    color: #e2e8f0;
+    padding: 10px 12px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    transition: border-color 0.2s, background 0.2s;
+    font-family: 'Inter', sans-serif;
+  }
+  .type-btn:hover { border-color: #00d4aa; background: #00d4aa11; color: #00d4aa; }
+  .type-btn.active { border-color: #00d4aa; background: #00d4aa22; color: #00d4aa; }
+  .form-select {
+    width: 100%;
+    background: #1a1e2d;
+    border: 1px solid #1e2130;
+    border-radius: 8px;
+    padding: 11px 14px;
+    color: #e2e8f0;
+    font-family: 'Inter', sans-serif;
+    font-size: 0.9rem;
+    outline: none;
+  }
+  .form-select:focus { border-color: #00d4aa; }
+  .asset-form { padding-top: 16px; border-top: 1px solid #1e2130; }
+  .form-select option { background: #1a1e2d; }
+</style>
+
+<script>
+  function togglePanel() {
+    const panel = document.getElementById("addPanel");
+    panel.style.display = panel.style.display === "none" ? "block" : "none";
+  }
+
+  function showForm(type, btn) {
+    // Hide all forms
+    document.querySelectorAll(".asset-form").forEach(f => f.style.display = "none");
+    // Remove active from all buttons
+    document.querySelectorAll(".type-btn").forEach(b => b.classList.remove("active"));
+    // Show selected form and mark button active
+    const form = document.getElementById("form-" + type);
+    if (form) form.style.display = "block";
+    if (btn) btn.classList.add("active");
+  }
+
+  // Live value calculator for gold and silver
+  function calcValue(metal) {
+    const grams = parseFloat(document.getElementById(metal + "_grams").value) || 0;
+    const price = parseFloat(document.getElementById(metal + "_price").value) || 0;
+    const calc  = document.getElementById(metal + "-calc");
+    if (grams > 0 && price > 0) {
+      const total = grams * price;
+      calc.innerHTML = "<span style='color:#00d4aa; font-weight:600;'>₹" +
+        total.toLocaleString("en-IN", {maximumFractionDigits:0}) +
+        "</span> <span style='color:#64748b;'>(" + grams + "g × ₹" + price + "/g)</span>";
+    } else {
+      calc.textContent = "Enter grams and price to see total value";
+    }
+  }
+</script>
+{% endblock %}

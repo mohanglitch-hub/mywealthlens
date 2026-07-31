@@ -1,0 +1,600 @@
+"""
+Insurance Centre — Services
+============================
+Business logic layer. Routes call these functions.
+No Flask request/response objects here — pure Python.
+"""
+
+from datetime import datetime, date
+from models import db
+from .models import (
+    InsurancePolicy, InsuranceNominee, InsuranceMember,
+    InsuranceAddon, InsuranceDocument, InsuranceTimeline,
+    PolicyStatus, TimelineEvent, InsuranceCategory,
+    InsuranceType, PremiumFrequency
+)
+from .validators import validate_policy, validate_nominee, ValidationError
+
+
+# ── Timeline Helper ───────────────────────────────────────────────────────────
+
+def log_timeline(db, policy_id, user_id, event_type, description):
+    """Append an entry to the policy timeline. Never overwrites."""
+    entry = InsuranceTimeline(
+        policy_id   = policy_id,
+        user_id     = user_id,
+        event_type  = event_type,
+        description = description,
+    )
+    db.session.add(entry)
+
+
+# ── Policy Services ───────────────────────────────────────────────────────────
+
+def create_policy(db, user_id, data):
+    """
+    Create a new insurance policy.
+    data: dict of form fields
+    Returns: (policy, None) on success, (None, error_message) on failure
+    """
+    errors = validate_policy(data, user_id)
+    if errors:
+        return None, errors[0]
+
+    policy = InsurancePolicy(
+        user_id           = user_id,
+        category          = data["category"],
+        insurance_type    = data["insurance_type"],
+        custom_type       = data.get("custom_type", "").strip() or None,
+        insurer           = data["insurer"].strip(),
+        policy_name       = data.get("policy_name", "").strip() or None,
+        policy_number     = data.get("policy_number", "").strip() or None,
+        policy_holder     = data.get("policy_holder", "").strip() or None,
+        sum_assured       = float(data.get("sum_assured", 0)),
+        premium_amount    = float(data.get("premium_amount", 0)),
+        premium_frequency = data.get("premium_frequency", PremiumFrequency.YEARLY),
+        status            = data.get("status", PolicyStatus.ACTIVE),
+        start_date        = _parse_date(data.get("start_date")),
+        maturity_date     = _parse_date(data.get("maturity_date")),
+        renewal_date      = _parse_date(data.get("renewal_date")),
+        expiry_date       = _parse_date(data.get("expiry_date")),
+        next_premium_due  = _parse_date(data.get("next_premium_due")),
+        vehicle_number    = data.get("vehicle_number", "").strip() or None,
+        property_name     = data.get("property_name", "").strip() or None,
+        notes             = data.get("notes", "").strip() or None,
+    )
+    db.session.add(policy)
+    db.session.flush()  # get policy.id before commit
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.CREATED,
+                 f"Policy created — {policy.category}: {policy.display_type} "
+                 f"with {policy.insurer}")
+
+    db.session.commit()
+    return policy, None
+
+
+def update_policy(db, policy, user_id, data):
+    """
+    Update an existing policy. Logs what changed.
+    Returns: (policy, None) on success, (None, error) on failure
+    """
+    errors = validate_policy(data, user_id, existing_policy_id=policy.id)
+    if errors:
+        return None, errors[0]
+
+    changes = []
+
+    def _track(field, label, formatter=None):
+        old = getattr(policy, field)
+        new_raw = data.get(field)
+        if new_raw is None:
+            return
+        new = float(new_raw) if field in ("sum_assured","premium_amount") else \
+              _parse_date(new_raw) if "date" in field else \
+              new_raw.strip() if isinstance(new_raw, str) else new_raw
+        if str(old) != str(new):
+            old_display = formatter(old) if formatter else old
+            new_display = formatter(new) if formatter else new
+            changes.append(f"{label}: {old_display} → {new_display}")
+            setattr(policy, field, new)
+
+    fmt_inr = lambda v: f"₹{v:,.0f}" if v else "₹0"
+
+    _track("insurer",          "Insurer")
+    _track("policy_name",      "Policy Name")
+    _track("policy_number",    "Policy Number")
+    _track("policy_holder",    "Policy Holder")
+    _track("sum_assured",      "Sum Assured",  fmt_inr)
+    _track("premium_amount",   "Premium",      fmt_inr)
+    _track("premium_frequency","Premium Frequency")
+    _track("status",           "Status")
+    _track("start_date",       "Start Date")
+    _track("maturity_date",    "Maturity Date")
+    _track("renewal_date",     "Renewal Date")
+    _track("expiry_date",      "Expiry Date")
+    _track("next_premium_due", "Next Premium Due")
+    _track("vehicle_number",   "Vehicle Number")
+    _track("property_name",    "Property Name")
+
+    # Custom type
+    if data.get("insurance_type") == "Other (Custom)":
+        policy.insurance_type = "Other (Custom)"
+        new_custom = data.get("custom_type","").strip()
+        if new_custom != (policy.custom_type or ""):
+            changes.append(f"Type: {policy.custom_type} → {new_custom}")
+            policy.custom_type = new_custom or None
+
+    # Notes — tracked separately
+    new_notes = data.get("notes","").strip() or None
+    if new_notes != policy.notes:
+        policy.notes = new_notes
+        log_timeline(db, policy.id, user_id,
+                     TimelineEvent.NOTES_UPDATED, "Policy notes updated")
+
+    if changes:
+        log_timeline(db, policy.id, user_id,
+                     TimelineEvent.COVERAGE_UPDATED,
+                     "Updated: " + "; ".join(changes))
+
+    db.session.commit()
+    return policy, None
+
+
+def archive_policy(db, policy, user_id):
+    """
+    Soft delete — marks policy as archived.
+    Logs the action. Policy still exists in DB.
+    """
+    if policy.is_archived:
+        return False, "Policy is already archived."
+
+    policy.is_archived  = True
+    policy.archived_at  = datetime.utcnow()
+    policy.archived_by  = user_id
+    policy.status       = PolicyStatus.ARCHIVED
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.ARCHIVED,
+                 f"Policy archived by user {user_id}")
+
+    db.session.commit()
+    return True, None
+
+
+def restore_policy(db, policy, user_id):
+    """Restore an archived policy back to active."""
+    if not policy.is_archived:
+        return False, "Policy is not archived."
+
+    policy.is_archived = False
+    policy.archived_at = None
+    policy.archived_by = None
+    policy.status      = PolicyStatus.ACTIVE
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.RESTORED,
+                 f"Policy restored by user {user_id}")
+
+    db.session.commit()
+    return True, None
+
+
+def renew_policy(db, policy, user_id, new_renewal_date, new_expiry_date=None):
+    """Record a policy renewal — updates dates and logs."""
+    old_renewal = policy.renewal_date
+    policy.renewal_date = new_renewal_date
+    if new_expiry_date:
+        policy.expiry_date = new_expiry_date
+    policy.status = PolicyStatus.ACTIVE
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.POLICY_RENEWED,
+                 f"Policy renewed. Renewal date: {old_renewal} → {new_renewal_date}")
+
+    db.session.commit()
+    return policy
+
+
+# ── Nominee Services ──────────────────────────────────────────────────────────
+
+def add_nominee(db, policy, user_id, data):
+    """Add a nominee to a policy. Validates total % does not exceed 100."""
+    errors = validate_nominee(data, policy)
+    if errors:
+        return None, errors[0]
+
+    nominee = InsuranceNominee(
+        policy_id    = policy.id,
+        user_id      = user_id,
+        name         = data["name"].strip(),
+        relationship = data["relationship"],
+        percentage   = float(data.get("percentage") or 0) or None,
+        contact      = data.get("contact","").strip() or None,
+    )
+    db.session.add(nominee)
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.NOMINEE_UPDATED,
+                 f"Nominee added: {nominee.name} ({nominee.relationship})")
+
+    db.session.commit()
+    return nominee, None
+
+
+def remove_nominee(db, nominee, user_id):
+    policy_id = nominee.policy_id
+    name = nominee.name
+    db.session.delete(nominee)
+    log_timeline(db, policy_id, user_id,
+                 TimelineEvent.NOMINEE_UPDATED,
+                 f"Nominee removed: {name}")
+    db.session.commit()
+
+
+# ── Health Member Services ────────────────────────────────────────────────────
+
+def add_member(db, policy, user_id, data):
+    """Add a health insured member. Only valid for Health Insurance."""
+    if policy.category != InsuranceCategory.HEALTH:
+        return None, "Members can only be added to Health Insurance policies."
+
+    age = int(data.get("age") or 0)
+    if age < 0:
+        return None, "Age cannot be negative."
+
+    member = InsuranceMember(
+        policy_id    = policy.id,
+        user_id      = user_id,
+        member_name  = data["member_name"].strip(),
+        age          = age or None,
+        relationship = data["relationship"],
+    )
+    db.session.add(member)
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.MEMBER_UPDATED,
+                 f"Member added: {member.member_name} ({member.relationship})")
+
+    db.session.commit()
+    return member, None
+
+
+def remove_member(db, member, user_id):
+    policy_id = member.policy_id
+    name = member.member_name
+    db.session.delete(member)
+    log_timeline(db, policy_id, user_id,
+                 TimelineEvent.MEMBER_UPDATED,
+                 f"Member removed: {name}")
+    db.session.commit()
+
+
+# ── Motor Addon Services ──────────────────────────────────────────────────────
+
+def set_addons(db, policy, user_id, addon_names):
+    """
+    Replace all add-ons for a motor policy.
+    addon_names: list of strings
+    """
+    if policy.category != InsuranceCategory.MOTOR:
+        return None, "Add-ons are only valid for Motor Insurance."
+
+    # Remove existing
+    policy.addons.delete()
+
+    # Add new
+    for name in addon_names:
+        if name.strip():
+            db.session.add(InsuranceAddon(
+                policy_id  = policy.id,
+                user_id    = user_id,
+                addon_name = name.strip(),
+            ))
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.ADDON_UPDATED,
+                 f"Add-ons updated: {', '.join(addon_names) or 'None'}")
+
+    db.session.commit()
+    return True, None
+
+
+# ── Document Services ─────────────────────────────────────────────────────────
+
+def save_document_metadata(db, policy, user_id,
+                           doc_type, original_name,
+                           stored_name, file_path,
+                           file_size=None, notes=None):
+    """Record document metadata after file has been saved locally."""
+    doc = InsuranceDocument(
+        policy_id     = policy.id,
+        user_id       = user_id,
+        doc_type      = doc_type,
+        original_name = original_name,
+        stored_name   = stored_name,
+        file_path     = file_path,
+        file_size     = file_size,
+        notes         = notes,
+    )
+    db.session.add(doc)
+
+    log_timeline(db, policy.id, user_id,
+                 TimelineEvent.DOCUMENT_UPLOADED,
+                 f"Document uploaded: {doc_type} — {original_name}")
+
+    db.session.commit()
+    return doc
+
+
+def delete_document(db, doc, user_id):
+    """Remove document metadata. Caller must delete the actual file."""
+    policy_id = doc.policy_id
+    name = doc.original_name
+    db.session.delete(doc)
+    log_timeline(db, policy_id, user_id,
+                 TimelineEvent.DOCUMENT_DELETED,
+                 f"Document deleted: {name}")
+    db.session.commit()
+
+
+# ── Query Helpers ─────────────────────────────────────────────────────────────
+
+def get_active_policies(user_id):
+    """All non-archived policies for a user, ordered by renewal date."""
+    return (InsurancePolicy.query
+            .filter_by(user_id=user_id, is_archived=False)
+            .order_by(InsurancePolicy.renewal_date.asc().nullslast())
+            .all())
+
+
+def get_archived_policies(user_id):
+    """All archived policies for a user."""
+    return (InsurancePolicy.query
+            .filter_by(user_id=user_id, is_archived=True)
+            .order_by(InsurancePolicy.archived_at.desc())
+            .all())
+
+
+def get_policies_by_category(user_id, category):
+    """Active policies filtered by category."""
+    return (InsurancePolicy.query
+            .filter_by(user_id=user_id,
+                       category=category,
+                       is_archived=False)
+            .order_by(InsurancePolicy.renewal_date.asc().nullslast())
+            .all())
+
+
+def get_renewals_due(user_id, days=30):
+    """Policies with renewal date within the next N days."""
+    from datetime import timedelta
+    today = date.today()
+    cutoff = today + timedelta(days=days)
+    return (InsurancePolicy.query
+            .filter_by(user_id=user_id, is_archived=False)
+            .filter(InsurancePolicy.renewal_date >= today)
+            .filter(InsurancePolicy.renewal_date <= cutoff)
+            .order_by(InsurancePolicy.renewal_date.asc())
+            .all())
+
+
+def get_overdue_renewals(user_id):
+    """Policies with renewal date in the past."""
+    return (InsurancePolicy.query
+            .filter_by(user_id=user_id, is_archived=False)
+            .filter(InsurancePolicy.renewal_date < date.today())
+            .order_by(InsurancePolicy.renewal_date.asc())
+            .all())
+
+
+def get_policy_summary(user_id):
+    """
+    Aggregated summary for dashboard widget.
+    Returns dict with counts and totals.
+    """
+    policies = get_active_policies(user_id)
+    total_cover    = sum(p.sum_assured for p in policies)
+    total_premium  = sum(p.annual_premium for p in policies)
+    due_soon       = len([p for p in policies if p.renewal_status == "due_soon"])
+    overdue        = len([p for p in policies if p.renewal_status == "overdue"])
+    by_category    = {}
+    for p in policies:
+        by_category[p.category] = by_category.get(p.category, 0) + 1
+
+    return {
+        "total_policies": len(policies),
+        "total_cover":    total_cover,
+        "total_premium":  total_premium,
+        "due_soon":       due_soon,
+        "overdue":        overdue,
+        "by_category":    by_category,
+    }
+
+
+def search_policies(user_id, query):
+    """
+    Search policies by policy number, insurer,
+    policy holder, vehicle number, property name, custom type.
+    """
+    q = f"%{query}%"
+    return (InsurancePolicy.query
+            .filter_by(user_id=user_id, is_archived=False)
+            .filter(
+                db.or_(
+                    InsurancePolicy.policy_number.ilike(q),
+                    InsurancePolicy.insurer.ilike(q),
+                    InsurancePolicy.policy_holder.ilike(q),
+                    InsurancePolicy.vehicle_number.ilike(q),
+                    InsurancePolicy.property_name.ilike(q),
+                    InsurancePolicy.custom_type.ilike(q),
+                    InsurancePolicy.policy_name.ilike(q),
+                )
+            )
+            .order_by(InsurancePolicy.updated_at.desc())
+            .all())
+
+
+# ── Private Helpers ───────────────────────────────────────────────────────────
+
+def _parse_date(value):
+    """Parse date string to date object. Returns None if empty/invalid."""
+    if not value:
+        return None
+    try:
+        if isinstance(value, date):
+            return value
+        return datetime.strptime(str(value).strip(), "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+# ── Dashboard Statistics Services ─────────────────────────────────────────────
+
+def get_active_policy_count(user_id):
+    """Count of all active (non-archived) policies."""
+    try:
+        return InsurancePolicy.query.filter_by(
+            user_id=user_id, is_archived=False).count()
+    except Exception:
+        return 0
+
+
+def get_total_coverage(user_id):
+    """Sum of sum_assured across all active policies."""
+    try:
+        from sqlalchemy import func
+        from models import db
+        result = db.session.query(
+            func.sum(InsurancePolicy.sum_assured)
+        ).filter_by(user_id=user_id, is_archived=False).scalar()
+        return result or 0
+    except Exception:
+        return 0
+
+
+def get_total_annual_premium(user_id):
+    """
+    Sum of annual premium equivalents across all active policies.
+    Converts all frequencies to annual.
+    """
+    try:
+        policies = InsurancePolicy.query.filter_by(
+            user_id=user_id, is_archived=False).all()
+        return sum(p.annual_premium for p in policies)
+    except Exception:
+        return 0
+
+
+def get_upcoming_renewals(user_id, days=30):
+    """Count of policies with renewal due within N days."""
+    try:
+        return len(get_renewals_due(user_id, days))
+    except Exception:
+        return 0
+
+
+def get_total_documents(user_id):
+    """Count of all uploaded documents across all policies."""
+    try:
+        from insurance_centre.models import InsuranceDocument
+        return InsuranceDocument.query.filter_by(user_id=user_id).count()
+    except Exception:
+        return 0
+
+
+def get_category_stats(user_id):
+    """
+    Per-category counts and coverage for the category cards.
+    Returns list of dicts ordered by InsuranceCategory.ALL.
+    """
+    try:
+        policies = InsurancePolicy.query.filter_by(
+            user_id=user_id, is_archived=False).all()
+        stats = {}
+        for cat in InsuranceCategory.ALL:
+            cat_policies = [p for p in policies if p.category == cat]
+            stats[cat] = {
+                "category":    cat,
+                "count":       len(cat_policies),
+                "coverage":    sum(p.sum_assured for p in cat_policies),
+                "premium":     sum(p.annual_premium for p in cat_policies),
+                "has_policies": len(cat_policies) > 0,
+            }
+        return stats
+    except Exception:
+        return {cat: {"category": cat, "count": 0, "coverage": 0,
+                      "premium": 0, "has_policies": False}
+                for cat in InsuranceCategory.ALL}
+
+
+def get_recent_policies(user_id, limit=5):
+    """Most recently created active policies."""
+    try:
+        return (InsurancePolicy.query
+                .filter_by(user_id=user_id, is_archived=False)
+                .order_by(InsurancePolicy.created_at.desc())
+                .limit(limit)
+                .all())
+    except Exception:
+        return []
+
+
+def get_recent_activity(user_id, limit=10):
+    """Most recent timeline entries across all policies."""
+    try:
+        from insurance_centre.models import InsuranceTimeline
+        return (InsuranceTimeline.query
+                .filter_by(user_id=user_id)
+                .order_by(InsuranceTimeline.created_at.desc())
+                .limit(limit)
+                .all())
+    except Exception:
+        return []
+
+
+def get_dashboard_data(user_id):
+    """
+    Single call to get all dashboard data.
+    Minimises database round trips.
+    """
+    try:
+        policies       = get_active_policies(user_id)
+        renewals_soon  = get_renewals_due(user_id, days=30)
+        overdue        = get_overdue_renewals(user_id)
+        recent         = get_recent_policies(user_id, limit=5)
+        activity       = get_recent_activity(user_id, limit=8)
+        category_stats = get_category_stats(user_id)
+        doc_count      = get_total_documents(user_id)
+
+        total_coverage = sum(p.sum_assured for p in policies)
+        total_premium  = sum(p.annual_premium for p in policies)
+
+        return {
+            "policy_count":    len(policies),
+            "total_coverage":  total_coverage,
+            "total_premium":   total_premium,
+            "renewals_soon":   len(renewals_soon),
+            "overdue_count":   len(overdue),
+            "doc_count":       doc_count,
+            "recent_policies": recent,
+            "recent_activity": activity,
+            "category_stats":  category_stats,
+            "has_policies":    len(policies) > 0,
+            "overdue_policies": overdue,
+            "due_soon_policies": renewals_soon,
+        }
+    except Exception as e:
+        import logging
+        logging.error(f"Dashboard data error for user {user_id}: {e}")
+        return {
+            "policy_count": 0, "total_coverage": 0, "total_premium": 0,
+            "renewals_soon": 0, "overdue_count": 0, "doc_count": 0,
+            "recent_policies": [], "recent_activity": [],
+            "category_stats": {cat: {"category": cat, "count": 0,
+                "coverage": 0, "premium": 0, "has_policies": False}
+                for cat in InsuranceCategory.ALL},
+            "has_policies": False,
+            "overdue_policies": [], "due_soon_policies": [],
+        }

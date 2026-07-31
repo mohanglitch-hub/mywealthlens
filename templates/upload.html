@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}Upload CAS — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:800px; margin:0 auto;">
+
+  <div style="margin-bottom:32px;">
+    <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">Upload CAS Statement</h1>
+    <p style="color:var(--muted); font-size:0.875rem;">Import your mutual funds and stocks automatically — no manual entry needed</p>
+  </div>
+
+  <!-- Info banner -->
+  <div class="info-banner">
+    <div style="font-weight:600; color:var(--accent); margin-bottom:8px;">📋 How to get your CAS PDF</div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" class="info-grid">
+      <div>
+        <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Mutual Funds</div>
+        <div>Visit <a href="https://www.camsonline.com/InvestorServices/COL_ISStmtOfAccount.aspx" target="_blank" class="link-accent">CAMS</a>
+        or <a href="https://mfs.kfintech.com/investor/General/ConsolidatedAccountStatement" target="_blank" class="link-accent">KFintech</a>
+        → Request CAS → Password is your <strong style="color:var(--text);">PAN in uppercase</strong></div>
+      </div>
+      <div>
+        <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Stocks (CDSL/NSDL)</div>
+        <div>Visit <a href="https://www.cdslindia.com/Investors/ConsolidatedAccountStatement.html" target="_blank" class="link-accent">CDSL</a>
+        → CAS → Password is your <strong style="color:var(--text);">8-digit date of birth</strong> (DDMMYYYY)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upload cards -->
+  <div class="upload-grid">
+
+    <!-- CAMS / KFintech -->
+    <div class="upload-card">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+        <span style="font-size:1.4rem;">📊</span>
+        <div style="font-weight:600; font-size:1rem; color:var(--text);">Mutual Funds</div>
+      </div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:20px;">CAMS or KFintech CAS PDF</div>
+
+      {% if mf_count > 0 %}
+      <div class="import-badge">✓ {{ mf_count }} fund{{ 's' if mf_count != 1 else '' }} currently imported</div>
+      {% endif %}
+
+      <form method="POST" action="/upload/cams" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+        <div class="form-group">
+          <label>Select PDF file</label>
+          <input type="file" name="pdf_file" accept=".pdf" required class="file-input" />
+        </div>
+        <div class="form-group">
+          <label>PDF Password (PAN number)</label>
+          <div class="input-wrapper">
+            <input type="password" name="password" id="cams_pw"
+                   placeholder="e.g. ABCDE1234F"
+                   style="text-transform:uppercase;" />
+            <button type="button" class="toggle-pw" onclick="togglePw('cams_pw',this)">Show</button>
+          </div>
+          <div class="field-hint">Leave blank if PDF is not password protected</div>
+        </div>
+        <button type="submit" class="btn-primary">Import Mutual Funds</button>
+      </form>
+
+      {% if mf_count > 0 %}
+      <form method="POST" action="/upload/delete-mf" style="margin-top:10px;"
+            onsubmit="return confirm('Delete all mutual fund data?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+        <button type="submit" class="btn-danger-outline">Clear all mutual fund data</button>
+      </form>
+      {% endif %}
+    </div>
+
+    <!-- CDSL / NSDL -->
+    <div class="upload-card">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+        <span style="font-size:1.4rem;">📈</span>
+        <div style="font-weight:600; font-size:1rem; color:var(--text);">Stocks & Demat</div>
+      </div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:20px;">CDSL or NSDL CAS PDF</div>
+
+      {% if st_count > 0 %}
+      <div class="import-badge">✓ {{ st_count }} stock{{ 's' if st_count != 1 else '' }} currently imported</div>
+      {% endif %}
+
+      <form method="POST" action="/upload/cdsl" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+        <div class="form-group">
+          <label>Select PDF file</label>
+          <input type="file" name="pdf_file" accept=".pdf" required class="file-input" />
+        </div>
+        <div class="form-group">
+          <label>PDF Password (Date of Birth)</label>
+          <div class="input-wrapper">
+            <input type="password" name="password" id="cdsl_pw"
+                   placeholder="e.g. 01011990 (DDMMYYYY)" />
+            <button type="button" class="toggle-pw" onclick="togglePw('cdsl_pw',this)">Show</button>
+          </div>
+          <div class="field-hint">CDSL: DOB &nbsp;·&nbsp; NSDL: PAN number</div>
+        </div>
+        <button type="submit" class="btn-primary">Import Stocks</button>
+      </form>
+
+      {% if st_count > 0 %}
+      <form method="POST" action="/upload/delete-stocks" style="margin-top:10px;"
+            onsubmit="return confirm('Delete all stock data?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+        <button type="submit" class="btn-danger-outline">Clear all stock data</button>
+      </form>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- What happens section -->
+  <div class="info-card">
+    <div class="section-label">What happens when you upload</div>
+    <div class="info-grid" style="gap:16px; font-size:0.85rem; color:var(--muted2); line-height:1.6;">
+      <div>
+        <div style="color:var(--accent); font-weight:600; margin-bottom:4px;">📊 Mutual Funds</div>
+        PDF is read locally → Folio, scheme, units and NAV extracted → Saved to your account → Appears on dashboard
+      </div>
+      <div>
+        <div style="color:var(--accent); font-weight:600; margin-bottom:4px;">📈 Stocks</div>
+        PDF is read locally → ISIN and quantity extracted → Live NSE price fetched → Current value calculated → Saved to dashboard
+      </div>
+    </div>
+    <div class="privacy-note">
+      🔒 Your PDF is never stored on the server. It is read in memory, parsed, and immediately discarded.
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .info-banner {
+    background:var(--accent-bg); border:1px solid var(--border);
+    border-left:4px solid var(--accent);
+    border-radius:10px; padding:16px 20px; margin-bottom:28px;
+    font-size:0.85rem; color:var(--muted); line-height:1.6;
+  }
+  .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .link-accent { color:var(--accent); text-decoration:none; font-weight:500; }
+  .link-accent:hover { text-decoration:underline; }
+
+  .upload-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:28px; }
+  .upload-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:28px; box-shadow:var(--shadow-sm);
+  }
+
+  .import-badge {
+    background:var(--up-bg); border:1px solid var(--up);
+    border-radius:8px; padding:10px 14px; margin-bottom:16px;
+    font-size:0.82rem; color:var(--up); font-weight:500;
+  }
+
+  .file-input {
+    width:100%; background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:10px 14px; color:var(--text);
+    font-size:0.85rem; cursor:pointer; transition:border-color 0.2s;
+  }
+  .file-input:focus { outline:none; border-color:var(--accent); }
+
+  .field-hint { font-size:0.75rem; color:var(--muted); margin-top:4px; }
+
+  .btn-danger-outline {
+    width:100%; background:none; border:1px solid var(--border);
+    border-radius:8px; padding:9px; color:var(--muted); cursor:pointer;
+    font-size:0.8rem; font-family:'Inter',sans-serif; transition:all 0.2s;
+  }
+  .btn-danger-outline:hover { border-color:var(--down); color:var(--down); background:var(--down-bg); }
+
+  .info-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:24px; box-shadow:var(--shadow-sm);
+  }
+  .section-label {
+    font-size:0.75rem; color:var(--muted); font-weight:600;
+    letter-spacing:0.1em; text-transform:uppercase; margin-bottom:16px;
+  }
+  .privacy-note {
+    margin-top:16px; padding-top:16px; border-top:1px solid var(--border);
+    font-size:0.78rem; color:var(--muted);
+  }
+
+  /* Mobile */
+  @media (max-width: 768px) {
+    .upload-grid { grid-template-columns:1fr; }
+    .info-grid   { grid-template-columns:1fr; }
+    .upload-card { padding:20px; }
+  }
+</style>
+
+<script>
+  function togglePw(id, btn) {
+    const inp = document.getElementById(id);
+    const hidden = inp.type === 'password';
+    inp.type = hidden ? 'text' : 'password';
+    btn.textContent = hidden ? 'Hide' : 'Show';
+  }
+</script>
+{% endblock %}
