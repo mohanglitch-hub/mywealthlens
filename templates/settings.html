@@ -4,48 +4,205 @@
 {% block content %}
 <div style="max-width:600px; margin:0 auto;">
 
-  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px;">Settings</h1>
-  <p style="color:#64748b; font-size:0.875rem; margin-bottom:32px;">Manage your MyWealthLens preferences</p>
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">Settings</h1>
+  <p style="color:var(--muted); font-size:0.875rem; margin-bottom:32px;">Manage your MyWealthLens preferences</p>
 
-  <!-- Settings sections -->
   <div style="display:flex; flex-direction:column; gap:16px;">
 
-    <!-- Life Stage -->
-    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
-      <div style="font-weight:600; margin-bottom:4px;">Life Stage</div>
-      <div style="color:#64748b; font-size:0.875rem; margin-bottom:16px;">Personalises your dashboard and goal suggestions</div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button style="background:#00d4aa22; border:1px solid #00d4aa; color:#00d4aa; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Single ✓</button>
-        <button style="background:#1a1e2d; border:1px solid #1e2130; color:#64748b; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Married</button>
-        <button style="background:#1a1e2d; border:1px solid #1e2130; color:#64748b; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Family</button>
+    <!-- ── Appearance (Theme Toggle) ── -->
+    <div class="settings-card">
+      <div class="card-row">
+        <div>
+          <div class="card-title">Appearance</div>
+          <div class="card-sub">Choose between light and dark mode</div>
+        </div>
+        <div class="theme-toggle-wrap">
+          <button class="theme-btn" id="themeLight" onclick="applyTheme('light')">
+            ☀️ Light
+          </button>
+          <button class="theme-btn" id="themeDark" onclick="applyTheme('dark')">
+            🌙 Dark
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- Currency -->
-    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
-      <div style="font-weight:600; margin-bottom:4px;">Currency</div>
-      <div style="color:#64748b; font-size:0.875rem; margin-bottom:16px;">All values displayed in</div>
-      <div style="background:#1a1e2d; border:1px solid #1e2130; border-radius:8px; padding:10px 14px; color:#e2e8f0; font-size:0.9rem; width:fit-content;">
-        ₹ Indian Rupee (INR)
+    <!-- ── Currency ── -->
+    <div class="settings-card">
+      <div class="card-title">Currency</div>
+      <div class="card-sub" style="margin-bottom:12px;">All values displayed in</div>
+      <div class="currency-box">
+        <span style="font-size:1.1rem;">₹</span>
+        <span>Indian Rupee (INR)</span>
+        <span class="badge-active">Active</span>
+      </div>
+      <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
+        Multi-currency support coming in Phase 6
       </div>
     </div>
 
-    <!-- Notifications -->
-    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
-      <div style="font-weight:600; margin-bottom:4px;">Notifications</div>
-      <div style="color:#64748b; font-size:0.875rem;">Coming soon — monthly net worth summary emails</div>
+    <!-- ── Data & Privacy ── -->
+    <div class="settings-card">
+      <div class="card-title">Data & Privacy</div>
+      <div class="card-sub" style="margin-bottom:16px;">
+        Your data is stored locally on this server only. Never shared or sold.
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <a href="/export/excel" class="btn-setting">
+          📊 Export my data (Excel)
+        </a>
+        <a href="/export/pdf" class="btn-setting">
+          📄 Export my data (PDF)
+        </a>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="btn-danger"
+          onclick="if(confirm('Are you sure? This will permanently delete your account and all data.')) window.location='/account/delete'">
+          Delete my account
+        </button>
+      </div>
     </div>
 
-    <!-- Data & Privacy -->
-    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
-      <div style="font-weight:600; margin-bottom:4px;">Data & Privacy</div>
-      <div style="color:#64748b; font-size:0.875rem; margin-bottom:16px;">Your data is stored locally on this server only. Never shared or sold.</div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button style="background:#1a1e2d; border:1px solid #1e2130; color:#e2e8f0; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Export my data</button>
-        <button style="background:#ef444411; border:1px solid #ef444433; color:#ef4444; padding:8px 16px; border-radius:8px; font-size:0.85rem; cursor:pointer;">Delete account</button>
+    <!-- ── Notifications ── -->
+    <div class="settings-card">
+      <div class="card-title">Notifications</div>
+      <div class="card-sub">Email reminders and alerts</div>
+      <div class="coming-soon-row">
+        <span>📧</span>
+        <div>
+          <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Monthly wealth summary email</div>
+          <div style="font-size:0.78rem; color:var(--muted);">Coming in Phase 6</div>
+        </div>
+        <span class="badge-soon">Soon</span>
+      </div>
+      <div class="coming-soon-row" style="border-bottom:none;">
+        <span>⏰</span>
+        <div>
+          <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">SIP due date reminders</div>
+          <div style="font-size:0.78rem; color:var(--muted);">Coming in Phase 6</div>
+        </div>
+        <span class="badge-soon">Soon</span>
+      </div>
+    </div>
+
+    <!-- ── About ── -->
+    <div class="settings-card">
+      <div class="card-title">About MyWealthLens</div>
+      <div style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
+        <div class="about-row">
+          <span class="about-label">Version</span>
+          <span class="about-value">1.0.0 — Phase 1</span>
+        </div>
+        <div class="about-row">
+          <span class="about-label">Built with</span>
+          <span class="about-value">Flask · Python · SQLite</span>
+        </div>
+        <div class="about-row">
+          <span class="about-label">Data storage</span>
+          <span class="about-value">Local only — your device</span>
+        </div>
+        <div class="about-row" style="border-bottom:none;">
+          <span class="about-label">Privacy</span>
+          <span class="about-value" style="color:var(--up);">No data shared or sold ✓</span>
+        </div>
       </div>
     </div>
 
   </div>
 </div>
+
+<style>
+  .settings-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:24px; box-shadow:var(--shadow-sm);
+  }
+  .card-row  { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+  .card-title { font-weight:600; color:var(--text); margin-bottom:4px; }
+  .card-sub   { color:var(--muted); font-size:0.875rem; }
+
+  /* Theme toggle */
+  .theme-toggle-wrap { display:flex; gap:8px; }
+  .theme-btn {
+    padding:8px 16px; border-radius:8px; font-size:0.85rem;
+    font-weight:500; cursor:pointer; font-family:'Inter',sans-serif;
+    border:1px solid var(--border); background:var(--surface2);
+    color:var(--muted); transition:all 0.2s;
+  }
+  .theme-btn.active {
+    background:var(--accent-bg); border-color:var(--accent);
+    color:var(--accent); font-weight:700;
+  }
+  .theme-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* Currency */
+  .currency-box {
+    display:inline-flex; align-items:center; gap:10px;
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:10px 16px; font-size:0.9rem; color:var(--text);
+  }
+  .badge-active {
+    background:var(--up-bg); color:var(--up); border:1px solid var(--up);
+    border-radius:12px; font-size:0.72rem; padding:2px 8px; font-weight:600;
+  }
+
+  /* Buttons */
+  .btn-setting {
+    display:inline-flex; align-items:center; gap:6px;
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:9px 16px; font-size:0.82rem;
+    font-weight:500; color:var(--text2); text-decoration:none;
+    transition:all 0.2s; cursor:pointer; font-family:'Inter',sans-serif;
+  }
+  .btn-setting:hover { border-color:var(--accent); color:var(--accent); }
+  .btn-danger {
+    background:none; border:1px solid var(--border);
+    border-radius:8px; padding:9px 16px; font-size:0.82rem;
+    color:var(--muted); cursor:pointer; font-family:'Inter',sans-serif;
+    transition:all 0.2s;
+  }
+  .btn-danger:hover { border-color:var(--down); color:var(--down); background:var(--down-bg); }
+
+  /* Notifications */
+  .coming-soon-row {
+    display:flex; align-items:center; gap:14px; padding:14px 0;
+    border-bottom:1px solid var(--border); flex-wrap:wrap;
+  }
+  .badge-soon {
+    margin-left:auto; background:var(--warning-bg); color:var(--warning);
+    border:1px solid var(--warning); border-radius:12px;
+    font-size:0.7rem; padding:2px 8px; font-weight:600; white-space:nowrap;
+  }
+
+  /* About */
+  .about-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;
+  }
+  .about-label { font-size:0.82rem; color:var(--muted); }
+  .about-value { font-size:0.82rem; color:var(--text2); font-weight:500; }
+
+  @media (max-width: 480px) {
+    .settings-card { padding:18px; }
+    .card-row { flex-direction:column; align-items:flex-start; }
+    .theme-toggle-wrap { width:100%; }
+    .theme-btn { flex:1; text-align:center; }
+  }
+</style>
+
+<script>
+  /* ── Apply and persist theme ── */
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('mwl-theme', t);
+    document.getElementById('themeLight').classList.toggle('active', t === 'light');
+    document.getElementById('themeDark').classList.toggle('active',  t === 'dark');
+  }
+
+  /* ── Set correct button state on load ── */
+  window.addEventListener('DOMContentLoaded', function() {
+    const saved = localStorage.getItem('mwl-theme') || 'light';
+    document.getElementById('themeLight').classList.toggle('active', saved === 'light');
+    document.getElementById('themeDark').classList.toggle('active',  saved === 'dark');
+  });
+</script>
 {% endblock %}

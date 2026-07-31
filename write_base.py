@@ -1,4 +1,9 @@
-<!DOCTYPE html>
+"""Writes base.html directly to templates folder."""
+import os
+
+TMPL = r"C:\Users\mohan\Documents\mywealthlens\templates"
+
+content = r"""<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
@@ -294,7 +299,7 @@
       <a href="/goals">Goals</a>
       <a href="/life-stage">Life Stage</a>
       <a href="/loans">Loans</a>
-      <a href="/insurance-centre">Insurance</a>
+      <a href="/insurance">Insurance</a>
       <a href="/emergency">Emergency</a>
       <a href="/tax">Tax</a>
       <a href="/family">Family</a>
@@ -314,7 +319,7 @@
       <a href="/goals">Goals</a>
       <a href="/life-stage">Life Stage</a>
       <a href="/loans">Loans</a>
-      <a href="/insurance-centre">Insurance</a>
+      <a href="/insurance">Insurance</a>
       <a href="/emergency">Emergency</a>
       <a href="/tax">Tax</a>
       <a href="/family">Family</a>
@@ -362,3 +367,9 @@
 
 </body>
 </html>
+"""
+
+dest = os.path.join(TMPL, "base.html")
+with open(dest, "w", encoding="utf-8") as f:
+    f.write(content)
+print(f"Done! base.html written to {dest}")

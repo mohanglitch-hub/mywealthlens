@@ -4,71 +4,164 @@
 {% block content %}
 <div class="auth-card">
 
-  <!-- Logo -->
-  <div style="text-align:center; margin-bottom:28px;">
-    <div style="font-family:'Roboto Mono',monospace; font-size:1.1rem; font-weight:600;">
-      <span style="color:#00d4aa;">MyWealth</span><span style="color:#64748b;">Lens</span>
+  <!-- Branding -->
+  <div style="text-align:center; margin-bottom:32px;">
+    <div style="font-family:'Roboto Mono',monospace; font-size:1.15rem; font-weight:700; letter-spacing:0.04em;">
+      <span style="color:var(--accent);">MyWealth</span><span style="color:var(--muted2);">Lens</span>
     </div>
-    <div style="color:#64748b; font-size:0.75rem; margin-top:4px; letter-spacing:0.08em; text-transform:uppercase;">
+    <div style="color:var(--muted2); font-size:0.72rem; margin-top:6px; letter-spacing:0.1em; text-transform:uppercase;">
       Your complete financial picture
     </div>
   </div>
 
   <div class="auth-title">Create your account</div>
-  <div class="auth-subtitle">Start tracking your complete financial life</div>
+  <div class="auth-subtitle">Start tracking your complete wealth in one place</div>
 
-  <form method="POST" action="/signup">
+  <form method="POST" action="/signup" id="signupForm" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
 
     <div class="form-group">
       <label for="name">Full Name</label>
-      <input type="text" id="name" name="name" placeholder="Mohan Kumar" required autocomplete="name" />
+      <input type="text" id="name" name="name"
+             placeholder="e.g. Mohan Kumar"
+             required autocomplete="name"
+             oninput="clearErr('name')" />
+      <div class="field-error" id="err-name"></div>
     </div>
 
     <div class="form-group">
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+      <label for="email">Email Address</label>
+      <input type="email" id="email" name="email"
+             placeholder="you@example.com"
+             required autocomplete="email"
+             oninput="clearErr('email')" />
+      <div class="field-error" id="err-email"></div>
     </div>
 
-    <!-- Password field with show/hide toggle -->
     <div class="form-group">
       <label for="password">Password</label>
       <div class="input-wrapper">
-        <input type="password" id="password" name="password" placeholder="Minimum 8 characters" required autocomplete="new-password" minlength="8" />
-        <button type="button" class="toggle-pw" onclick="togglePassword('password', this)">Show</button>
+        <input type="password" id="password" name="password"
+               placeholder="Minimum 8 characters"
+               required autocomplete="new-password" minlength="8"
+               oninput="checkStrength(this.value); clearErr('password')" />
+        <button type="button" class="toggle-pw" onclick="togglePw('password',this)">Show</button>
       </div>
+      <!-- Strength meter -->
+      <div style="margin-top:8px;">
+        <div style="height:4px; background:var(--border); border-radius:2px; overflow:hidden;">
+          <div id="strengthBar" style="height:4px; width:0%; border-radius:2px; transition:width 0.3s, background 0.3s;"></div>
+        </div>
+        <div id="strengthLabel" style="font-size:0.72rem; color:var(--muted2); margin-top:4px; min-height:16px;"></div>
+      </div>
+      <div class="field-error" id="err-password"></div>
     </div>
 
-    <!-- Confirm password with show/hide toggle -->
     <div class="form-group">
       <label for="confirm_password">Confirm Password</label>
       <div class="input-wrapper">
-        <input type="password" id="confirm_password" name="confirm_password" placeholder="Repeat your password" required autocomplete="new-password" minlength="8" />
-        <button type="button" class="toggle-pw" onclick="togglePassword('confirm_password', this)">Show</button>
+        <input type="password" id="confirm_password" name="confirm_password"
+               placeholder="Repeat your password"
+               required autocomplete="new-password" minlength="8"
+               oninput="clearErr('confirm')" />
+        <button type="button" class="toggle-pw" onclick="togglePw('confirm_password',this)">Show</button>
       </div>
+      <div class="field-error" id="err-confirm"></div>
     </div>
 
-    <button type="submit" class="btn-primary">Create account</button>
+    <button type="submit" class="btn-primary" id="submitBtn" style="margin-top:8px;">
+      Create account
+    </button>
+
+    <p style="font-size:0.75rem; color:var(--muted2); text-align:center; margin-top:14px; line-height:1.5;">
+      Your data stays on your device and is never sold or shared.
+    </p>
 
   </form>
 
-  <div class="auth-footer">
+  <div class="auth-footer" style="margin-top:20px;">
     Already have an account? <a href="/login">Log in</a>
   </div>
 
 </div>
 
+<style>
+  .field-error { font-size:0.78rem; color:var(--down); margin-top:5px; min-height:16px; }
+  #submitBtn:disabled { opacity:0.6; cursor:not-allowed; }
+</style>
+
 <script>
-  // togglePassword — switches a password field between hidden and visible
-  // id      = the input field's id
-  // btn     = the button that was clicked (so we can change its label)
-  function togglePassword(id, btn) {
-    const input = document.getElementById(id);
-    if (input.type === "password") {
-      input.type = "text";
-      btn.textContent = "Hide";
-    } else {
-      input.type = "password";
-      btn.textContent = "Show";
-    }
+  function togglePw(id, btn) {
+    const inp = document.getElementById(id);
+    const hidden = inp.type === 'password';
+    inp.type = hidden ? 'text' : 'password';
+    btn.textContent = hidden ? 'Hide' : 'Show';
   }
+
+  function clearErr(field) {
+    const el = document.getElementById('err-' + field);
+    if (el) el.textContent = '';
+  }
+
+  function checkStrength(val) {
+    const bar   = document.getElementById('strengthBar');
+    const label = document.getElementById('strengthLabel');
+    if (!val) { bar.style.width = '0%'; label.textContent = ''; return; }
+
+    let score = 0;
+    if (val.length >= 8)               score++;
+    if (val.length >= 12)              score++;
+    if (/[A-Z]/.test(val))            score++;
+    if (/[0-9]/.test(val))            score++;
+    if (/[^A-Za-z0-9]/.test(val))    score++;
+
+    const levels = [
+      { pct:'20%', color:'#DC2626', text:'Very weak'   },
+      { pct:'40%', color:'#EA580C', text:'Weak'        },
+      { pct:'60%', color:'#D97706', text:'Fair'        },
+      { pct:'80%', color:'#65A30D', text:'Strong'      },
+      { pct:'100%',color:'#16A34A', text:'Very strong' },
+    ];
+    const lvl = levels[Math.min(score - 1, 4)] || levels[0];
+    bar.style.width      = lvl.pct;
+    bar.style.background = lvl.color;
+    label.style.color    = lvl.color;
+    label.textContent    = lvl.text;
+  }
+
+  document.getElementById('signupForm').addEventListener('submit', function(e) {
+    let valid = true;
+    const name = document.getElementById('name').value.trim();
+    const email = document.getElementById('email').value.trim();
+    const pw    = document.getElementById('password').value;
+    const cpw   = document.getElementById('confirm_password').value;
+
+    if (!name) {
+      document.getElementById('err-name').textContent = 'Please enter your full name.';
+      valid = false;
+    }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      document.getElementById('err-email').textContent = 'Please enter a valid email address.';
+      valid = false;
+    }
+    if (pw.length < 8) {
+      document.getElementById('err-password').textContent = 'Password must be at least 8 characters.';
+      valid = false;
+    }
+    if (pw !== cpw) {
+      document.getElementById('err-confirm').textContent = 'Passwords do not match.';
+      valid = false;
+    }
+    if (!valid) { e.preventDefault(); return; }
+
+    const btn = document.getElementById('submitBtn');
+    btn.textContent = 'Creating account…';
+    btn.disabled = true;
+  });
+
+  window.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('name').focus();
+  });
 </script>
+{% endblock %}

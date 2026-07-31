@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Family Wealth — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:1000px; margin:0 auto;">
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Family Wealth</h1>
+      <p class="page-sub">Combined financial picture of your family</p>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      {% if family %}
+      <a href="/family/manage" class="btn-outline-sm">⚙️ Manage Family</a>
+      {% else %}
+      <button onclick="toggleCreate()" class="btn-accent-pill">+ Create Family</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not family %}
+  <div class="panel" style="text-align:center; padding:48px 32px;">
+    <div style="font-size:3rem; margin-bottom:16px;">👨‍👩‍👧‍👦</div>
+    <div style="font-size:1.1rem; font-weight:700; color:var(--text); margin-bottom:8px;">No family group yet</div>
+    <div style="color:var(--muted); font-size:0.875rem; margin-bottom:28px;">Create a family to see combined net worth and invite members</div>
+    <button onclick="toggleCreate()" class="btn-accent-pill">+ Create Family Group</button>
+  </div>
+  <div id="createPanel" style="display:none;" class="panel">
+    <div class="panel-title">Create Your Family Group</div>
+    <form method="POST" action="/family/create">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-group">
+        <label>Family Name</label>
+        <input type="text" name="family_name" placeholder="e.g. The Sharma Family" required />
+      </div>
+      <button type="submit" class="btn-primary" style="width:auto; padding:10px 28px;">Create Family</button>
+    </form>
+  </div>
+
+  {% else %}
+  <div class="panel">
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+      <div>
+        <div style="font-size:1.2rem; font-weight:700; color:var(--text);">{{ family.name }}</div>
+        <div style="font-size:0.82rem; color:var(--muted); margin-top:4px;">
+          {{ members|length }} member{% if members|length != 1 %}s{% endif %} ·
+          Your role: <span style="color:var(--accent); font-weight:600;">{{ my_role.title() }}</span>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">Combined Net Worth</div>
+        <div style="font-family:'Roboto Mono',monospace; font-size:2rem; font-weight:700; color:var(--accent);">₹{{ "{:,.0f}".format(combined_total) }}</div>
+      </div>
+    </div>
+  </div>
+
+  {% if combined_total > 0 %}
+  <div class="panel">
+    <div class="section-label">Combined Asset Allocation</div>
+    <div class="alloc-grid">
+      {% for icon, label, val, color in [
+        ('📊','Equity',combined.equity,'#0ea5e9'),
+        ('🏛️','Debt',combined.debt,'#16A34A'),
+        ('🥇','Gold',combined.gold,'#D97706'),
+        ('🏠','Real Estate',combined.realestate,'#0F766E'),
+        ('💵','Cash',combined.cash,'#64748B'),
+        ('📦','Other',combined.other,'#DC2626')] %}
+      {% if val > 0 %}
+      <div class="alloc-card">
+        <div style="display:flex; align-items:center; gap:6px; margin-bottom:8px;">
+          <span>{{ icon }}</span><span style="font-size:0.78rem; color:var(--muted);">{{ label }}</span>
+        </div>
+        <div style="font-family:'Roboto Mono',monospace; font-weight:700; color:var(--text);">₹{{ "{:,.0f}".format(val) }}</div>
+        <div style="height:3px; background:var(--border); border-radius:2px; margin-top:6px;">
+          <div style="height:3px; border-radius:2px; background:{{ color }}; width:{{ [[val/combined_total*100,100]|min,0]|max|round(1) }}%;"></div>
+        </div>
+        <div style="font-size:0.72rem; color:var(--muted); margin-top:3px;">{{ (val/combined_total*100)|round(1) }}%</div>
+      </div>
+      {% endif %}{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="panel">
+    <div class="section-label">Members</div>
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      {% for m in members %}
+      <div class="member-row">
+        <div style="display:flex; align-items:center; gap:14px; flex:1; min-width:0;">
+          <div class="member-avatar">{{ m.display_name[0].upper() }}</div>
+          <div>
+            <div style="font-weight:600; color:var(--text);">{{ m.display_name }}</div>
+            <div style="font-size:0.78rem; color:var(--muted);">{{ m.role.title() }}
+              {% if m.is_manual %}<span style="margin-left:6px; background:var(--warning-bg); color:var(--warning); border:1px solid var(--warning); border-radius:10px; padding:1px 7px; font-size:0.7rem;">Manual</span>{% endif %}
+            </div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-family:'Roboto Mono',monospace; font-weight:700; color:var(--accent);">₹{{ "{:,.0f}".format(m.net_worth) }}</div>
+          <div style="font-size:0.72rem; color:var(--muted);">{{ (m.net_worth/combined_total*100)|round(1) if combined_total > 0 else 0 }}% of family</div>
+        </div>
+        <div style="width:120px; height:6px; background:var(--border); border-radius:3px; overflow:hidden; flex-shrink:0;">
+          <div style="height:6px; background:var(--accent); border-radius:3px; width:{{ (m.net_worth/combined_total*100)|round(1) if combined_total > 0 else 0 }}%;"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .page-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:12px;}
+  .page-title{font-size:1.4rem;font-weight:700;margin-bottom:4px;color:var(--text);}
+  .page-sub{color:var(--muted);font-size:0.875rem;}
+  .btn-accent-pill{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 20px;font-weight:700;font-size:0.875rem;cursor:pointer;}
+  .btn-outline-sm{background:var(--surface2);color:var(--text2);text-decoration:none;border:1px solid var(--border);border-radius:8px;padding:9px 16px;font-size:0.82rem;font-weight:500;transition:all 0.2s;}
+  .btn-outline-sm:hover{border-color:var(--accent);color:var(--accent);}
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;box-shadow:var(--shadow-sm);margin-bottom:20px;}
+  .panel-title{font-weight:600;margin-bottom:18px;color:var(--text);}
+  .section-label{font-size:0.72rem;font-weight:600;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:16px;}
+  .alloc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  .alloc-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .member-row{display:flex;align-items:center;gap:16px;padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;flex-wrap:wrap;}
+  .member-avatar{width:40px;height:40px;border-radius:50%;background:var(--accent-bg);border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--accent);font-size:1rem;flex-shrink:0;}
+  @media(max-width:768px){.alloc-grid{grid-template-columns:1fr 1fr;}.member-row{flex-direction:column;align-items:flex-start;}}
+</style>
+<script>
+  function toggleCreate(){const p=document.getElementById('createPanel');if(p)p.style.display=p.style.display==='none'?'block':'none';}
+</script>
+{% endblock %}

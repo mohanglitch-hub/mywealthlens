@@ -1,0 +1,491 @@
+{% extends "base.html" %}
+{% block title %}Insurance Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ic-wrap">
+
+  <!-- ── Page Header ── -->
+  <div class="ic-header">
+    <div>
+      <h1 class="ic-title">Insurance Centre</h1>
+      <p class="ic-subtitle">
+        Securely manage all your insurance policies, premiums,
+        documents and renewal reminders in one place.
+      </p>
+    </div>
+    <div class="ic-actions">
+      <button
+        class="ic-btn-secondary"
+        title="Manage Policies — coming in Phase 4"
+        onclick="alert('Manage Policies will be available in the next phase.')">
+        Manage Policies
+      </button>
+      <button
+        class="ic-btn-primary"
+        title="Add a new insurance policy — coming in Phase 4"
+        onclick="alert('Add Policy will be available in the next phase.')">
+        + Add Policy
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Renewal Alert Banner ── -->
+  {% if data.overdue_count > 0 %}
+  <div class="ic-alert ic-alert-danger" role="alert">
+    <span class="ic-alert-icon">⚠️</span>
+    <div>
+      <strong>{{ data.overdue_count }} policy renewal{{ 's' if data.overdue_count != 1 else '' }} overdue.</strong>
+      Please renew immediately to avoid coverage gaps.
+    </div>
+  </div>
+  {% elif data.renewals_soon > 0 %}
+  <div class="ic-alert ic-alert-warning" role="alert">
+    <span class="ic-alert-icon">🔔</span>
+    <div>
+      <strong>{{ data.renewals_soon }} policy renewal{{ 's' if data.renewals_soon != 1 else '' }} due within 30 days.</strong>
+      Review and renew on time.
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Summary Cards ── -->
+  <div class="ic-summary-grid" role="region" aria-label="Insurance Summary">
+
+    <div class="ic-stat-card" tabindex="0">
+      <div class="ic-stat-icon">📋</div>
+      <div class="ic-stat-label">Active Policies</div>
+      <div class="ic-stat-value">{{ data.policy_count }}</div>
+    </div>
+
+    <div class="ic-stat-card" tabindex="0">
+      <div class="ic-stat-icon">🛡️</div>
+      <div class="ic-stat-label">Total Coverage</div>
+      <div class="ic-stat-value">
+        {% if data.total_coverage > 0 %}
+          {{ format_inr(data.total_coverage) }}
+        {% else %}
+          ₹0
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="ic-stat-card" tabindex="0">
+      <div class="ic-stat-icon">💳</div>
+      <div class="ic-stat-label">Annual Premium</div>
+      <div class="ic-stat-value">
+        {% if data.total_premium > 0 %}
+          {{ format_inr(data.total_premium) }}
+        {% else %}
+          ₹0
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="ic-stat-card {% if data.renewals_soon > 0 %}ic-stat-card--warning{% endif %}"
+         tabindex="0">
+      <div class="ic-stat-icon">🔔</div>
+      <div class="ic-stat-label">Upcoming Renewals</div>
+      <div class="ic-stat-value {% if data.renewals_soon > 0 %}ic-value-warning{% endif %}">
+        {{ data.renewals_soon }}
+      </div>
+    </div>
+
+    <div class="ic-stat-card" tabindex="0">
+      <div class="ic-stat-icon">📁</div>
+      <div class="ic-stat-label">Documents Stored</div>
+      <div class="ic-stat-value">{{ data.doc_count }}</div>
+    </div>
+
+  </div>
+
+  <!-- ── Category Cards ── -->
+  <div class="ic-section">
+    <div class="ic-section-header">
+      <h2 class="ic-section-title">Insurance Categories</h2>
+    </div>
+    <div class="ic-category-grid" role="region" aria-label="Insurance Categories">
+      {% for cat in categories %}
+      {% set stats = data.category_stats.get(cat, {}) %}
+      <a href="/insurance-centre/category/{{ cat | urlencode }}"
+         class="ic-category-card {% if stats.get('has_policies') %}ic-category-card--active{% endif %}"
+         tabindex="0"
+         title="{{ cat }}">
+        <div class="ic-cat-icon">{{ category_icons.get(cat, '📋') }}</div>
+        <div class="ic-cat-name">{{ cat }}</div>
+        {% if stats.get('has_policies') %}
+        <div class="ic-cat-count">{{ stats.count }} polic{{ 'y' if stats.count == 1 else 'ies' }}</div>
+        <div class="ic-cat-coverage">{{ format_inr(stats.coverage) }} covered</div>
+        {% else %}
+        <div class="ic-cat-empty">No policies added yet</div>
+        {% endif %}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if not data.has_policies %}
+  <!-- ── Empty State ── -->
+  <div class="ic-empty-state" role="region" aria-label="Empty State">
+    <div class="ic-empty-icon">🛡️</div>
+    <h2 class="ic-empty-title">No insurance policies found</h2>
+    <p class="ic-empty-desc">
+      Start building your Insurance Centre by adding your first policy.
+      Track coverage, premiums, renewals and documents — all in one place.
+    </p>
+    <button
+      class="ic-btn-primary ic-btn-lg"
+      title="Add your first policy — coming in Phase 4"
+      onclick="alert('Add Policy will be available in the next phase.')">
+      Add Your First Policy
+    </button>
+  </div>
+  {% endif %}
+
+  <!-- ── Recent Policies ── -->
+  <div class="ic-section">
+    <div class="ic-section-header">
+      <h2 class="ic-section-title">Recent Policies</h2>
+    </div>
+
+    {% if data.recent_policies %}
+    <div class="ic-policy-list">
+      {% for p in data.recent_policies %}
+      <div class="ic-policy-row" tabindex="0">
+        <div class="ic-policy-icon">
+          {{ category_icons.get(p.category, '📋') }}
+        </div>
+        <div class="ic-policy-info">
+          <div class="ic-policy-name">
+            {{ p.policy_name or p.display_type }}
+          </div>
+          <div class="ic-policy-meta">
+            {{ p.insurer }} · {{ p.category }}
+            {% if p.policy_number %} · {{ p.policy_number }}{% endif %}
+          </div>
+        </div>
+        <div class="ic-policy-right">
+          <div class="ic-policy-coverage">
+            {{ format_inr(p.sum_assured) }}
+          </div>
+          {% if p.renewal_date %}
+          <div class="ic-policy-renewal ic-renewal-{{ p.renewal_status }}">
+            Renews {{ format_date(p.renewal_date) }}
+          </div>
+          {% endif %}
+        </div>
+        <div class="ic-policy-status">
+          <span class="ic-badge ic-badge-{{ p._badge_color if p._badge_color else 'muted' }}">
+            {{ p.status }}
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="ic-placeholder">
+      <span class="ic-placeholder-icon">📋</span>
+      <span>No recent policies.</span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Recent Activity ── -->
+  <div class="ic-section">
+    <div class="ic-section-header">
+      <h2 class="ic-section-title">Recent Activity</h2>
+    </div>
+
+    {% if data.recent_activity %}
+    <div class="ic-activity-list">
+      {% for event in data.recent_activity %}
+      <div class="ic-activity-row">
+        <div class="ic-activity-dot"></div>
+        <div class="ic-activity-content">
+          <div class="ic-activity-desc">{{ event.description }}</div>
+          <div class="ic-activity-time">{{ format_date(event.created_at) }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="ic-placeholder">
+      <span class="ic-placeholder-icon">📅</span>
+      <span>No activity available.</span>
+    </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+  /* ── Wrapper ── */
+  .ic-wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  /* ── Header ── */
+  .ic-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .ic-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .ic-subtitle {
+    font-size: 0.875rem;
+    color: var(--muted);
+    max-width: 520px;
+    line-height: 1.5;
+  }
+  .ic-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  /* ── Buttons ── */
+  .ic-btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 0.875rem;
+    font-weight: 700;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+  }
+  .ic-btn-primary:hover { opacity: 0.88; }
+  .ic-btn-lg { padding: 12px 28px; font-size: 0.95rem; }
+
+  .ic-btn-secondary {
+    background: var(--surface2);
+    color: var(--text2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: var(--font-ui);
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .ic-btn-secondary:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ── Alert Banner ── */
+  .ic-alert {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    border: 1px solid;
+    line-height: 1.5;
+  }
+  .ic-alert-danger  { background: var(--down-bg);    border-color: var(--down);    color: var(--down); }
+  .ic-alert-warning { background: var(--warning-bg); border-color: var(--warning); color: var(--warning); }
+  .ic-alert-icon    { font-size: 1.2rem; flex-shrink: 0; }
+
+  /* ── Summary Cards ── */
+  .ic-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+  }
+  .ic-stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 18px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s, transform 0.15s;
+    cursor: default;
+  }
+  .ic-stat-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+  .ic-stat-card:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .ic-stat-card--warning { border-color: var(--warning); }
+  .ic-stat-icon  { font-size: 1.4rem; margin-bottom: 10px; }
+  .ic-stat-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .ic-stat-value { font-family: var(--font-data); font-size: 1.3rem; font-weight: 700; color: var(--text); }
+  .ic-value-warning { color: var(--warning); }
+
+  /* ── Section ── */
+  .ic-section { display: flex; flex-direction: column; gap: 14px; }
+  .ic-section-header { display: flex; align-items: center; justify-content: space-between; }
+  .ic-section-title  { font-size: 1rem; font-weight: 600; color: var(--text); }
+
+  /* ── Category Cards ── */
+  .ic-category-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+  }
+  .ic-category-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 22px 16px;
+    text-align: center;
+    text-decoration: none;
+    box-shadow: var(--shadow-sm);
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .ic-category-card:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+  }
+  .ic-category-card:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .ic-category-card--active { border-color: var(--accent); }
+  .ic-cat-icon     { font-size: 1.8rem; }
+  .ic-cat-name     { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+  .ic-cat-count    { font-size: 0.78rem; color: var(--accent); font-weight: 600; }
+  .ic-cat-coverage { font-size: 0.72rem; color: var(--muted); }
+  .ic-cat-empty    { font-size: 0.72rem; color: var(--muted2); }
+
+  /* ── Empty State ── */
+  .ic-empty-state {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 60px 32px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .ic-empty-icon  { font-size: 3.5rem; }
+  .ic-empty-title { font-size: 1.2rem; font-weight: 700; color: var(--text); }
+  .ic-empty-desc  { font-size: 0.875rem; color: var(--muted); max-width: 440px; line-height: 1.6; }
+
+  /* ── Policy List ── */
+  .ic-policy-list { display: flex; flex-direction: column; gap: 8px; }
+  .ic-policy-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow-sm);
+    transition: border-color 0.2s;
+    flex-wrap: wrap;
+  }
+  .ic-policy-row:hover    { border-color: var(--accent); }
+  .ic-policy-row:focus    { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ic-policy-icon         { font-size: 1.4rem; flex-shrink: 0; }
+  .ic-policy-info         { flex: 1; min-width: 0; }
+  .ic-policy-name         { font-weight: 600; font-size: 0.9rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ic-policy-meta         { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+  .ic-policy-right        { text-align: right; flex-shrink: 0; }
+  .ic-policy-coverage     { font-family: var(--font-data); font-size: 0.95rem; font-weight: 600; color: var(--accent); }
+  .ic-policy-renewal      { font-size: 0.72rem; margin-top: 2px; }
+  .ic-renewal-overdue     { color: var(--down); }
+  .ic-renewal-due_soon    { color: var(--warning); }
+  .ic-renewal-upcoming    { color: var(--accent); }
+  .ic-renewal-active      { color: var(--muted); }
+
+  /* ── Badges ── */
+  .ic-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    border: 1px solid;
+  }
+  .ic-badge-up      { background: var(--up-bg);      color: var(--up);      border-color: var(--up); }
+  .ic-badge-down    { background: var(--down-bg);    color: var(--down);    border-color: var(--down); }
+  .ic-badge-warning { background: var(--warning-bg); color: var(--warning); border-color: var(--warning); }
+  .ic-badge-accent  { background: var(--accent-bg);  color: var(--accent);  border-color: var(--accent); }
+  .ic-badge-muted   { background: var(--surface2);   color: var(--muted);   border-color: var(--border); }
+
+  /* ── Activity ── */
+  .ic-activity-list { display: flex; flex-direction: column; gap: 0; }
+  .ic-activity-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .ic-activity-row:last-child { border-bottom: none; }
+  .ic-activity-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+  .ic-activity-content { flex: 1; }
+  .ic-activity-desc    { font-size: 0.875rem; color: var(--text); line-height: 1.4; }
+  .ic-activity-time    { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+
+  /* ── Placeholder ── */
+  .ic-placeholder {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 24px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 0.875rem;
+  }
+  .ic-placeholder-icon { font-size: 1.2rem; }
+
+  /* ── Responsive ── */
+  @media (max-width: 1024px) {
+    .ic-summary-grid  { grid-template-columns: repeat(3, 1fr); }
+    .ic-category-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+  @media (max-width: 768px) {
+    .ic-summary-grid  { grid-template-columns: repeat(2, 1fr); }
+    .ic-category-grid { grid-template-columns: repeat(2, 1fr); }
+    .ic-header        { flex-direction: column; align-items: flex-start; }
+    .ic-actions       { width: 100%; }
+    .ic-btn-primary, .ic-btn-secondary { flex: 1; text-align: center; }
+    .ic-policy-row    { flex-direction: column; align-items: flex-start; }
+    .ic-policy-right  { text-align: left; }
+  }
+  @media (max-width: 480px) {
+    .ic-summary-grid  { grid-template-columns: 1fr; }
+    .ic-category-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+{% endblock %}

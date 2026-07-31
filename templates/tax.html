@@ -1,0 +1,343 @@
+{% extends "base.html" %}
+{% block title %}Tax Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:0 auto;">
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Tax Centre</h1>
+      <p class="page-sub">80C tracker · LTCG calculator · Old vs New regime comparison</p>
+    </div>
+  </div>
+
+  <!-- ── TAB NAV ── -->
+  <div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('tab80c', this)">80C Investments</button>
+    <button class="tab-btn" onclick="switchTab('tabLTCG', this)">LTCG Calculator</button>
+    <button class="tab-btn" onclick="switchTab('tabRegime', this)">Old vs New Regime</button>
+  </div>
+
+  <!-- ── TAB 1: 80C ── -->
+  <div id="tab80c" class="tab-panel">
+    <div class="panel">
+      <div class="panel-title">Section 80C — Investment Tracker</div>
+      <div style="color:var(--muted); font-size:0.85rem; margin-bottom:20px;">
+        Maximum deduction: <strong style="color:var(--text);">₹1,50,000</strong> per financial year
+      </div>
+
+      <!-- Auto-detected from assets -->
+      <div style="font-size:0.78rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:12px;">Auto-detected from your assets</div>
+      {% for item in deductions_80c %}
+      <div class="tax-row">
+        <div>
+          <div style="font-weight:500; font-size:0.88rem; color:var(--text);">{{ item.label }}</div>
+          <div style="font-size:0.75rem; color:var(--muted);">{{ item.note }}</div>
+        </div>
+        <div style="font-family:'Roboto Mono',monospace; font-weight:600; color:var(--accent);">₹{{ "{:,.0f}".format(item.amount) }}</div>
+      </div>
+      {% endfor %}
+
+      <!-- Manual top-up -->
+      <div style="margin-top:20px; margin-bottom:12px;">
+        <div style="font-size:0.78rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em;">Add manually</div>
+      </div>
+      <form method="POST" action="/tax/add-80c">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label>Instrument</label>
+            <select name="label" class="form-select">
+              <option value="ELSS Mutual Fund">ELSS Mutual Fund</option>
+              <option value="LIC Premium">LIC Premium</option>
+              <option value="NSC">NSC</option>
+              <option value="ULIP">ULIP</option>
+              <option value="Home Loan Principal">Home Loan Principal</option>
+              <option value="Tuition Fees">Tuition Fees</option>
+              <option value="Other 80C">Other 80C</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Amount (₹)</label>
+            <input type="number" name="amount" step="1" min="0" placeholder="e.g. 50000" required />
+          </div>
+          <div class="form-group" style="display:flex; align-items:flex-end;">
+            <button type="submit" class="btn-primary" style="width:100%; padding:11px;">Add</button>
+          </div>
+        </div>
+      </form>
+
+      <!-- Total and limit bar -->
+      {% set used_pct = [[total_80c / 150000 * 100, 100]|min, 0]|max | round(1) %}
+      {% set remaining = [150000 - total_80c, 0]|max %}
+      <div style="margin-top:24px; padding-top:20px; border-top:1px solid var(--border);">
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <span style="font-weight:600; color:var(--text);">Total 80C:</span>
+            <span style="font-family:'Roboto Mono',monospace; font-weight:700; color:var(--accent); margin-left:8px;">₹{{ "{:,.0f}".format(total_80c) }}</span>
+          </div>
+          <div>
+            {% if remaining > 0 %}
+            <span style="color:var(--warning); font-weight:600;">₹{{ "{:,.0f}".format(remaining) }} more to claim full deduction</span>
+            {% else %}
+            <span style="color:var(--up); font-weight:600;">✓ 80C limit fully utilised</span>
+            {% endif %}
+          </div>
+        </div>
+        <div style="height:8px; background:var(--border); border-radius:4px; overflow:hidden;">
+          <div style="height:8px; background:{{ 'var(--up)' if used_pct >= 100 else 'var(--accent)' }}; border-radius:4px; width:{{ used_pct }}%; transition:width 0.5s;"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:0.72rem; color:var(--muted); margin-top:4px;">
+          <span>₹0</span>
+          <span>{{ used_pct }}% used</span>
+          <span>₹1,50,000</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB 2: LTCG ── -->
+  <div id="tabLTCG" class="tab-panel" style="display:none;">
+    <div class="panel">
+      <div class="panel-title">Long Term Capital Gains (LTCG) Calculator</div>
+      <div style="color:var(--muted); font-size:0.85rem; margin-bottom:20px;">
+        Equity LTCG exemption: <strong style="color:var(--text);">₹1,00,000</strong> per year · Tax rate above exemption: <strong style="color:var(--text);">10%</strong>
+      </div>
+
+      <form method="POST" action="/tax/calculate-ltcg" id="ltcgForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label>Purchase Price (₹)</label>
+            <input type="number" name="buy_price" id="buyPrice" step="0.01" min="0" placeholder="e.g. 100000" oninput="calcLTCG()" />
+          </div>
+          <div class="form-group">
+            <label>Selling Price (₹)</label>
+            <input type="number" name="sell_price" id="sellPrice" step="0.01" min="0" placeholder="e.g. 150000" oninput="calcLTCG()" />
+          </div>
+          <div class="form-group">
+            <label>Holding Period</label>
+            <select name="holding" id="holdingPeriod" class="form-select" onchange="calcLTCG()">
+              <option value="long">More than 1 year (LTCG)</option>
+              <option value="short">Less than 1 year (STCG)</option>
+            </select>
+          </div>
+        </div>
+      </form>
+
+      <!-- Live result -->
+      <div id="ltcgResult" style="display:none; margin-top:20px;">
+        <div class="ef-grid">
+          <div class="ef-stat">
+            <div class="stat-label">Total Gain</div>
+            <div class="stat-val" id="totalGain" style="color:var(--accent);">—</div>
+          </div>
+          <div class="ef-stat">
+            <div class="stat-label">Exemption</div>
+            <div class="stat-val" id="exemption">—</div>
+          </div>
+          <div class="ef-stat">
+            <div class="stat-label">Taxable Gain</div>
+            <div class="stat-val" id="taxableGain">—</div>
+          </div>
+          <div class="ef-stat" style="background:var(--down-bg); border-color:var(--down);">
+            <div class="stat-label">Tax Payable</div>
+            <div class="stat-val" id="taxPayable" style="color:var(--down);">—</div>
+          </div>
+        </div>
+        <div id="ltcgNote" style="margin-top:12px; font-size:0.78rem; color:var(--muted);"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TAB 3: OLD vs NEW REGIME ── -->
+  <div id="tabRegime" class="tab-panel" style="display:none;">
+    <div class="panel">
+      <div class="panel-title">Old vs New Tax Regime Comparison</div>
+      <div style="color:var(--muted); font-size:0.85rem; margin-bottom:20px;">FY 2024–25 tax slabs</div>
+
+      <div class="form-grid-2" style="margin-bottom:20px;">
+        <div class="form-group">
+          <label>Annual Gross Income (₹)</label>
+          <input type="number" id="grossIncome" step="1" min="0" placeholder="e.g. 1200000" oninput="calcRegime()" />
+        </div>
+        <div class="form-group">
+          <label>Your 80C Deductions (₹)</label>
+          <input type="number" id="deductions80c" step="1" min="0" value="{{ total_80c | round(0) | int }}" oninput="calcRegime()" />
+        </div>
+      </div>
+
+      <div id="regimeResult" style="display:none;">
+        <div class="regime-grid">
+          <div class="regime-card" id="oldCard">
+            <div style="font-weight:700; font-size:1rem; color:var(--text); margin-bottom:16px;">🏛️ Old Regime</div>
+            <div class="regime-row"><span>Gross Income</span><span id="oldGross">—</span></div>
+            <div class="regime-row"><span>Standard Deduction</span><span>−₹50,000</span></div>
+            <div class="regime-row"><span>80C Deduction</span><span id="old80c">—</span></div>
+            <div class="regime-row"><span>Taxable Income</span><span id="oldTaxable">—</span></div>
+            <div class="regime-row regime-total"><span>Tax Payable</span><span id="oldTax">—</span></div>
+          </div>
+          <div class="regime-card" id="newCard">
+            <div style="font-weight:700; font-size:1rem; color:var(--text); margin-bottom:16px;">✨ New Regime</div>
+            <div class="regime-row"><span>Gross Income</span><span id="newGross">—</span></div>
+            <div class="regime-row"><span>Standard Deduction</span><span>−₹75,000</span></div>
+            <div class="regime-row"><span>80C Deduction</span><span style="color:var(--muted);">Not applicable</span></div>
+            <div class="regime-row"><span>Taxable Income</span><span id="newTaxable">—</span></div>
+            <div class="regime-row regime-total"><span>Tax Payable</span><span id="newTax">—</span></div>
+          </div>
+        </div>
+        <div id="regimeVerdict" style="margin-top:16px; padding:14px 18px; border-radius:10px; font-weight:600; font-size:0.9rem;"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<style>
+  .page-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; flex-wrap:wrap; gap:12px; }
+  .page-title  { font-size:1.4rem; font-weight:700; margin-bottom:4px; color:var(--text); }
+  .page-sub    { color:var(--muted); font-size:0.875rem; }
+
+  .tab-nav  { display:flex; gap:4px; margin-bottom:20px; background:var(--surface2); border-radius:10px; padding:4px; border:1px solid var(--border); }
+  .tab-btn  { flex:1; padding:9px; border:none; border-radius:7px; font-size:0.85rem; font-weight:500; cursor:pointer; font-family:'Inter',sans-serif; background:transparent; color:var(--muted); transition:all 0.2s; }
+  .tab-btn.active { background:var(--surface); color:var(--accent); font-weight:700; box-shadow:var(--shadow-sm); }
+
+  .panel       { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); }
+  .panel-title { font-weight:600; margin-bottom:6px; color:var(--text); font-size:1rem; }
+  .form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .form-select { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; outline:none; }
+
+  .tax-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); }
+  .ef-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .ef-stat { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:14px; }
+  .stat-label { font-size:0.7rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:5px; }
+  .stat-val   { font-family:'Roboto Mono',monospace; font-size:0.95rem; font-weight:700; color:var(--text); }
+
+  .regime-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .regime-card { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:20px; }
+  .regime-row  { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:0.85rem; color:var(--muted); }
+  .regime-row span:last-child { font-family:'Roboto Mono',monospace; font-weight:600; color:var(--text); }
+  .regime-total { font-weight:700 !important; border-bottom:none !important; }
+  .regime-total span { color:var(--text) !important; font-size:1rem !important; }
+
+  @media (max-width:768px) {
+    .tab-btn    { font-size:0.75rem; padding:8px 4px; }
+    .form-grid-2, .form-grid-3 { grid-template-columns:1fr; }
+    .ef-grid    { grid-template-columns:1fr 1fr; }
+    .regime-grid{ grid-template-columns:1fr; }
+  }
+</style>
+
+<script>
+  function switchTab(id, btn) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(id).style.display = 'block';
+    btn.classList.add('active');
+  }
+
+  function fmt(n) { return '₹' + Math.round(n).toLocaleString('en-IN'); }
+
+  /* ── LTCG Calculator ── */
+  function calcLTCG() {
+    const buy  = parseFloat(document.getElementById('buyPrice').value)  || 0;
+    const sell = parseFloat(document.getElementById('sellPrice').value) || 0;
+    const isLong = document.getElementById('holdingPeriod').value === 'long';
+    if (!buy || !sell) { document.getElementById('ltcgResult').style.display='none'; return; }
+
+    const gain = sell - buy;
+    if (gain <= 0) {
+      document.getElementById('ltcgResult').style.display = 'block';
+      document.getElementById('totalGain').textContent  = fmt(gain) + ' (Loss)';
+      document.getElementById('exemption').textContent  = '—';
+      document.getElementById('taxableGain').textContent= '—';
+      document.getElementById('taxPayable').textContent = '₹0';
+      document.getElementById('ltcgNote').textContent   = 'Capital loss can be carried forward for 8 years to offset future gains.';
+      return;
+    }
+
+    let tax = 0, exemption = 0, taxableGain = gain, note = '';
+    if (isLong) {
+      exemption   = Math.min(gain, 100000);
+      taxableGain = Math.max(gain - 100000, 0);
+      tax         = taxableGain * 0.10;
+      note        = 'LTCG on equity: 10% on gains above ₹1,00,000 exemption (no indexation).';
+    } else {
+      tax  = gain * 0.15;
+      note = 'STCG on equity: flat 15% on entire gain (no exemption).';
+    }
+
+    document.getElementById('ltcgResult').style.display  = 'block';
+    document.getElementById('totalGain').textContent     = fmt(gain);
+    document.getElementById('exemption').textContent     = isLong ? fmt(exemption) : 'None (STCG)';
+    document.getElementById('taxableGain').textContent   = fmt(taxableGain);
+    document.getElementById('taxPayable').textContent    = fmt(tax);
+    document.getElementById('ltcgNote').textContent      = note;
+  }
+
+  /* ── Old vs New Regime ── */
+  function calcOldTax(income) {
+    if (income <= 250000)  return 0;
+    if (income <= 500000)  return (income - 250000) * 0.05;
+    if (income <= 1000000) return 12500 + (income - 500000) * 0.20;
+    return 112500 + (income - 1000000) * 0.30;
+  }
+
+  function calcNewTax(income) {
+    if (income <= 300000)  return 0;
+    if (income <= 700000)  return (income - 300000) * 0.05;
+    if (income <= 1000000) return 20000 + (income - 700000) * 0.10;
+    if (income <= 1200000) return 50000 + (income - 1000000) * 0.15;
+    if (income <= 1500000) return 80000 + (income - 1200000) * 0.20;
+    return 140000 + (income - 1500000) * 0.30;
+  }
+
+  function calcRegime() {
+    const gross = parseFloat(document.getElementById('grossIncome').value) || 0;
+    const d80c  = Math.min(parseFloat(document.getElementById('deductions80c').value) || 0, 150000);
+    if (!gross) { document.getElementById('regimeResult').style.display='none'; return; }
+
+    const oldTaxable = Math.max(gross - 50000 - d80c, 0);
+    const newTaxable = Math.max(gross - 75000, 0);
+
+    // Rebate u/s 87A (up to ₹12,500 if taxable income ≤ ₹5L old, ₹25,000 if ≤ ₹7L new)
+    let oldTax = calcOldTax(oldTaxable);
+    if (oldTaxable <= 500000) oldTax = Math.max(oldTax - 12500, 0);
+    let newTax = calcNewTax(newTaxable);
+    if (newTaxable <= 700000) newTax = 0; // full rebate new regime
+
+    // Add 4% health & education cess
+    oldTax = oldTax * 1.04;
+    newTax = newTax * 1.04;
+
+    document.getElementById('regimeResult').style.display = 'block';
+    document.getElementById('oldGross').textContent    = fmt(gross);
+    document.getElementById('old80c').textContent      = '−' + fmt(d80c);
+    document.getElementById('oldTaxable').textContent  = fmt(oldTaxable);
+    document.getElementById('oldTax').textContent      = fmt(oldTax);
+    document.getElementById('newGross').textContent    = fmt(gross);
+    document.getElementById('newTaxable').textContent  = fmt(newTaxable);
+    document.getElementById('newTax').textContent      = fmt(newTax);
+
+    const verdict = document.getElementById('regimeVerdict');
+    const saving  = Math.abs(oldTax - newTax);
+    if (oldTax < newTax) {
+      verdict.style.background = 'var(--up-bg)';
+      verdict.style.color      = 'var(--up)';
+      verdict.style.border     = '1px solid var(--up)';
+      verdict.textContent      = `✓ Old Regime saves you ${fmt(saving)} more in taxes this year.`;
+    } else if (newTax < oldTax) {
+      verdict.style.background = 'var(--accent-bg)';
+      verdict.style.color      = 'var(--accent)';
+      verdict.style.border     = '1px solid var(--accent)';
+      verdict.textContent      = `✓ New Regime saves you ${fmt(saving)} more in taxes this year.`;
+    } else {
+      verdict.style.background = 'var(--surface2)';
+      verdict.style.color      = 'var(--text)';
+      verdict.style.border     = '1px solid var(--border)';
+      verdict.textContent      = 'Both regimes result in the same tax. Choose New Regime for simplicity.';
+    }
+  }
+</script>
+{% endblock %}
