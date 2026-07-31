@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Sign Up — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+
+  <!-- Logo -->
+  <div style="text-align:center; margin-bottom:28px;">
+    <div style="font-family:'Roboto Mono',monospace; font-size:1.1rem; font-weight:600;">
+      <span style="color:#00d4aa;">MyWealth</span><span style="color:#64748b;">Lens</span>
+    </div>
+    <div style="color:#64748b; font-size:0.75rem; margin-top:4px; letter-spacing:0.08em; text-transform:uppercase;">
+      Your complete financial picture
+    </div>
+  </div>
+
+  <div class="auth-title">Create your account</div>
+  <div class="auth-subtitle">Start tracking your complete financial life</div>
+
+  <form method="POST" action="/signup">
+
+    <div class="form-group">
+      <label for="name">Full Name</label>
+      <input type="text" id="name" name="name" placeholder="Mohan Kumar" required autocomplete="name" />
+    </div>
+
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" placeholder="you@example.com" required autocomplete="email" />
+    </div>
+
+    <!-- Password field with show/hide toggle -->
+    <div class="form-group">
+      <label for="password">Password</label>
+      <div class="input-wrapper">
+        <input type="password" id="password" name="password" placeholder="Minimum 8 characters" required autocomplete="new-password" minlength="8" />
+        <button type="button" class="toggle-pw" onclick="togglePassword('password', this)">Show</button>
+      </div>
+    </div>
+
+    <!-- Confirm password with show/hide toggle -->
+    <div class="form-group">
+      <label for="confirm_password">Confirm Password</label>
+      <div class="input-wrapper">
+        <input type="password" id="confirm_password" name="confirm_password" placeholder="Repeat your password" required autocomplete="new-password" minlength="8" />
+        <button type="button" class="toggle-pw" onclick="togglePassword('confirm_password', this)">Show</button>
+      </div>
+    </div>
+
+    <button type="submit" class="btn-primary">Create account</button>
+
+  </form>
+
+  <div class="auth-footer">
+    Already have an account? <a href="/login">Log in</a>
+  </div>
+
+</div>
+
+<script>
+  // togglePassword — switches a password field between hidden and visible
+  // id      = the input field's id
+  // btn     = the button that was clicked (so we can change its label)
+  function togglePassword(id, btn) {
+    const input = document.getElementById(id);
+    if (input.type === "password") {
+      input.type = "text";
+      btn.textContent = "Hide";
+    } else {
+      input.type = "password";
+      btn.textContent = "Show";
+    }
+  }
+</script>

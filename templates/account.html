@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Account — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:600px; margin:0 auto;">
+
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px;">Your Account</h1>
+  <p style="color:#64748b; font-size:0.875rem; margin-bottom:32px;">Your profile and account details</p>
+
+  <!-- Profile card -->
+  <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:32px; margin-bottom:20px;">
+
+    <!-- Avatar circle with initials -->
+    <div style="width:64px; height:64px; border-radius:50%; background:#00d4aa22; border:2px solid #00d4aa44; display:flex; align-items:center; justify-content:center; margin-bottom:20px;">
+      <span style="font-size:1.4rem; font-weight:700; color:#00d4aa;">
+        {{ user.name[0].upper() }}
+      </span>
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <div style="font-size:0.75rem; color:#64748b; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:4px;">Full Name</div>
+      <div style="font-size:1rem; font-weight:500;">{{ user.name }}</div>
+    </div>
+
+    <div style="margin-bottom:20px;">
+      <div style="font-size:0.75rem; color:#64748b; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:4px;">Email</div>
+      <div style="font-size:1rem; font-weight:500;">{{ user.email }}</div>
+    </div>
+
+    <div>
+      <div style="font-size:0.75rem; color:#64748b; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; margin-bottom:4px;">Password</div>
+      <div style="font-size:1rem; color:#64748b;">••••••••••••</div>
+    </div>
+
+  </div>
+
+  <!-- Coming soon -->
+  <div style="background:#13161f; border:1px dashed #1e2130; border-radius:12px; padding:20px; text-align:center;">
+    <div style="color:#64748b; font-size:0.875rem;">✏️ Edit profile and change password coming soon</div>
+  </div>
+
+</div>
+{% endblock %}

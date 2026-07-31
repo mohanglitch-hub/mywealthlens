@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}MyWealthLens{% endblock %}</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;600&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0f14;
+      --surface:   #13161f;
+      --surface2:  #1a1e2d;
+      --border:    #1e2130;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --accent:    #00d4aa;
+      --accent2:   #0ea5e9;
+      --up:        #22c55e;
+      --down:      #ef4444;
+      --warning:   #facc15;
+      --font-ui:   'Inter', sans-serif;
+      --font-data: 'Roboto Mono', monospace;
+      --radius:    12px;
+    }
+
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-ui);
+      min-height: 100vh;
+    }
+
+    /* ── Navbar ── */
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .wordmark {
+      font-family: var(--font-data);
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-decoration: none;
+    }
+
+    .wordmark span.accent { color: var(--accent); }
+    .wordmark span.dim    { color: var(--muted); font-weight: 400; }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .nav-links a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: var(--text); }
+
+    .nav-links .btn-logout {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      font-family: var(--font-ui);
+      text-decoration: none;
+      transition: border-color 0.2s;
+    }
+
+    .nav-links .btn-logout:hover { border-color: var(--down); color: var(--down); }
+
+    /* ── Flash messages ── */
+    /*
+      Flash messages are one-time notifications from the server.
+      For example: "Welcome back!" or "Invalid password."
+      Flask stores them in the session and they disappear after
+      being displayed once.
+    */
+    .flash-container {
+      max-width: 480px;
+      margin: 20px auto 0;
+      padding: 0 20px;
+    }
+
+    .flash {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      margin-bottom: 10px;
+      border: 1px solid transparent;
+    }
+
+    .flash.success {
+      background: rgba(34, 197, 94, 0.1);
+      border-color: rgba(34, 197, 94, 0.3);
+      color: var(--up);
+    }
+
+    .flash.error {
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.3);
+      color: var(--down);
+    }
+
+    /* ── Page wrapper ── */
+    .page { padding: 40px 20px 80px; }
+
+    /* ── Auth card (login + signup) ── */
+    .auth-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      width: 100%;
+      max-width: 420px;
+      margin: 0 auto;
+    }
+
+    .auth-title {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .auth-subtitle {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-bottom: 28px;
+    }
+
+    /* ── Form elements ── */
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .form-group input {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px 14px;
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus {
+      border-color: var(--accent);
+    }
+
+    .form-group input::placeholder {
+      color: var(--muted);
+    }
+
+    /* ── Password show/hide wrapper ── */
+    .input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .input-wrapper input { padding-right: 60px; }
+    .toggle-pw {
+      position: absolute;
+      right: 12px;
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      font-family: var(--font-ui);
+      padding: 0;
+    }
+    .toggle-pw:hover { opacity: 0.75; }
+
+    /* ── Buttons ── */
+    .btn-primary {
+      width: 100%;
+      background: var(--accent);
+      color: #0d0f14;
+      border: none;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      font-family: var(--font-ui);
+      cursor: pointer;
+      transition: opacity 0.2s;
+      margin-top: 6px;
+    }
+
+    .btn-primary:hover { opacity: 0.88; }
+
+    .auth-footer {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .auth-footer a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .auth-footer a:hover { text-decoration: underline; }
+
+    /* ── Responsive ── */
+    @media (max-width: 480px) {
+      .navbar { padding: 14px 16px; }
+      .auth-card { padding: 28px 20px; }
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Navbar — only shown when logged in -->
+  {% if current_user.is_authenticated %}
+  <nav class="navbar">
+    <a class="wordmark" href="/dashboard">
+      <span class="accent">MyWealth</span><span class="dim">Lens</span>
+    </a>
+    <div class="nav-links">
+      <a href="/dashboard">Dashboard</a>
+      <a href="/account">Account</a>
+      <a href="/settings">Settings</a>
+      <a href="/logout" class="btn-logout">Log out</a>
+    </div>
+  </nav>
+  {% endif %}
+
+  <!-- Flash messages — shown on every page -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flash-container">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <!-- Page content — each template fills this block -->
+  <div class="page">
+    {% block content %}{% endblock %}
+  </div>
+
+</body>
+</html>

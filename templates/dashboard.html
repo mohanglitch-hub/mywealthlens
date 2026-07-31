@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — MyWealthLens{% endblock %}
+
+{% block content %}
+
+<div style="max-width:1100px; margin:0 auto;">
+
+  <!-- Welcome header -->
+  <div style="margin-bottom:40px;">
+    <h1 style="font-size:1.6rem; font-weight:700; margin-bottom:6px;">
+      Good to see you, {{ user.name.split()[0] }} 👋
+    </h1>
+    <p style="color:#64748b; font-size:0.9rem;">
+      Your financial dashboard is being built. More coming soon.
+    </p>
+  </div>
+
+  <!-- Placeholder cards — will be replaced in future steps -->
+  <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px,1fr)); gap:16px; margin-bottom:40px;">
+
+    <!-- Net Worth card -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-size:0.75rem; color:#64748b; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:12px;">Net Worth</div>
+      <div style="font-family:'Roboto Mono',monospace; font-size:1.8rem; font-weight:600; color:#e2e8f0;">₹ —</div>
+      <div style="font-size:0.8rem; color:#64748b; margin-top:6px;">Add assets to calculate</div>
+    </div>
+
+    <!-- Mutual Funds card -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-size:0.75rem; color:#64748b; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:12px;">Mutual Funds</div>
+      <div style="font-family:'Roboto Mono',monospace; font-size:1.8rem; font-weight:600; color:#e2e8f0;">₹ —</div>
+      <div style="font-size:0.8rem; color:#64748b; margin-top:6px;">Upload CAS PDF to sync</div>
+    </div>
+
+    <!-- Physical Assets card -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-size:0.75rem; color:#64748b; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:12px;">Physical Assets</div>
+      <div style="font-family:'Roboto Mono',monospace; font-size:1.8rem; font-weight:600; color:#e2e8f0;">₹ —</div>
+      <div style="font-size:0.8rem; color:#64748b; margin-top:6px;">Gold, silver, real estate</div>
+    </div>
+
+    <!-- Goals card -->
+    <div style="background:#13161f; border:1px solid #1e2130; border-radius:12px; padding:24px;">
+      <div style="font-size:0.75rem; color:#64748b; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:12px;">Goals</div>
+      <div style="font-family:'Roboto Mono',monospace; font-size:1.8rem; font-weight:600; color:#e2e8f0;">0</div>
+      <div style="font-size:0.8rem; color:#64748b; margin-top:6px;">Retirement, house, education</div>
+    </div>
+
+  </div>
+
+  <!-- Coming soon banner -->
+  <div style="background:#13161f; border:1px dashed #1e2130; border-radius:12px; padding:32px; text-align:center;">
+    <div style="font-size:1.5rem; margin-bottom:10px;">🚧</div>
+    <div style="font-weight:600; margin-bottom:6px;">More features coming soon</div>
+    <div style="color:#64748b; font-size:0.875rem;">
+      Next: manual asset entry for gold, PPF, real estate and more.
+    </div>
+  </div>
+
+</div>
+
+{% endblock %}
