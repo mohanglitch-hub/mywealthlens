@@ -207,21 +207,21 @@ def validate_document(file, doc_type):
         errors.append(f"Invalid document type: {doc_type}.")
 
     # Allowed extensions
-    allowed = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"}
+    allowed = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx"}
     import os
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in allowed:
         errors.append(
             f"File type '{ext}' not allowed. "
-            f"Allowed: PDF, JPG, PNG, DOC, DOCX."
+            f"Allowed: PDF, JPG, JPEG, PNG, DOC, DOCX, XLS, XLSX."
         )
 
-    # Size check — max 10MB
+    # Size check — max 25MB
     file.seek(0, 2)
     size = file.tell()
     file.seek(0)
-    if size > 10 * 1024 * 1024:
-        errors.append("File size exceeds 10MB limit.")
+    if size > 25 * 1024 * 1024:
+        errors.append("File size exceeds 25MB limit.")
 
     return errors
 

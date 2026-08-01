@@ -16,14 +16,14 @@
     <div class="ic-actions">
       <button
         class="ic-btn-secondary"
-        title="Manage Policies — coming in Phase 4"
-        onclick="alert('Manage Policies will be available in the next phase.')">
+        title="View and manage all policies"
+        onclick="window.location='/insurance-centre/policies'">
         Manage Policies
       </button>
       <button
         class="ic-btn-primary"
-        title="Add a new insurance policy — coming in Phase 4"
-        onclick="alert('Add Policy will be available in the next phase.')">
+        title="Add a new insurance policy"
+        onclick="window.location='/insurance-centre/add'">
         + Add Policy
       </button>
     </div>
@@ -106,7 +106,7 @@
     <div class="ic-category-grid" role="region" aria-label="Insurance Categories">
       {% for cat in categories %}
       {% set stats = data.category_stats.get(cat, {}) %}
-      <a href="/insurance-centre/category/{{ cat | urlencode }}"
+      <a href="/insurance-centre/category/{{ category_to_slug(cat) }}"
          class="ic-category-card {% if stats.get('has_policies') %}ic-category-card--active{% endif %}"
          tabindex="0"
          title="{{ cat }}">
@@ -150,7 +150,7 @@
     {% if data.recent_policies %}
     <div class="ic-policy-list">
       {% for p in data.recent_policies %}
-      <div class="ic-policy-row" tabindex="0">
+      <div class="ic-policy-row" tabindex="0" onclick="window.location='/insurance-centre/policy/{{ p.id }}'" style="cursor:pointer;">
         <div class="ic-policy-icon">
           {{ category_icons.get(p.category, '📋') }}
         </div>

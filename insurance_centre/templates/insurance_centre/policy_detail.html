@@ -1,0 +1,773 @@
+{% extends "base.html" %}
+{% block title %}{{ policy.display_type }} — Insurance Centre<script>
+function confirmArchive(id, name) {
+  if (confirm('Archive "' + name + '"?\n\nThis policy will be moved to Archive. It can be restored later.')) {
+    document.getElementById('archiveFormDetail').submit();
+  }
+}
+</script>
+
+<script>
+function toggleUploadForm() {
+  const form = document.getElementById('uploadForm');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  if (form.style.display === 'block') {
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function showFileInfo(input) {
+  const info = document.getElementById('fileInfo');
+  if (input.files && input.files[0]) {
+    const file = input.files[0];
+    const size = file.size > 1024*1024
+      ? (file.size/(1024*1024)).toFixed(1) + ' MB'
+      : (file.size/1024).toFixed(0) + ' KB';
+    info.textContent = file.name + ' (' + size + ')';
+    info.style.color = file.size > 25*1024*1024 ? 'var(--down)' : 'var(--up)';
+  }
+}
+
+function confirmDeleteDoc(id, name) {
+  if (confirm(
+    'Delete Document?
+
+' +
+    '"' + name + '"
+
+' +
+    'This permanently removes the file from local storage.
+
+' +
+    'This action cannot be undone.'
+  )) {
+    document.getElementById('delDocForm' + id).submit();
+  }
+}
+
+document.getElementById('docUploadForm') && document.getElementById('docUploadForm')
+  .addEventListener('submit', function() {
+    const btn = document.getElementById('uploadSubmitBtn');
+    btn.textContent = 'Uploading…';
+    btn.disabled = true;
+  });
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="ic-wrap">
+
+  <!-- ── Breadcrumb ── -->
+  <div class="ic-breadcrumb">
+    <a href="/insurance-centre" class="ic-breadcrumb-link">Insurance Centre</a>
+    <span class="ic-breadcrumb-sep">›</span>
+    <a href="/insurance-centre/policies" class="ic-breadcrumb-link">Manage Policies</a>
+    <span class="ic-breadcrumb-sep">›</span>
+    <span class="ic-breadcrumb-current">{{ policy.display_type }}</span>
+  </div>
+
+  <!-- ── Header ── -->
+  <div class="pd-header">
+    <div class="pd-header-left">
+      <div class="pd-icon-wrap">
+        {{ category_icons.get(policy.category, '📋') }}
+      </div>
+      <div>
+        <div class="pd-type">{{ policy.display_type }}</div>
+        <div class="pd-insurer">{{ policy.insurer }}</div>
+        {% if policy.policy_name %}
+        <div class="pd-policy-name">{{ policy.policy_name }}</div>
+        {% endif %}
+        <div class="pd-badges">
+          <span class="ic-badge ic-badge-{{ 'up' if policy.status == 'Active' else 'down' if policy.status in ['Lapsed','Claimed'] else 'muted' }}">
+            {{ policy.status }}
+          </span>
+          <span class="ic-badge ic-badge-accent">{{ policy.category }}</span>
+          {% if policy.renewal_status == 'overdue' %}
+          <span class="ic-badge ic-badge-down">⚠ Renewal Overdue</span>
+          {% elif policy.renewal_status == 'due_soon' %}
+          <span class="ic-badge ic-badge-warning">🔔 Renewal Due Soon</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <a href="/insurance-centre/policy/{{ policy.id }}/edit" class="ic-btn-primary">✏️ Edit Policy</a>
+      <button class="ic-btn-archive"
+        onclick="confirmArchive({{ policy.id }}, '{{ policy.display_type }}')">
+        Archive
+      </button>
+      <a href="/insurance-centre/policies" class="ic-btn-secondary">← Back</a>
+    </div>
+
+    <!-- Archive form -->
+    <form method="POST" action="/insurance-centre/policy/{{ policy.id }}/archive"
+          id="archiveFormDetail" style="display:none;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    </form>
+  </div>
+
+  <!-- ── Summary Cards ── -->
+  <div class="pd-summary-grid">
+    <div class="pd-sum-card">
+      <div class="pd-sum-label">Coverage</div>
+      <div class="pd-sum-value pd-sum-accent">{{ format_inr(policy.sum_assured) }}</div>
+    </div>
+    <div class="pd-sum-card">
+      <div class="pd-sum-label">Premium</div>
+      <div class="pd-sum-value">{{ format_inr(policy.premium_amount) }}</div>
+      <div class="pd-sum-sub">{{ policy.premium_frequency }}</div>
+    </div>
+    <div class="pd-sum-card">
+      <div class="pd-sum-label">Annual Premium</div>
+      <div class="pd-sum-value">{{ format_inr(policy.annual_premium) }}</div>
+    </div>
+    {% if policy.renewal_date %}
+    <div class="pd-sum-card {% if policy.renewal_status in ['overdue','due_soon'] %}pd-sum-card--alert{% endif %}">
+      <div class="pd-sum-label">Renewal Date</div>
+      <div class="pd-sum-value pd-renewal-{{ policy.renewal_status }}">
+        {{ format_date(policy.renewal_date) }}
+      </div>
+      {% if policy.days_to_renewal is not none %}
+      <div class="pd-sum-sub">
+        {% if policy.days_to_renewal < 0 %}
+          {{ (policy.days_to_renewal * -1) }} days overdue
+        {% elif policy.days_to_renewal == 0 %}
+          Due today
+        {% else %}
+          {{ policy.days_to_renewal }} days left
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Policy Details ── -->
+  <div class="pd-card">
+    <div class="pd-card-title">Policy Information</div>
+    <div class="pd-fields-grid">
+
+      {% if policy.policy_number %}
+      <div class="pd-field">
+        <div class="pd-field-label">Policy Number</div>
+        <div class="pd-field-value">{{ policy.policy_number }}</div>
+      </div>
+      {% endif %}
+
+      {% if policy.policy_holder %}
+      <div class="pd-field">
+        <div class="pd-field-label">Policy Holder</div>
+        <div class="pd-field-value">{{ policy.policy_holder }}</div>
+      </div>
+      {% endif %}
+
+      <div class="pd-field">
+        <div class="pd-field-label">Insurance Company</div>
+        <div class="pd-field-value">{{ policy.insurer }}</div>
+      </div>
+
+      {% if policy.start_date %}
+      <div class="pd-field">
+        <div class="pd-field-label">Start Date</div>
+        <div class="pd-field-value">{{ format_date(policy.start_date) }}</div>
+      </div>
+      {% endif %}
+
+      <div class="pd-field">
+        <div class="pd-field-label">Insurance Type</div>
+        <div class="pd-field-value">{{ policy.display_type }}</div>
+      </div>
+
+      <div class="pd-field">
+        <div class="pd-field-label">Status</div>
+        <div class="pd-field-value">{{ policy.status }}</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ── Category-Specific Details ── -->
+
+  {# ── LIFE INSURANCE ── #}
+  {% if policy.category == 'Life Insurance' %}
+  <div class="pd-card">
+    <div class="pd-card-title">🛡️ Life Insurance Details</div>
+    <div class="pd-fields-grid">
+      {% if policy.maturity_date %}
+      <div class="pd-field">
+        <div class="pd-field-label">Maturity Date</div>
+        <div class="pd-field-value">{{ format_date(policy.maturity_date) }}</div>
+      </div>
+      {% endif %}
+      {% if policy.notes and 'Agent:' in policy.notes %}
+      {% set agent_info = policy.notes %}
+      <div class="pd-field">
+        <div class="pd-field-label">Agent Details</div>
+        <div class="pd-field-value">{{ agent_info }}</div>
+      </div>
+      {% endif %}
+    </div>
+    {% if policy.notes %}
+    <div class="pd-notes">
+      <div class="pd-field-label">Notes</div>
+      <div class="pd-notes-text">{{ policy.notes }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# Nominees #}
+  <div class="pd-card">
+    <div class="pd-card-title">👥 Nominees</div>
+    {% if nominees %}
+    <div class="pd-sub-grid">
+      {% for n in nominees %}
+      <div class="pd-sub-card">
+        <div class="pd-sub-name">{{ n.name }}</div>
+        <div class="pd-sub-meta">{{ n.relationship }}</div>
+        {% if n.percentage %}
+        <div class="pd-sub-tag">{{ n.percentage }}% share</div>
+        {% endif %}
+        {% if n.contact %}
+        <div class="pd-sub-meta">📞 {{ n.contact }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="pd-empty-sub">No nominees added.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── HEALTH INSURANCE ── #}
+  {% if policy.category == 'Health Insurance' %}
+  <div class="pd-card">
+    <div class="pd-card-title">🏥 Health Insurance Details</div>
+    <div class="pd-fields-grid">
+      {% if policy.renewal_date %}
+      <div class="pd-field">
+        <div class="pd-field-label">Renewal Date</div>
+        <div class="pd-field-value pd-renewal-{{ policy.renewal_status }}">
+          {{ format_date(policy.renewal_date) }}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% if policy.notes %}
+    <div class="pd-notes">
+      <div class="pd-field-label">Notes</div>
+      <div class="pd-notes-text">{{ policy.notes }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# Health Members #}
+  <div class="pd-card">
+    <div class="pd-card-title">👨‍👩‍👧 Insured Members</div>
+    {% if members %}
+    <div class="pd-sub-grid">
+      {% for m in members %}
+      <div class="pd-sub-card">
+        <div class="pd-sub-name">{{ m.member_name }}</div>
+        <div class="pd-sub-meta">{{ m.relationship }}</div>
+        {% if m.age %}
+        <div class="pd-sub-tag">Age {{ m.age }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="pd-empty-sub">No insured members added.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── MOTOR INSURANCE ── #}
+  {% if policy.category == 'Motor Insurance' %}
+  <div class="pd-card">
+    <div class="pd-card-title">🚗 Motor Insurance Details</div>
+    <div class="pd-fields-grid">
+      {% if policy.vehicle_number %}
+      <div class="pd-field">
+        <div class="pd-field-label">Vehicle Number</div>
+        <div class="pd-field-value">{{ policy.vehicle_number }}</div>
+      </div>
+      {% endif %}
+      {% if policy.renewal_date %}
+      <div class="pd-field">
+        <div class="pd-field-label">Renewal Date</div>
+        <div class="pd-field-value pd-renewal-{{ policy.renewal_status }}">
+          {{ format_date(policy.renewal_date) }}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    {% if addons %}
+    <div style="margin-top:14px;">
+      <div class="pd-field-label" style="margin-bottom:10px;">Add-ons</div>
+      <div class="pd-addon-wrap">
+        {% for a in addons %}
+        <span class="pd-addon-badge">✓ {{ a.addon_name }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if policy.notes %}
+    <div class="pd-notes">
+      <div class="pd-field-label">Claim History / Notes</div>
+      <div class="pd-notes-text">{{ policy.notes }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── PROPERTY INSURANCE ── #}
+  {% if policy.category == 'Property Insurance' %}
+  <div class="pd-card">
+    <div class="pd-card-title">🏠 Property Insurance Details</div>
+    <div class="pd-fields-grid">
+      {% if policy.property_name %}
+      <div class="pd-field">
+        <div class="pd-field-label">Property Name / Address</div>
+        <div class="pd-field-value">{{ policy.property_name }}</div>
+      </div>
+      {% endif %}
+      {% if policy.renewal_date %}
+      <div class="pd-field">
+        <div class="pd-field-label">Renewal Date</div>
+        <div class="pd-field-value pd-renewal-{{ policy.renewal_status }}">
+          {{ format_date(policy.renewal_date) }}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% if policy.notes %}
+    <div class="pd-notes">
+      <div class="pd-field-label">Notes</div>
+      <div class="pd-notes-text">{{ policy.notes }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── GENERAL INSURANCE ── #}
+  {% if policy.category == 'General Insurance' %}
+  <div class="pd-card">
+    <div class="pd-card-title">📋 General Insurance Details</div>
+    <div class="pd-fields-grid">
+      {% if policy.expiry_date %}
+      <div class="pd-field">
+        <div class="pd-field-label">Expiry Date</div>
+        <div class="pd-field-value">{{ format_date(policy.expiry_date) }}</div>
+      </div>
+      {% endif %}
+      {% if policy.renewal_date %}
+      <div class="pd-field">
+        <div class="pd-field-label">Renewal Date</div>
+        <div class="pd-field-value pd-renewal-{{ policy.renewal_status }}">
+          {{ format_date(policy.renewal_date) }}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+    {% if policy.notes %}
+    <div class="pd-notes">
+      <div class="pd-field-label">Notes</div>
+      <div class="pd-notes-text">{{ policy.notes }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ── Documents ── -->
+  <div class="pd-card" id="documentsSection">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+      <div class="pd-card-title" style="margin-bottom:0;">📁 Documents
+        {% if documents %}
+        <span style="font-size:0.75rem; color:var(--muted); font-weight:400; margin-left:8px;">
+          {{ documents|length }} file{{ 's' if documents|length != 1 else '' }}
+        </span>
+        {% endif %}
+      </div>
+      <button class="ic-btn-upload" onclick="toggleUploadForm()">
+        + Upload Document
+      </button>
+    </div>
+
+    <!-- Upload Form (hidden by default) -->
+    <div id="uploadForm" style="display:none; margin-bottom:20px;">
+      <form method="POST"
+            action="/insurance-centre/policy/{{ policy.id }}/documents/upload"
+            enctype="multipart/form-data"
+            id="docUploadForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="doc-upload-card">
+          <div class="ic-form-grid-2">
+            <div class="ic-field">
+              <label class="ic-label">Document Type <span class="ic-required">*</span></label>
+              <select name="doc_type" class="ic-select" required>
+                <option value="">— Select Type —</option>
+                {% for dt in doc_types %}
+                <option value="{{ dt }}">{{ dt }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="ic-field">
+              <label class="ic-label">Choose File <span class="ic-required">*</span></label>
+              <input type="file" name="document" class="ic-input" required
+                     accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                     onchange="showFileInfo(this)" />
+              <div id="fileInfo" style="font-size:0.75rem; color:var(--muted); margin-top:4px;"></div>
+            </div>
+          </div>
+          <div class="ic-field">
+            <label class="ic-label">Description (optional)</label>
+            <input type="text" name="doc_notes" class="ic-input"
+                   placeholder="e.g. Original policy document from LIC" />
+          </div>
+          <div class="doc-upload-hint">
+            Allowed: PDF, JPG, PNG, DOC, DOCX, XLS, XLSX · Max size: 25 MB
+          </div>
+          <div style="display:flex; gap:10px; margin-top:14px;">
+            <button type="submit" class="ic-btn-primary"
+                    style="width:auto; padding:10px 24px;"
+                    id="uploadSubmitBtn">
+              Upload
+            </button>
+            <button type="button" class="ic-btn-secondary"
+                    onclick="toggleUploadForm()">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <!-- Document Table (desktop) -->
+    {% if documents %}
+    <div class="doc-table-wrap">
+      <table class="doc-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>File Name</th>
+            <th>Size</th>
+            <th>Uploaded</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for doc in documents %}
+          <tr>
+            <td>
+              <span class="doc-type-badge">{{ doc.doc_type }}</span>
+            </td>
+            <td class="doc-filename">
+              <span class="doc-icon">{{ '🖼️' if doc.original_name.lower().endswith(('.jpg','.jpeg','.png')) else '📄' }}</span>
+              {{ doc.original_name }}
+              {% if doc.notes %}
+              <div class="doc-notes-text">{{ doc.notes }}</div>
+              {% endif %}
+            </td>
+            <td class="doc-size">{{ doc.file_size_display }}</td>
+            <td class="doc-date">{{ format_date(doc.uploaded_at) }}</td>
+            <td class="doc-actions">
+              <!-- Preview -->
+              {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+              {% if ext in ['pdf','jpg','jpeg','png'] %}
+              <a href="/insurance-centre/documents/{{ doc.id }}/preview"
+                 target="_blank" class="doc-btn doc-btn-preview"
+                 title="Preview in new tab">👁 Preview</a>
+              {% else %}
+              <span class="doc-btn doc-btn-disabled" title="Preview not available">👁</span>
+              {% endif %}
+
+              <!-- Download -->
+              <a href="/insurance-centre/documents/{{ doc.id }}/download"
+                 class="doc-btn doc-btn-download" title="Download">
+                ⬇ Download
+              </a>
+
+              <!-- Delete -->
+              <button class="doc-btn doc-btn-delete"
+                onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.original_name }}')"
+                title="Delete">
+                🗑 Delete
+              </button>
+
+              <!-- Hidden delete form -->
+              <form method="POST"
+                    action="/insurance-centre/documents/{{ doc.id }}/delete"
+                    id="delDocForm{{ doc.id }}" style="display:none;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Mobile card layout -->
+    <div class="doc-cards-mobile">
+      {% for doc in documents %}
+      <div class="doc-mobile-card">
+        <div class="doc-mobile-top">
+          <span class="doc-type-badge">{{ doc.doc_type }}</span>
+          <span class="doc-size">{{ doc.file_size_display }}</span>
+        </div>
+        <div class="doc-filename" style="margin:8px 0;">{{ doc.original_name }}</div>
+        <div class="doc-date" style="margin-bottom:10px;">{{ format_date(doc.uploaded_at) }}</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+          {% if ext in ['pdf','jpg','jpeg','png'] %}
+          <a href="/insurance-centre/documents/{{ doc.id }}/preview" target="_blank" class="doc-btn doc-btn-preview">👁 Preview</a>
+          {% endif %}
+          <a href="/insurance-centre/documents/{{ doc.id }}/download" class="doc-btn doc-btn-download">⬇ Download</a>
+          <button class="doc-btn doc-btn-delete" onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.original_name }}')">🗑 Delete</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% else %}
+    <div class="pd-empty-sub">
+      No documents uploaded yet.
+      <span style="color:var(--muted2); display:block; margin-top:4px; font-size:0.78rem;">
+        Click "+ Upload Document" to add policy documents, receipts or claim files.
+      </span>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Timeline ── -->
+  <div class="pd-card">
+    <div class="pd-card-title">📅 Policy Timeline</div>
+    {% if timeline %}
+    <div class="pd-timeline">
+      {% for event in timeline %}
+      <div class="pd-timeline-row">
+        <div class="pd-timeline-dot"></div>
+        <div class="pd-timeline-content">
+          <div class="pd-timeline-event">{{ event.event_type }}</div>
+          <div class="pd-timeline-desc">{{ event.description }}</div>
+          <div class="pd-timeline-time">{{ format_date(event.created_at) }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="pd-empty-sub">No activity recorded.</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+  .ic-wrap            { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
+  .ic-breadcrumb      { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .ic-breadcrumb-link { color:var(--muted); text-decoration:none; font-size:0.85rem; transition:color 0.2s; }
+  .ic-breadcrumb-link:hover { color:var(--accent); }
+  .ic-breadcrumb-sep  { color:var(--border); }
+  .ic-breadcrumb-current { font-size:0.85rem; color:var(--text2); }
+
+  /* Header */
+  .pd-header       { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; }
+  .pd-header-left  { display:flex; align-items:flex-start; gap:16px; }
+  .pd-icon-wrap    { width:56px; height:56px; border-radius:14px; background:var(--accent-bg); display:flex; align-items:center; justify-content:center; font-size:1.8rem; flex-shrink:0; }
+  .pd-type         { font-size:1.3rem; font-weight:700; color:var(--text); }
+  .pd-insurer      { font-size:0.9rem; color:var(--accent); font-weight:600; margin-top:2px; }
+  .pd-policy-name  { font-size:0.78rem; color:var(--muted); margin-top:2px; }
+  .pd-badges       { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+
+  /* Buttons */
+  .ic-btn-secondary { background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:10px 18px; font-size:0.82rem; font-weight:500; text-decoration:none; transition:all 0.2s; white-space:nowrap; }
+  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+  .ic-btn-archive { background:none; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:10px 18px; font-size:0.82rem; font-family:var(--font-ui); cursor:pointer; transition:all 0.2s; white-space:nowrap; }
+  .ic-btn-archive:hover { border-color:var(--down); color:var(--down); }
+  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* Summary Grid */
+  .pd-summary-grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
+  .pd-sum-card     { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:18px; box-shadow:var(--shadow-sm); }
+  .pd-sum-card--alert { border-color:var(--warning); }
+  .pd-sum-label    { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:8px; }
+  .pd-sum-value    { font-family:var(--font-data); font-size:1.1rem; font-weight:700; color:var(--text); }
+  .pd-sum-accent   { color:var(--accent); }
+  .pd-sum-sub      { font-size:0.72rem; color:var(--muted); margin-top:4px; }
+
+  /* Cards */
+  .pd-card         { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:22px; box-shadow:var(--shadow-sm); }
+  .pd-card-title   { font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:18px; }
+
+  /* Fields */
+  .pd-fields-grid  { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .pd-field        { }
+  .pd-field-label  { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px; }
+  .pd-field-value  { font-size:0.9rem; color:var(--text); font-weight:500; }
+  .pd-notes        { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
+  .pd-notes-text   { font-size:0.875rem; color:var(--text2); line-height:1.6; margin-top:6px; }
+
+  /* Renewal colours */
+  .pd-renewal-overdue  { color:var(--down); font-weight:600; }
+  .pd-renewal-due_soon { color:var(--warning); font-weight:600; }
+  .pd-renewal-upcoming { color:var(--text2); }
+  .pd-renewal-active   { color:var(--muted); }
+
+  /* Sub cards (nominees/members) */
+  .pd-sub-grid     { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:12px; }
+  .pd-sub-card     { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .pd-sub-name     { font-weight:600; color:var(--text); font-size:0.9rem; margin-bottom:4px; }
+  .pd-sub-meta     { font-size:0.78rem; color:var(--muted); }
+  .pd-sub-tag      { display:inline-block; background:var(--accent-bg); color:var(--accent); border:1px solid var(--accent); border-radius:10px; font-size:0.7rem; padding:2px 8px; margin-top:6px; font-weight:600; }
+
+  /* Add-on badges */
+  .pd-addon-wrap   { display:flex; flex-wrap:wrap; gap:8px; }
+  .pd-addon-badge  { background:var(--up-bg); color:var(--up); border:1px solid var(--up); border-radius:20px; padding:4px 12px; font-size:0.78rem; font-weight:600; }
+
+  /* Documents */
+  .pd-doc-row      { display:flex; align-items:center; gap:12px; padding:10px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; }
+  .pd-doc-icon     { font-size:1.2rem; flex-shrink:0; }
+  .pd-doc-info     { flex:1; min-width:0; }
+  .pd-doc-name     { font-weight:500; color:var(--text); font-size:0.875rem; }
+  .pd-doc-meta     { font-size:0.75rem; color:var(--muted); margin-top:2px; }
+
+  /* Timeline */
+  .pd-timeline     { display:flex; flex-direction:column; gap:0; }
+  .pd-timeline-row { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid var(--border); }
+  .pd-timeline-row:last-child { border-bottom:none; }
+  .pd-timeline-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); margin-top:5px; flex-shrink:0; }
+  .pd-timeline-content { flex:1; }
+  .pd-timeline-event { font-size:0.82rem; font-weight:600; color:var(--text); }
+  .pd-timeline-desc  { font-size:0.8rem; color:var(--text2); margin-top:2px; }
+  .pd-timeline-time  { font-size:0.72rem; color:var(--muted); margin-top:4px; }
+
+  /* Empty */
+  .pd-empty-sub    { font-size:0.85rem; color:var(--muted); font-style:italic; padding:8px 0; }
+
+  /* Badges */
+  .ic-badge        { display:inline-block; padding:3px 10px; border-radius:12px; font-size:0.7rem; font-weight:600; border:1px solid; }
+  .ic-badge-up     { background:var(--up-bg);      color:var(--up);      border-color:var(--up); }
+  .ic-badge-down   { background:var(--down-bg);    color:var(--down);    border-color:var(--down); }
+  .ic-badge-accent { background:var(--accent-bg);  color:var(--accent);  border-color:var(--accent); }
+  .ic-badge-muted  { background:var(--surface2);   color:var(--muted);   border-color:var(--border); }
+  .ic-badge-warning{ background:var(--warning-bg); color:var(--warning); border-color:var(--warning); }
+
+
+  /* ── Documents ── */
+  .ic-btn-upload    { background:var(--accent-bg); color:var(--accent); border:1px solid var(--accent); border-radius:8px; padding:8px 16px; font-size:0.82rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; transition:all 0.2s; }
+  .ic-btn-upload:hover { background:var(--accent); color:#fff; }
+  .ic-btn-primary   { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:0.875rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; transition:opacity 0.2s; }
+  .ic-btn-primary:hover { opacity:0.88; }
+  .ic-required      { color:var(--down); }
+  .ic-form-grid-2   { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+  .ic-field         { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+  .ic-label         { font-size:0.72rem; font-weight:600; color:var(--muted2); letter-spacing:0.06em; text-transform:uppercase; }
+  .ic-input, .ic-select { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; color:var(--text); font-family:var(--font-ui); font-size:0.875rem; outline:none; transition:border-color 0.2s; width:100%; }
+  .ic-input:focus, .ic-select:focus { border-color:var(--accent); }
+
+  .doc-upload-card  { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:18px; }
+  .doc-upload-hint  { font-size:0.75rem; color:var(--muted2); margin-top:4px; }
+
+  .doc-table-wrap   { overflow-x:auto; }
+  .doc-table        { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .doc-table th     { padding:10px 12px; text-align:left; font-size:0.72rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; border-bottom:1px solid var(--border); background:var(--surface2); }
+  .doc-table td     { padding:12px; border-bottom:1px solid var(--border); color:var(--text2); vertical-align:middle; }
+  .doc-table tr:last-child td { border-bottom:none; }
+  .doc-table tr:hover td { background:var(--surface2); }
+
+  .doc-type-badge   { background:var(--accent-bg); color:var(--accent); border:1px solid var(--accent); border-radius:12px; font-size:0.7rem; padding:3px 10px; font-weight:600; white-space:nowrap; }
+  .doc-filename     { font-weight:500; color:var(--text); display:flex; align-items:center; gap:6px; flex-direction:column; align-items:flex-start; }
+  .doc-icon         { font-size:1rem; }
+  .doc-notes-text   { font-size:0.72rem; color:var(--muted); margin-top:2px; font-weight:400; }
+  .doc-size         { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
+  .doc-date         { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
+  .doc-actions      { display:flex; gap:6px; flex-wrap:wrap; }
+
+  .doc-btn          { display:inline-flex; align-items:center; gap:4px; padding:5px 10px; border-radius:6px; font-size:0.75rem; font-weight:500; font-family:var(--font-ui); cursor:pointer; text-decoration:none; border:1px solid; transition:all 0.2s; white-space:nowrap; }
+  .doc-btn-preview  { background:var(--surface2); color:var(--text2); border-color:var(--border); }
+  .doc-btn-preview:hover { border-color:var(--accent); color:var(--accent); }
+  .doc-btn-download { background:var(--accent-bg); color:var(--accent); border-color:var(--accent); }
+  .doc-btn-download:hover { background:var(--accent); color:#fff; }
+  .doc-btn-delete   { background:none; color:var(--muted); border-color:var(--border); }
+  .doc-btn-delete:hover { border-color:var(--down); color:var(--down); }
+  .doc-btn-disabled { background:var(--surface2); color:var(--muted2); border-color:var(--border); cursor:not-allowed; opacity:0.5; }
+
+  /* Mobile cards */
+  .doc-cards-mobile { display:none; }
+  .doc-mobile-card  { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:10px; }
+  .doc-mobile-top   { display:flex; justify-content:space-between; align-items:center; }
+
+  @media (max-width:768px) {
+    .doc-table-wrap  { display:none; }
+    .doc-cards-mobile{ display:block; }
+    .ic-form-grid-2  { grid-template-columns:1fr; }
+  }
+
+  @media (max-width:768px) {
+    .pd-summary-grid { grid-template-columns:1fr 1fr; }
+    .pd-fields-grid  { grid-template-columns:1fr; }
+    .pd-header       { flex-direction:column; }
+    .pd-header-left  { flex-direction:column; }
+  }
+  @media (max-width:480px) {
+    .pd-summary-grid { grid-template-columns:1fr; }
+  }
+</style>
+<script>
+function confirmArchive(id, name) {
+  if (confirm('Archive "' + name + '"?\n\nThis policy will be moved to Archive. It can be restored later.')) {
+    document.getElementById('archiveFormDetail').submit();
+  }
+}
+</script>
+
+<script>
+function toggleUploadForm() {
+  const form = document.getElementById('uploadForm');
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  if (form.style.display === 'block') {
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+function showFileInfo(input) {
+  const info = document.getElementById('fileInfo');
+  if (input.files && input.files[0]) {
+    const file = input.files[0];
+    const size = file.size > 1024*1024
+      ? (file.size/(1024*1024)).toFixed(1) + ' MB'
+      : (file.size/1024).toFixed(0) + ' KB';
+    info.textContent = file.name + ' (' + size + ')';
+    info.style.color = file.size > 25*1024*1024 ? 'var(--down)' : 'var(--up)';
+  }
+}
+
+function confirmDeleteDoc(id, name) {
+  if (confirm(
+    'Delete Document?
+
+' +
+    '"' + name + '"
+
+' +
+    'This permanently removes the file from local storage.
+
+' +
+    'This action cannot be undone.'
+  )) {
+    document.getElementById('delDocForm' + id).submit();
+  }
+}
+
+document.getElementById('docUploadForm') && document.getElementById('docUploadForm')
+  .addEventListener('submit', function() {
+    const btn = document.getElementById('uploadSubmitBtn');
+    btn.textContent = 'Uploading…';
+    btn.disabled = true;
+  });
+</script>
+{% endblock %}

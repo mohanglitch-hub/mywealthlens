@@ -18,6 +18,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = "mywealthlens-dev-secret-change-in-production"
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///mywealthlens.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB upload limit
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
