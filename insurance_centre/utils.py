@@ -74,10 +74,20 @@ def days_until(target_date):
 
 
 def format_date(d, fmt="%d %b %Y"):
-    """Format a date object for display. Returns '—' if None."""
+    """Format a date or datetime object for display. Returns '—' if None."""
     if not d:
         return "—"
-    return d.strftime(fmt)
+    try:
+        # Handle both date and datetime objects
+        from datetime import datetime as _dt, date as _date
+        if isinstance(d, _dt):
+            return d.strftime(fmt)
+        if isinstance(d, _date):
+            return d.strftime(fmt)
+        # Try parsing string
+        return _dt.strptime(str(d)[:10], "%Y-%m-%d").strftime(fmt)
+    except Exception:
+        return str(d)
 
 
 def annual_premium(amount, frequency):
@@ -117,3 +127,66 @@ def renewal_badge(policy):
         "unknown":  ("No Date",   "muted"),
     }
     return badges.get(status, ("—", "muted"))
+
+
+# ── Category URL Slugs ────────────────────────────────────────────────────────
+
+CATEGORY_SLUGS = {
+    "life":     "Life Insurance",
+    "health":   "Health Insurance",
+    "motor":    "Motor Insurance",
+    "property": "Property Insurance",
+    "general":  "General Insurance",
+}
+
+SLUG_FROM_CATEGORY = {v: k for k, v in CATEGORY_SLUGS.items()}
+
+
+def category_to_slug(category):
+    """Convert category name to URL slug. e.g. 'Life Insurance' → 'life'"""
+    return SLUG_FROM_CATEGORY.get(category, category.lower().replace(" ", "-"))
+
+
+def slug_to_category(slug):
+    """Convert URL slug to category name. e.g. 'life' → 'Life Insurance'"""
+    return CATEGORY_SLUGS.get(slug, slug)
+
+
+# ── Document Preview ──────────────────────────────────────────────────────────
+
+PREVIEWABLE_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+
+def is_previewable(filename):
+    """Check if a file can be previewed in browser."""
+    import os
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in PREVIEWABLE_EXTENSIONS
+
+
+def get_preview_mimetype(filename):
+    """Return MIME type for inline preview."""
+    import os
+    ext = os.path.splitext(filename)[1].lower()
+    mimetypes = {
+        ".pdf":  "application/pdf",
+        ".jpg":  "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png":  "image/png",
+    }
+    return mimetypes.get(ext, "application/octet-stream")
+
+
+def secure_file_path(file_path, policy_id):
+    """
+    Validate that file_path is within the expected policy documents directory.
+    Prevents directory traversal attacks.
+    """
+    import os
+    from flask import current_app
+    expected_base = os.path.join(
+        current_app.instance_path, "documents", "insurance", str(policy_id)
+    )
+    # Resolve both paths to absolute
+    real_path     = os.path.realpath(file_path)
+    real_base     = os.path.realpath(expected_base)
+    return real_path.startswith(real_base)

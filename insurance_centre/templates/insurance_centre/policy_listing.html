@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}Manage Policies — Insurance Centre{% endblock %}
+
+{% block content %}
+<div class="ic-wrap">
+
+  <!-- ── Breadcrumb ── -->
+  <div class="ic-breadcrumb">
+    <a href="/insurance-centre" class="ic-breadcrumb-link">← Insurance Centre</a>
+    <span class="ic-breadcrumb-sep">›</span>
+    <span class="ic-breadcrumb-current">Manage Policies</span>
+  </div>
+
+  <!-- ── Header ── -->
+  <div class="ic-header">
+    <div>
+      <h1 class="ic-title">Manage Policies</h1>
+      <p class="ic-subtitle">View and manage all your insurance policies in one place.</p>
+    </div>
+    <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <a href="/insurance-centre/archive" class="ic-btn-secondary">🗄 Archive</a>
+      <a href="/insurance-centre/add" class="ic-btn-primary">+ Add Policy</a>
+    </div>
+  </div>
+
+  {% if policies %}
+
+  <!-- ── Policy Count ── -->
+  <div style="font-size:0.85rem; color:var(--muted);">
+    {{ policies|length }} active polic{{ 'y' if policies|length == 1 else 'ies' }}
+  </div>
+
+  <!-- ── Policy Cards ── -->
+  <div class="pl-grid">
+    {% for p in policies %}
+    {% set days = p.days_to_renewal %}
+    <div class="pl-card {% if p.renewal_status == 'overdue' %}pl-card--overdue
+                         {% elif p.renewal_status == 'due_soon' %}pl-card--warning{% endif %}">
+
+      <!-- Card Top -->
+      <div class="pl-card-top">
+        <div class="pl-icon-wrap">
+          <span class="pl-icon">{{ category_icons.get(p.category, '📋') }}</span>
+        </div>
+        <div class="pl-badges">
+          <span class="ic-badge ic-badge-{{ 'up' if p.status == 'Active' else 'muted' }}">
+            {{ p.status }}
+          </span>
+          <span class="ic-badge ic-badge-accent">{{ p.category }}</span>
+        </div>
+      </div>
+
+      <!-- Policy Name & Type -->
+      <div class="pl-type">{{ p.display_type }}</div>
+      <div class="pl-insurer">{{ p.insurer }}</div>
+      {% if p.policy_name %}
+      <div class="pl-policy-name">{{ p.policy_name }}</div>
+      {% endif %}
+
+      <!-- Key Details -->
+      <div class="pl-details">
+        {% if p.policy_holder %}
+        <div class="pl-detail-row">
+          <span class="pl-detail-label">Policy Holder</span>
+          <span class="pl-detail-value">{{ p.policy_holder }}</span>
+        </div>
+        {% endif %}
+        {% if p.policy_number %}
+        <div class="pl-detail-row">
+          <span class="pl-detail-label">Policy No.</span>
+          <span class="pl-detail-value">{{ p.policy_number }}</span>
+        </div>
+        {% endif %}
+        <div class="pl-detail-row">
+          <span class="pl-detail-label">Coverage</span>
+          <span class="pl-detail-value pl-coverage">{{ format_inr(p.sum_assured) }}</span>
+        </div>
+        <div class="pl-detail-row">
+          <span class="pl-detail-label">Premium</span>
+          <span class="pl-detail-value">
+            {{ format_inr(p.premium_amount) }} / {{ p.premium_frequency }}
+          </span>
+        </div>
+        {% if p.renewal_date %}
+        <div class="pl-detail-row">
+          <span class="pl-detail-label">Renewal</span>
+          <span class="pl-detail-value pl-renewal-{{ p.renewal_status }}">
+            {{ format_date(p.renewal_date) }}
+            {% if p.renewal_status == 'overdue' %} ⚠ Overdue
+            {% elif p.renewal_status == 'due_soon' %} 🔔 Due Soon
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Actions -->
+      <div class="pl-actions">
+        <a href="/insurance-centre/policy/{{ p.id }}" class="pl-view-btn">View →</a>
+        <a href="/insurance-centre/policy/{{ p.id }}/edit" class="pl-edit-btn">Edit</a>
+        <button class="pl-archive-btn"
+          onclick="confirmArchive({{ p.id }}, '{{ p.display_type }}')">
+          Archive
+        </button>
+      </div>
+
+      <!-- Hidden archive form -->
+      <form method="POST" action="/insurance-centre/policy/{{ p.id }}/archive"
+            id="archiveForm{{ p.id }}" style="display:none;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <!-- ── Empty State ── -->
+  <div class="ic-empty-state">
+    <div class="ic-empty-icon">🛡️</div>
+    <h2 class="ic-empty-title">No insurance policies found</h2>
+    <p class="ic-empty-desc">
+      Add your first policy to begin managing your insurance portfolio.
+    </p>
+    <a href="/insurance-centre/add" class="ic-btn-primary ic-btn-lg">
+      Add Policy
+    </a>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .ic-wrap         { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
+  .ic-breadcrumb   { display:flex; align-items:center; gap:8px; }
+  .ic-breadcrumb-link { color:var(--muted); text-decoration:none; font-size:0.85rem; transition:color 0.2s; }
+  .ic-breadcrumb-link:hover { color:var(--accent); }
+  .ic-breadcrumb-sep { color:var(--border); }
+  .ic-breadcrumb-current { font-size:0.85rem; color:var(--text2); }
+  .ic-header       { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; }
+  .ic-title        { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+  .ic-subtitle     { font-size:0.875rem; color:var(--muted); }
+  .ic-btn-primary  { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:0.875rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; text-decoration:none; display:inline-block; transition:opacity 0.2s; }
+  .ic-btn-primary:hover { opacity:0.88; }
+  .ic-btn-lg       { padding:12px 28px; font-size:0.95rem; }
+
+  /* Policy Grid */
+  .pl-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:18px; }
+
+  /* Policy Card */
+  .pl-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:14px; padding:22px;
+    box-shadow:var(--shadow-sm);
+    display:flex; flex-direction:column; gap:12px;
+    transition:box-shadow 0.2s, transform 0.15s, border-color 0.2s;
+  }
+  .pl-card:hover       { box-shadow:var(--shadow-md); transform:translateY(-2px); border-color:var(--accent); }
+  .pl-card--overdue    { border-color:var(--down); }
+  .pl-card--warning    { border-color:var(--warning); }
+
+  .pl-card-top    { display:flex; justify-content:space-between; align-items:flex-start; }
+  .pl-icon-wrap   { width:44px; height:44px; border-radius:10px; background:var(--accent-bg); display:flex; align-items:center; justify-content:center; }
+  .pl-icon        { font-size:1.4rem; }
+  .pl-badges      { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
+
+  .pl-type        { font-size:1rem; font-weight:700; color:var(--text); }
+  .pl-insurer     { font-size:0.85rem; color:var(--accent); font-weight:600; }
+  .pl-policy-name { font-size:0.78rem; color:var(--muted); }
+
+  .pl-details     { display:flex; flex-direction:column; gap:6px; padding:12px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .pl-detail-row  { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px; }
+  .pl-detail-label{ font-size:0.75rem; color:var(--muted); }
+  .pl-detail-value{ font-size:0.82rem; color:var(--text2); font-weight:500; text-align:right; }
+  .pl-coverage    { font-family:var(--font-data); color:var(--accent); font-weight:700; }
+  .pl-renewal-overdue  { color:var(--down); font-weight:600; }
+  .pl-renewal-due_soon { color:var(--warning); font-weight:600; }
+  .pl-renewal-active   { color:var(--muted); }
+  .pl-renewal-upcoming { color:var(--text2); }
+
+  .pl-view-btn {
+    display:block; text-align:center;
+    background:var(--accent-bg); color:var(--accent);
+    border:1px solid var(--accent); border-radius:8px;
+    padding:9px; font-size:0.82rem; font-weight:700;
+    text-decoration:none; margin-top:auto;
+    transition:all 0.2s;
+  }
+  .pl-view-btn:hover { background:var(--accent); color:#fff; }
+
+  /* Badges */
+  .ic-badge        { display:inline-block; padding:3px 10px; border-radius:12px; font-size:0.7rem; font-weight:600; border:1px solid; }
+  .ic-badge-up     { background:var(--up-bg);      color:var(--up);      border-color:var(--up); }
+  .ic-badge-accent { background:var(--accent-bg);  color:var(--accent);  border-color:var(--accent); }
+  .ic-badge-muted  { background:var(--surface2);   color:var(--muted);   border-color:var(--border); }
+  .ic-badge-down   { background:var(--down-bg);    color:var(--down);    border-color:var(--down); }
+
+  /* Empty state */
+  .ic-empty-state  { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:60px 32px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .ic-empty-icon   { font-size:3.5rem; }
+  .ic-empty-title  { font-size:1.2rem; font-weight:700; color:var(--text); }
+  .ic-empty-desc   { font-size:0.875rem; color:var(--muted); max-width:400px; line-height:1.6; }
+
+  @media (max-width:1024px) { .pl-grid { grid-template-columns:repeat(2, 1fr); } }
+  @media (max-width:640px)  { .pl-grid { grid-template-columns:1fr; } }
+
+  .pl-actions    { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; }
+  .pl-view-btn   { flex:1; text-align:center; background:var(--accent-bg); color:var(--accent); border:1px solid var(--accent); border-radius:8px; padding:9px; font-size:0.82rem; font-weight:700; text-decoration:none; transition:all 0.2s; }
+  .pl-view-btn:hover { background:var(--accent); color:#fff; }
+  .pl-edit-btn   { flex:1; text-align:center; background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:9px; font-size:0.82rem; font-weight:500; text-decoration:none; transition:all 0.2s; }
+  .pl-edit-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .pl-archive-btn{ flex:1; background:none; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:9px; font-size:0.82rem; font-family:var(--font-ui); cursor:pointer; transition:all 0.2s; }
+  .pl-archive-btn:hover { border-color:var(--down); color:var(--down); }
+  .ic-btn-secondary { background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:10px 16px; font-size:0.82rem; font-weight:500; text-decoration:none; transition:all 0.2s; }
+  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+</style>
+
+<script>
+function confirmArchive(id, name) {
+  if (confirm('Archive "' + name + '"?\n\nThis policy will be moved to Archive. It can be restored later.')) {
+    document.getElementById('archiveForm' + id).submit();
+  }
+}
+</script>
+{% endblock %}

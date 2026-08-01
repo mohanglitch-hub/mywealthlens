@@ -31,10 +31,12 @@ def log_timeline(db, policy_id, user_id, event_type, description):
 
 # ── Policy Services ───────────────────────────────────────────────────────────
 
-def create_policy(db, user_id, data):
+def create_policy(db, user_id, data, multi_data=None):
     """
-    Create a new insurance policy.
-    data: dict of form fields
+    Create a new insurance policy with related records.
+    data:       flat dict (from request.form.to_dict())
+    multi_data: multi-value dict (from request.form)
+                used for nominees, members, addons (list fields)
     Returns: (policy, None) on success, (None, error_message) on failure
     """
     errors = validate_policy(data, user_id)
@@ -50,8 +52,8 @@ def create_policy(db, user_id, data):
         policy_name       = data.get("policy_name", "").strip() or None,
         policy_number     = data.get("policy_number", "").strip() or None,
         policy_holder     = data.get("policy_holder", "").strip() or None,
-        sum_assured       = float(data.get("sum_assured", 0)),
-        premium_amount    = float(data.get("premium_amount", 0)),
+        sum_assured       = float(data.get("sum_assured", 0) or 0),
+        premium_amount    = float(data.get("premium_amount", 0) or 0),
         premium_frequency = data.get("premium_frequency", PremiumFrequency.YEARLY),
         status            = data.get("status", PolicyStatus.ACTIVE),
         start_date        = _parse_date(data.get("start_date")),
@@ -64,8 +66,60 @@ def create_policy(db, user_id, data):
         notes             = data.get("notes", "").strip() or None,
     )
     db.session.add(policy)
-    db.session.flush()  # get policy.id before commit
+    db.session.flush()  # get policy.id before adding related records
 
+    # ── Nominees (Life Insurance) ──────────────────────────────────
+    if multi_data and data.get("category") == InsuranceCategory.LIFE:
+        names         = multi_data.getlist("nominee_name[]")
+        relationships = multi_data.getlist("nominee_relationship[]")
+        percentages   = multi_data.getlist("nominee_percentage[]")
+        contacts      = multi_data.getlist("nominee_contact[]")
+
+        for i, name in enumerate(names):
+            name = name.strip()
+            if not name:
+                continue
+            pct = percentages[i] if i < len(percentages) else ""
+            db.session.add(InsuranceNominee(
+                policy_id    = policy.id,
+                user_id      = user_id,
+                name         = name,
+                relationship = relationships[i] if i < len(relationships) else "Other",
+                percentage   = float(pct) if pct else None,
+                contact      = contacts[i].strip() if i < len(contacts) else None,
+            ))
+
+    # ── Insured Members (Health Insurance) ────────────────────────
+    if multi_data and data.get("category") == InsuranceCategory.HEALTH:
+        m_names  = multi_data.getlist("member_name[]")
+        m_rels   = multi_data.getlist("member_relationship[]")
+        m_ages   = multi_data.getlist("member_age[]")
+
+        for i, name in enumerate(m_names):
+            name = name.strip()
+            if not name:
+                continue
+            age = m_ages[i] if i < len(m_ages) else ""
+            db.session.add(InsuranceMember(
+                policy_id    = policy.id,
+                user_id      = user_id,
+                member_name  = name,
+                relationship = m_rels[i] if i < len(m_rels) else "Other",
+                age          = int(age) if age and age.isdigit() else None,
+            ))
+
+    # ── Motor Add-ons (Motor Insurance) ───────────────────────────
+    if multi_data and data.get("category") == InsuranceCategory.MOTOR:
+        addons = multi_data.getlist("addons")
+        for addon in addons:
+            if addon.strip():
+                db.session.add(InsuranceAddon(
+                    policy_id  = policy.id,
+                    user_id    = user_id,
+                    addon_name = addon.strip(),
+                ))
+
+    # ── Timeline entry ─────────────────────────────────────────────
     log_timeline(db, policy.id, user_id,
                  TimelineEvent.CREATED,
                  f"Policy created — {policy.category}: {policy.display_type} "
@@ -75,9 +129,10 @@ def create_policy(db, user_id, data):
     return policy, None
 
 
-def update_policy(db, policy, user_id, data):
+def update_policy(db, policy, user_id, data, multi_data=None):
     """
-    Update an existing policy. Logs what changed.
+    Update an existing policy. Logs all changes.
+    Handles nominees, members, addons replacement.
     Returns: (policy, None) on success, (None, error) on failure
     """
     errors = validate_policy(data, user_id, existing_policy_id=policy.id)
@@ -87,56 +142,136 @@ def update_policy(db, policy, user_id, data):
     changes = []
 
     def _track(field, label, formatter=None):
-        old = getattr(policy, field)
+        old_val = getattr(policy, field, None)
         new_raw = data.get(field)
         if new_raw is None:
             return
-        new = float(new_raw) if field in ("sum_assured","premium_amount") else \
-              _parse_date(new_raw) if "date" in field else \
-              new_raw.strip() if isinstance(new_raw, str) else new_raw
-        if str(old) != str(new):
-            old_display = formatter(old) if formatter else old
-            new_display = formatter(new) if formatter else new
-            changes.append(f"{label}: {old_display} → {new_display}")
-            setattr(policy, field, new)
+        if field in ("sum_assured", "premium_amount"):
+            new_val = float(new_raw or 0)
+        elif "date" in field:
+            new_val = _parse_date(new_raw)
+        elif isinstance(new_raw, str):
+            new_val = new_raw.strip() or None
+        else:
+            new_val = new_raw
 
-    fmt_inr = lambda v: f"₹{v:,.0f}" if v else "₹0"
+        if str(old_val or "") != str(new_val or ""):
+            fmt = formatter or (lambda v: v)
+            changes.append(f"{label}: {fmt(old_val)} → {fmt(new_val)}")
+            setattr(policy, field, new_val)
+
+    fmt_inr = lambda v: f"₹{float(v):,.0f}" if v else "₹0"
 
     _track("insurer",          "Insurer")
     _track("policy_name",      "Policy Name")
     _track("policy_number",    "Policy Number")
     _track("policy_holder",    "Policy Holder")
-    _track("sum_assured",      "Sum Assured",  fmt_inr)
-    _track("premium_amount",   "Premium",      fmt_inr)
+    _track("sum_assured",      "Coverage",        fmt_inr)
+    _track("premium_amount",   "Premium",         fmt_inr)
     _track("premium_frequency","Premium Frequency")
     _track("status",           "Status")
     _track("start_date",       "Start Date")
     _track("maturity_date",    "Maturity Date")
     _track("renewal_date",     "Renewal Date")
     _track("expiry_date",      "Expiry Date")
-    _track("next_premium_due", "Next Premium Due")
     _track("vehicle_number",   "Vehicle Number")
     _track("property_name",    "Property Name")
+    _track("agent_name",       "Agent Name")
+    _track("agent_contact",    "Agent Contact")
 
     # Custom type
     if data.get("insurance_type") == "Other (Custom)":
         policy.insurance_type = "Other (Custom)"
-        new_custom = data.get("custom_type","").strip()
-        if new_custom != (policy.custom_type or ""):
+        new_custom = data.get("custom_type", "").strip() or None
+        if new_custom != policy.custom_type:
             changes.append(f"Type: {policy.custom_type} → {new_custom}")
-            policy.custom_type = new_custom or None
+            policy.custom_type = new_custom
+    elif data.get("insurance_type"):
+        if data["insurance_type"] != policy.insurance_type:
+            changes.append(f"Type: {policy.insurance_type} → {data['insurance_type']}")
+        policy.insurance_type = data["insurance_type"]
+        policy.custom_type = None
 
-    # Notes — tracked separately
-    new_notes = data.get("notes","").strip() or None
+    # Notes
+    new_notes = data.get("notes", "").strip() or None
     if new_notes != policy.notes:
         policy.notes = new_notes
-        log_timeline(db, policy.id, user_id,
-                     TimelineEvent.NOTES_UPDATED, "Policy notes updated")
+        log_timeline(db, policy.id, user_id, TimelineEvent.NOTES_UPDATED,
+                     "Policy notes updated")
 
     if changes:
-        log_timeline(db, policy.id, user_id,
-                     TimelineEvent.COVERAGE_UPDATED,
+        log_timeline(db, policy.id, user_id, TimelineEvent.COVERAGE_UPDATED,
                      "Updated: " + "; ".join(changes))
+
+    # ── Replace Nominees (Life) ───────────────────────────────────
+    if multi_data and data.get("category") == InsuranceCategory.LIFE:
+        old_nominees = list(policy.nominees.all())
+        policy.nominees.delete()
+
+        names  = multi_data.getlist("nominee_name[]")
+        rels   = multi_data.getlist("nominee_relationship[]")
+        pcts   = multi_data.getlist("nominee_percentage[]")
+        conts  = multi_data.getlist("nominee_contact[]")
+
+        added = []
+        for i, name in enumerate(names):
+            name = name.strip()
+            if not name:
+                continue
+            pct = pcts[i] if i < len(pcts) else ""
+            db.session.add(InsuranceNominee(
+                policy_id    = policy.id,
+                user_id      = user_id,
+                name         = name,
+                relationship = rels[i] if i < len(rels) else "Other",
+                percentage   = float(pct) if pct else None,
+                contact      = conts[i].strip() if i < len(conts) else None,
+            ))
+            added.append(name)
+
+        if added or old_nominees:
+            log_timeline(db, policy.id, user_id, TimelineEvent.NOMINEE_UPDATED,
+                         f"Nominees updated: {', '.join(added) if added else 'All removed'}")
+
+    # ── Replace Members (Health) ──────────────────────────────────
+    if multi_data and data.get("category") == InsuranceCategory.HEALTH:
+        old_members = list(policy.members.all())
+        policy.members.delete()
+
+        m_names = multi_data.getlist("member_name[]")
+        m_rels  = multi_data.getlist("member_relationship[]")
+        m_ages  = multi_data.getlist("member_age[]")
+
+        added = []
+        for i, name in enumerate(m_names):
+            name = name.strip()
+            if not name:
+                continue
+            age = m_ages[i] if i < len(m_ages) else ""
+            db.session.add(InsuranceMember(
+                policy_id    = policy.id,
+                user_id      = user_id,
+                member_name  = name,
+                relationship = m_rels[i] if i < len(m_rels) else "Other",
+                age          = int(age) if age and str(age).isdigit() else None,
+            ))
+            added.append(name)
+
+        if added or old_members:
+            log_timeline(db, policy.id, user_id, TimelineEvent.MEMBER_UPDATED,
+                         f"Members updated: {', '.join(added) if added else 'All removed'}")
+
+    # ── Replace Add-ons (Motor) ───────────────────────────────────
+    if multi_data and data.get("category") == InsuranceCategory.MOTOR:
+        policy.addons.delete()
+        addon_names = multi_data.getlist("addons")
+        for addon in addon_names:
+            if addon.strip():
+                db.session.add(InsuranceAddon(
+                    policy_id=policy.id, user_id=user_id,
+                    addon_name=addon.strip()))
+        log_timeline(db, policy.id, user_id, TimelineEvent.ADDON_UPDATED,
+                     f"Add-ons updated: {', '.join(addon_names) or 'None'}")
 
     db.session.commit()
     return policy, None
@@ -598,3 +733,62 @@ def get_dashboard_data(user_id):
             "has_policies": False,
             "overdue_policies": [], "due_soon_policies": [],
         }
+
+
+# ── Phase 5 Service Methods ───────────────────────────────────────────────────
+
+def get_policy_with_related(policy_id, user_id):
+    """
+    Load a single policy with all related data in one call.
+    Validates ownership. Returns None if not found or unauthorized.
+    """
+    try:
+        policy = InsurancePolicy.query.filter_by(
+            id=policy_id, user_id=user_id
+        ).first()
+        if not policy:
+            return None
+
+        return {
+            "policy":    policy,
+            "nominees":  policy.nominees.all(),
+            "members":   policy.members.all(),
+            "addons":    policy.addons.all(),
+            "documents": policy.documents.order_by(
+                             InsuranceDocument.uploaded_at.desc()).all(),
+            "timeline":  policy.timeline.order_by(
+                             InsuranceTimeline.created_at.desc()).limit(20).all(),
+        }
+    except Exception as e:
+        import logging
+        logging.error(f"get_policy_with_related error: {e}")
+        return None
+
+
+def get_all_active_policies_for_listing(user_id):
+    """
+    Return all active policies for the listing page.
+    Ordered by category then renewal date.
+    Includes only fields needed for list cards — efficient.
+    """
+    try:
+        return (InsurancePolicy.query
+                .filter_by(user_id=user_id, is_archived=False)
+                .order_by(
+                    InsurancePolicy.category.asc(),
+                    InsurancePolicy.renewal_date.asc().nullslast()
+                )
+                .all())
+    except Exception:
+        return []
+
+
+# ── Phase 6: Archive page data ────────────────────────────────────────────────
+
+def get_archived_policy_count(user_id):
+    """Count of archived policies."""
+    try:
+        return InsurancePolicy.query.filter_by(
+            user_id=user_id, is_archived=True).count()
+    except Exception:
+        return 0

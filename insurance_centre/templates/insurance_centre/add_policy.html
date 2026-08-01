@@ -1,0 +1,761 @@
+{% extends "base.html" %}
+{% block title %}{% if is_edit %}Edit Policy{% else %}Add Policy{% endif %} — Insurance Centre{% endblock %}
+
+{% block content %}
+<div class="ic-wrap">
+
+  <!-- ── Breadcrumb ── -->
+  <div class="ic-breadcrumb">
+    <a href="/insurance-centre" class="ic-breadcrumb-link">← Insurance Centre</a>
+    <span class="ic-breadcrumb-sep">›</span>
+    <span class="ic-breadcrumb-current">Add Policy</span>
+  </div>
+
+  <!-- ── Header ── -->
+  <div class="ic-form-header">
+    <h1 class="ic-title">{% if is_edit %}Edit Policy{% else %}Add Insurance Policy{% endif %}</h1>
+    <p class="ic-subtitle">Fill in the details below. Required fields are marked with <span style="color:var(--down);">*</span></p>
+  </div>
+
+  <!-- ── Flash messages ── -->
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+      <div class="ic-alert ic-alert-{{ 'danger' if category == 'error' else category }}">
+        {{ message }}
+      </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form method="POST" action="{% if is_edit %}/insurance-centre/policy/{{ policy.id }}/edit{% else %}/insurance-centre/add{% endif %}" id="addPolicyForm" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <!-- ── STEP 1: Category & Type ── -->
+    <div class="ic-form-card">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">1</span> Policy Category & Type
+      </div>
+
+      <div class="ic-form-grid-2">
+        <div class="ic-field">
+          <label class="ic-label">Insurance Category <span class="ic-required">*</span></label>
+          <select name="category" id="categorySelect" class="ic-select" required
+                  onchange="onCategoryChange(this.value)">
+            <option value="">— Select Category —</option>
+            {% for cat in categories | sort %}
+            <option value="{{ cat }}" {% if request.form.get('category') == cat %}selected{% endif %}>
+              {{ category_icons.get(cat, '📋') }} {{ cat }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="ic-field">
+          <label class="ic-label">Insurance Type <span class="ic-required">*</span></label>
+          <select name="insurance_type" id="typeSelect" class="ic-select" required
+                  onchange="onTypeChange(this.value)">
+            <option value="">— Select Category First —</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Custom type field — shown only when Other selected -->
+      <div class="ic-field" id="customTypeField" style="display:none;">
+        <label class="ic-label">Custom Insurance Type <span class="ic-required">*</span></label>
+        <input type="text" name="custom_type" id="customTypeInput" class="ic-input"
+               placeholder="e.g. Pet Insurance, Crop Insurance"
+               value="{{ request.form.get('custom_type', '') }}" />
+      </div>
+    </div>
+
+    <!-- ── STEP 2: Core Policy Details ── -->
+    <div class="ic-form-card">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">2</span> Policy Details
+      </div>
+
+      <div class="ic-form-grid-2">
+        <div class="ic-field">
+          <label class="ic-label">Insurance Company <span class="ic-required">*</span></label>
+          <input type="text" name="insurer" class="ic-input"
+                 placeholder="e.g. LIC, HDFC Ergo, Star Health"
+                 value="{{ request.form.get('insurer', '') }}" required />
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Policy Name</label>
+          <input type="text" name="policy_name" class="ic-input"
+                 placeholder="e.g. Jeevan Anand, Optima Restore"
+                 value="{{ request.form.get('policy_name', '') }}" />
+        </div>
+      </div>
+
+      <div class="ic-form-grid-2">
+        <div class="ic-field">
+          <label class="ic-label">Policy Number</label>
+          <input type="text" name="policy_number" class="ic-input"
+                 placeholder="e.g. 123456789"
+                 value="{{ request.form.get('policy_number', '') }}" />
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Policy Holder Name</label>
+          <input type="text" name="policy_holder" class="ic-input"
+                 placeholder="Name on the policy"
+                 value="{{ request.form.get('policy_holder', '') }}" />
+        </div>
+      </div>
+
+      <!-- Vehicle Number — Motor only -->
+      <div class="ic-field ic-motor-only" style="display:none;">
+        <label class="ic-label">Vehicle Number</label>
+        <input type="text" name="vehicle_number" class="ic-input"
+               placeholder="e.g. KA01AB1234"
+               value="{{ request.form.get('vehicle_number', '') }}" />
+      </div>
+
+      <!-- Property Name — Property only -->
+      <div class="ic-field ic-property-only" style="display:none;">
+        <label class="ic-label">Property Name / Address</label>
+        <input type="text" name="property_name" class="ic-input"
+               placeholder="e.g. Flat 4B, Prestige Tower, Koramangala"
+               value="{{ request.form.get('property_name', '') }}" />
+      </div>
+
+      <!-- Property Type — Property only -->
+      <div class="ic-field ic-property-only" style="display:none;">
+        <label class="ic-label">Property Type</label>
+        <select name="property_type" class="ic-select">
+          <option value="">— Select —</option>
+          {% for pt in ['Apartment','Commercial','House','Land','Office','Shop','Other'] %}
+          <option value="{{ pt }}" {% if request.form.get('property_type') == pt %}selected{% endif %}>{{ pt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- Agent Details — Life only (inline in Step 2) -->
+    <div class="ic-form-grid-2 ic-life-only" style="display:none;" id="agentFieldsInline">
+      <div class="ic-field">
+        <label class="ic-label">Agent Name</label>
+        <input type="text" name="agent_name" class="ic-input"
+               placeholder="e.g. Ramesh Kumar"
+               value="{% if is_edit and policy.agent_name %}{{ policy.agent_name }}{% else %}{{ request.form.get('agent_name', '') }}{% endif %}" />
+      </div>
+      <div class="ic-field">
+        <label class="ic-label">Agent Contact</label>
+        <input type="text" name="agent_contact" class="ic-input"
+               placeholder="+91 98765 43210"
+               value="{% if is_edit and policy.agent_contact %}{{ policy.agent_contact }}{% else %}{{ request.form.get('agent_contact', '') }}{% endif %}" />
+      </div>
+    </div>
+
+    <!-- ── STEP 3: Coverage & Premium ── -->
+    <div class="ic-form-card">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">3</span> Coverage & Premium
+      </div>
+
+      <div class="ic-form-grid-3">
+        <div class="ic-field">
+          <label class="ic-label">Sum Assured / Cover (₹) <span class="ic-required">*</span></label>
+          <input type="number" name="sum_assured" class="ic-input"
+                 placeholder="e.g. 1000000" min="0" step="1"
+                 value="{{ request.form.get('sum_assured', '') }}" required />
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Premium Amount (₹) <span class="ic-required">*</span></label>
+          <input type="number" name="premium_amount" class="ic-input"
+                 placeholder="e.g. 15000" min="0" step="0.01"
+                 value="{{ request.form.get('premium_amount', '') }}" required />
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Premium Frequency <span class="ic-required">*</span></label>
+          <select name="premium_frequency" class="ic-select" required>
+            {% for freq in premium_frequencies %}
+            <option value="{{ freq }}"
+              {% if request.form.get('premium_frequency', 'Yearly') == freq %}selected{% endif %}>
+              {{ freq }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <!-- General Insurance Policy Type -->
+      <div class="ic-field ic-general-only" style="display:none;">
+        <label class="ic-label">Policy Type</label>
+        <select name="policy_type" class="ic-select">
+          <option value="Recurring" {% if request.form.get('policy_type') == 'Recurring' %}selected{% endif %}>Recurring</option>
+          <option value="One-Time" {% if request.form.get('policy_type') == 'One-Time' %}selected{% endif %}>One-Time</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ── STEP 4: Status & Dates ── -->
+    <div class="ic-form-card">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">4</span> Status & Dates
+      </div>
+
+      <div class="ic-form-grid-2">
+        <div class="ic-field">
+          <label class="ic-label">Policy Status</label>
+          <select name="status" class="ic-select">
+            {% for s in policy_statuses %}
+            {% if s != 'Archived' %}
+            <option value="{{ s }}"
+              {% if request.form.get('status', 'Active') == s %}selected{% endif %}>
+              {{ s }}
+            </option>
+            {% endif %}
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Policy Start Date</label>
+          <input type="date" name="start_date" class="ic-input"
+                 value="{{ request.form.get('start_date', '') }}" />
+        </div>
+      </div>
+
+      <div class="ic-form-grid-3">
+        <!-- Maturity Date — Life only -->
+        <div class="ic-field ic-life-only" style="display:none;">
+          <label class="ic-label">Maturity Date</label>
+          <input type="date" name="maturity_date" class="ic-input"
+                 value="{{ request.form.get('maturity_date', '') }}" />
+        </div>
+
+        <!-- Renewal Date — Health, Motor, Property, General -->
+        <div class="ic-field ic-no-life" style="display:none;">
+          <label class="ic-label">Renewal Date</label>
+          <input type="date" name="renewal_date" class="ic-input"
+                 value="{{ request.form.get('renewal_date', '') }}" />
+        </div>
+
+        <!-- Expiry Date — General -->
+        <div class="ic-field ic-general-only" style="display:none;">
+          <label class="ic-label">Expiry Date</label>
+          <input type="date" name="expiry_date" class="ic-input"
+                 value="{{ request.form.get('expiry_date', '') }}" />
+        </div>
+
+        <!-- Start Date for General -->
+        <div class="ic-field ic-general-only" style="display:none;">
+          <label class="ic-label">Policy Start Date</label>
+          <input type="date" name="start_date_general" class="ic-input"
+                 value="{{ request.form.get('start_date_general', '') }}" />
+        </div>
+      </div>
+
+      <!-- Health: Cashless -->
+      <div class="ic-field ic-health-only" style="display:none;">
+        <label class="ic-label">Cashless Available</label>
+        <select name="cashless_available" class="ic-select">
+          <option value="yes" {% if request.form.get('cashless_available') == 'yes' %}selected{% endif %}>Yes</option>
+          <option value="no"  {% if request.form.get('cashless_available') == 'no'  %}selected{% endif %}>No</option>
+        </select>
+      </div>
+
+      <!-- Motor: Claim History -->
+      <div class="ic-field ic-motor-only" style="display:none;">
+        <label class="ic-label">Claim History</label>
+        <textarea name="claim_history" class="ic-textarea" rows="2"
+                  placeholder="e.g. 1 claim in 2023 for ₹25,000">{{ request.form.get('claim_history', '') }}</textarea>
+      </div>
+    </div>
+
+    <!-- ── STEP 5: Agent Details (Life only) ── -->
+    <div class="ic-form-card ic-life-only" style="display:none;">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">5</span> Agent Details
+      </div>
+      <div class="ic-form-grid-2">
+        <div class="ic-field">
+          <label class="ic-label">Agent Name</label>
+          <input type="text" name="agent_name" class="ic-input"
+                 placeholder="e.g. Ramesh Kumar"
+                 value="{{ request.form.get('agent_name', '') }}" />
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Agent Contact</label>
+          <input type="text" name="agent_contact" class="ic-input"
+                 placeholder="e.g. +91 98765 43210"
+                 value="{{ request.form.get('agent_contact', '') }}" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── STEP 6: Nominees (Life only) ── -->
+    <div class="ic-form-card ic-life-only" style="display:none;" id="nomineesSection">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">6</span> Nominees
+        <button type="button" class="ic-btn-add" onclick="addNominee()">+ Add Nominee</button>
+      </div>
+      <div id="nomineesList">
+        {% if is_edit and existing_nominees %}
+          {% for n in existing_nominees %}
+          <div class="ic-sub-card" data-nominee>
+            <div class="ic-sub-card-header">
+              <span class="ic-sub-card-title">Nominee {{ loop.index }}</span>
+              <button type="button" class="ic-btn-remove" onclick="removeItem(this,'nominee')">✕ Remove</button>
+            </div>
+            <div class="ic-form-grid-2">
+              <div class="ic-field">
+                <label class="ic-label">Full Name <span class="ic-required">*</span></label>
+                <input type="text" name="nominee_name[]" class="ic-input" value="{{ n.name }}" required />
+              </div>
+              <div class="ic-field">
+                <label class="ic-label">Relationship <span class="ic-required">*</span></label>
+                <select name="nominee_relationship[]" class="ic-select" required>
+                  {% for rel in nominee_relations %}
+                  <option value="{{ rel }}" {% if n.relationship == rel %}selected{% endif %}>{{ rel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="ic-form-grid-2">
+              <div class="ic-field">
+                <label class="ic-label">Percentage (%)</label>
+                <input type="number" name="nominee_percentage[]" class="ic-input"
+                       value="{{ n.percentage or '' }}" min="0" max="100" step="0.01" />
+              </div>
+              <div class="ic-field">
+                <label class="ic-label">Contact Number</label>
+                <input type="text" name="nominee_contact[]" class="ic-input" value="{{ n.contact or '' }}" />
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+      <div id="nomineeEmpty" class="ic-hint" {% if is_edit and existing_nominees %}style="display:none;"{% endif %}>
+        No nominees added yet. Click "+ Add Nominee" to add.
+      </div>
+    </div>
+
+    <!-- ── STEP 6: Insured Members (Health only) ── -->
+    <div class="ic-form-card ic-health-only" style="display:none;" id="membersSection">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">6</span> Insured Members
+        <button type="button" class="ic-btn-add" onclick="addMember()">+ Add Member</button>
+      </div>
+      <div id="membersList">
+        {% if is_edit and existing_members %}
+          {% for m in existing_members %}
+          <div class="ic-sub-card" data-member>
+            <div class="ic-sub-card-header">
+              <span class="ic-sub-card-title">Member {{ loop.index }}</span>
+              <button type="button" class="ic-btn-remove" onclick="removeItem(this,'member')">✕ Remove</button>
+            </div>
+            <div class="ic-form-grid-3">
+              <div class="ic-field">
+                <label class="ic-label">Member Name <span class="ic-required">*</span></label>
+                <input type="text" name="member_name[]" class="ic-input" value="{{ m.member_name }}" required />
+              </div>
+              <div class="ic-field">
+                <label class="ic-label">Relationship <span class="ic-required">*</span></label>
+                <select name="member_relationship[]" class="ic-select" required>
+                  {% for rel in member_relations %}
+                  <option value="{{ rel }}" {% if m.relationship == rel %}selected{% endif %}>{{ rel }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="ic-field">
+                <label class="ic-label">Age</label>
+                <input type="number" name="member_age[]" class="ic-input" value="{{ m.age or '' }}" min="0" max="120" />
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+      <div id="memberEmpty" class="ic-hint" {% if is_edit and existing_members %}style="display:none;"{% endif %}>
+        No members added yet. Click "+ Add Member" to add.
+      </div>
+    </div>
+
+    <!-- ── STEP 6: Motor Add-ons ── -->
+    <div class="ic-form-card ic-motor-only" style="display:none;">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">6</span> Motor Add-ons
+      </div>
+      <div class="ic-addon-grid">
+        {% for addon in motor_addons %}
+        <label class="ic-checkbox-label">
+          <input type="checkbox" name="addons" value="{{ addon }}"
+                 {% if addon in request.form.getlist('addons') %}checked{% endif %} />
+          <span>{{ addon }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ── STEP 7: Notes ── -->
+    <div class="ic-form-card">
+      <div class="ic-form-section-title">
+        <span class="ic-step-badge">7</span> Additional Notes
+      </div>
+      <div class="ic-field">
+        <label class="ic-label">Notes</label>
+        <textarea name="notes" class="ic-textarea" rows="3"
+                  placeholder="Any additional information about this policy...">{{ request.form.get('notes', '') }}</textarea>
+      </div>
+    </div>
+
+    <!-- ── Form Actions ── -->
+    <div class="ic-form-actions">
+      <a href="/insurance-centre" class="ic-btn-cancel">Cancel</a>
+      <button type="submit" class="ic-btn-submit" id="submitBtn">
+        {% if is_edit %}Update Policy{% else %}Save Policy{% endif %}
+      </button>
+    </div>
+
+  </form>
+</div>
+
+<!-- ── Nominee Template ── -->
+<template id="nomineeTemplate">
+  <div class="ic-sub-card" data-nominee>
+    <div class="ic-sub-card-header">
+      <span class="ic-sub-card-title">Nominee</span>
+      <button type="button" class="ic-btn-remove" onclick="removeItem(this, 'nominee')">✕ Remove</button>
+    </div>
+    <div class="ic-form-grid-2">
+      <div class="ic-field">
+        <label class="ic-label">Full Name <span class="ic-required">*</span></label>
+        <input type="text" name="nominee_name[]" class="ic-input" placeholder="e.g. Priya Sharma" required />
+      </div>
+      <div class="ic-field">
+        <label class="ic-label">Relationship <span class="ic-required">*</span></label>
+        <select name="nominee_relationship[]" class="ic-select" required>
+          <option value="">— Select —</option>
+          {% for rel in nominee_relations %}
+          <option value="{{ rel }}">{{ rel }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="ic-form-grid-2">
+      <div class="ic-field">
+        <label class="ic-label">Percentage (%)</label>
+        <input type="number" name="nominee_percentage[]" class="ic-input"
+               placeholder="e.g. 50" min="0" max="100" step="0.01" />
+      </div>
+      <div class="ic-field">
+        <label class="ic-label">Contact Number</label>
+        <input type="text" name="nominee_contact[]" class="ic-input" placeholder="+91 98765 43210" />
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- ── Member Template ── -->
+<template id="memberTemplate">
+  <div class="ic-sub-card" data-member>
+    <div class="ic-sub-card-header">
+      <span class="ic-sub-card-title">Insured Member</span>
+      <button type="button" class="ic-btn-remove" onclick="removeItem(this, 'member')">✕ Remove</button>
+    </div>
+    <div class="ic-form-grid-3">
+      <div class="ic-field">
+        <label class="ic-label">Member Name <span class="ic-required">*</span></label>
+        <input type="text" name="member_name[]" class="ic-input" placeholder="e.g. Mohan Sharma" required />
+      </div>
+      <div class="ic-field">
+        <label class="ic-label">Relationship <span class="ic-required">*</span></label>
+        <select name="member_relationship[]" class="ic-select" required>
+          <option value="">— Select —</option>
+          {% for rel in member_relations %}
+          <option value="{{ rel }}">{{ rel }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ic-field">
+        <label class="ic-label">Age</label>
+        <input type="number" name="member_age[]" class="ic-input" placeholder="e.g. 35" min="0" max="120" />
+      </div>
+    </div>
+  </div>
+</template>
+
+<style>
+  .ic-wrap           { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
+  .ic-breadcrumb     { display:flex; align-items:center; gap:8px; }
+  .ic-breadcrumb-link{ color:var(--muted); text-decoration:none; font-size:0.85rem; transition:color 0.2s; }
+  .ic-breadcrumb-link:hover { color:var(--accent); }
+  .ic-breadcrumb-sep { color:var(--border); }
+  .ic-breadcrumb-current { font-size:0.85rem; color:var(--text2); }
+
+  .ic-form-header    { margin-bottom:4px; }
+  .ic-title          { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+  .ic-subtitle       { font-size:0.875rem; color:var(--muted); }
+
+  .ic-alert          { padding:12px 16px; border-radius:8px; font-size:0.875rem; border:1px solid; }
+  .ic-alert-danger   { background:var(--down-bg); border-color:var(--down); color:var(--down); }
+  .ic-alert-success  { background:var(--up-bg); border-color:var(--up); color:var(--up); }
+
+  .ic-form-card      { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); }
+
+  .ic-form-section-title {
+    font-size:0.9rem; font-weight:700; color:var(--text);
+    margin-bottom:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .ic-step-badge {
+    width:24px; height:24px; border-radius:50%;
+    background:var(--accent); color:#fff;
+    font-size:0.75rem; font-weight:700;
+    display:inline-flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+
+  .ic-form-grid-2    { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  .ic-form-grid-3    { display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+  .ic-form-grid-2:last-child, .ic-form-grid-3:last-child { margin-bottom:0; }
+
+  .ic-field          { display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+  .ic-field:last-child{ margin-bottom:0; }
+  .ic-label          { font-size:0.78rem; font-weight:600; color:var(--muted2); letter-spacing:0.06em; text-transform:uppercase; }
+  .ic-required       { color:var(--down); }
+
+  .ic-input, .ic-select, .ic-textarea {
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:11px 14px;
+    color:var(--text); font-family:var(--font-ui); font-size:0.9rem;
+    outline:none; transition:border-color 0.2s, box-shadow 0.2s;
+    width:100%;
+  }
+  .ic-input:focus, .ic-select:focus, .ic-textarea:focus {
+    border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-bg);
+  }
+  .ic-input::placeholder, .ic-textarea::placeholder { color:var(--muted2); }
+  .ic-textarea { resize:vertical; min-height:80px; }
+
+  .ic-hint { font-size:0.8rem; color:var(--muted); font-style:italic; padding:8px 0; }
+
+  /* Add-ons grid */
+  .ic-addon-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:10px; }
+  .ic-checkbox-label {
+    display:flex; align-items:center; gap:10px;
+    padding:12px 14px; background:var(--surface2);
+    border:1px solid var(--border); border-radius:8px;
+    cursor:pointer; font-size:0.875rem; color:var(--text2);
+    transition:border-color 0.2s;
+  }
+  .ic-checkbox-label:hover { border-color:var(--accent); }
+  .ic-checkbox-label input[type="checkbox"] { accent-color:var(--accent); width:16px; height:16px; }
+
+  /* Sub-cards (nominees/members) */
+  .ic-sub-card {
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:10px; padding:18px; margin-bottom:12px;
+  }
+  .ic-sub-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .ic-sub-card-title  { font-size:0.85rem; font-weight:600; color:var(--text2); }
+
+  /* Buttons */
+  .ic-btn-add {
+    background:var(--accent-bg); color:var(--accent);
+    border:1px solid var(--accent); border-radius:6px;
+    padding:6px 14px; font-size:0.78rem; font-weight:600;
+    font-family:var(--font-ui); cursor:pointer; transition:all 0.2s;
+  }
+  .ic-btn-add:hover { background:var(--accent); color:#fff; }
+  .ic-btn-remove {
+    background:none; color:var(--muted); border:1px solid var(--border);
+    border-radius:6px; padding:4px 10px; font-size:0.75rem;
+    font-family:var(--font-ui); cursor:pointer; transition:all 0.2s;
+  }
+  .ic-btn-remove:hover { border-color:var(--down); color:var(--down); }
+
+  .ic-form-actions {
+    display:flex; justify-content:flex-end; gap:12px;
+    padding:8px 0; flex-wrap:wrap;
+  }
+  .ic-btn-cancel {
+    background:var(--surface2); color:var(--text2);
+    border:1px solid var(--border); border-radius:8px;
+    padding:11px 24px; font-size:0.875rem; font-weight:500;
+    text-decoration:none; transition:all 0.2s;
+  }
+  .ic-btn-cancel:hover { border-color:var(--down); color:var(--down); }
+  .ic-btn-submit {
+    background:var(--accent); color:#fff; border:none;
+    border-radius:8px; padding:11px 32px; font-size:0.875rem;
+    font-weight:700; font-family:var(--font-ui); cursor:pointer;
+    transition:opacity 0.2s;
+  }
+  .ic-btn-submit:hover    { opacity:0.88; }
+  .ic-btn-submit:disabled { opacity:0.5; cursor:not-allowed; }
+
+  @media (max-width:768px) {
+    .ic-form-grid-2, .ic-form-grid-3 { grid-template-columns:1fr; }
+    .ic-form-card { padding:16px; }
+  }
+</style>
+
+<script>
+const TYPES = {{ insurance_types_json | safe }};
+
+// ── Category change ───────────────────────────────────────────────
+function onCategoryChange(cat) {
+  const typeSelect = document.getElementById('typeSelect');
+  typeSelect.innerHTML = '<option value="">— Select Type —</option>';
+
+  const types = TYPES[cat] || [];
+  types.forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t; opt.textContent = t;
+    typeSelect.appendChild(opt);
+  });
+
+  // Show/hide category-specific sections
+  const isLife     = cat === 'Life Insurance';
+  const isHealth   = cat === 'Health Insurance';
+  const isMotor    = cat === 'Motor Insurance';
+  const isProperty = cat === 'Property Insurance';
+  const isGeneral  = cat === 'General Insurance';
+
+  toggleClass('.ic-life-only',     isLife);
+  toggleClass('.ic-health-only',   isHealth);
+  toggleClass('.ic-motor-only',    isMotor);
+  toggleClass('.ic-property-only', isProperty);
+  toggleClass('.ic-general-only',  isGeneral);
+  toggleClass('.ic-no-life',       !isLife && cat !== '');
+}
+
+function toggleClass(selector, show) {
+  document.querySelectorAll(selector).forEach(el => {
+    el.style.display = show ? '' : 'none';
+  });
+}
+
+// ── Type change ───────────────────────────────────────────────────
+function onTypeChange(val) {
+  const customField = document.getElementById('customTypeField');
+  const customInput = document.getElementById('customTypeInput');
+  const show = val === 'Other (Custom)';
+  customField.style.display = show ? '' : 'none';
+  customInput.required = show;
+}
+
+// ── Nominees ──────────────────────────────────────────────────────
+let nomineeCount = 0;
+function addNominee() {
+  nomineeCount++;
+  const tmpl  = document.getElementById('nomineeTemplate');
+  const clone = tmpl.content.cloneNode(true);
+  const card  = clone.querySelector('[data-nominee]');
+  card.querySelector('.ic-sub-card-title').textContent = `Nominee ${nomineeCount}`;
+  document.getElementById('nomineesList').appendChild(clone);
+  document.getElementById('nomineeEmpty').style.display = 'none';
+  renumberCards('nominee');
+}
+
+// ── Health Members ────────────────────────────────────────────────
+let memberCount = 0;
+function addMember() {
+  memberCount++;
+  const tmpl  = document.getElementById('memberTemplate');
+  const clone = tmpl.content.cloneNode(true);
+  const card  = clone.querySelector('[data-member]');
+  card.querySelector('.ic-sub-card-title').textContent = `Member ${memberCount}`;
+  document.getElementById('membersList').appendChild(clone);
+  document.getElementById('memberEmpty').style.display = 'none';
+  renumberCards('member');
+}
+
+// ── Remove item ───────────────────────────────────────────────────
+function removeItem(btn, type) {
+  const card = btn.closest('[data-nominee], [data-member]');
+  card.remove();
+  renumberCards(type);
+  const listId = type === 'nominee' ? 'nomineesList' : 'membersList';
+  const emptyId = type === 'nominee' ? 'nomineeEmpty' : 'memberEmpty';
+  if (!document.getElementById(listId).children.length) {
+    document.getElementById(emptyId).style.display = '';
+  }
+}
+
+function renumberCards(type) {
+  const attr = type === 'nominee' ? '[data-nominee]' : '[data-member]';
+  const label = type === 'nominee' ? 'Nominee' : 'Member';
+  document.querySelectorAll(attr).forEach((card, i) => {
+    card.querySelector('.ic-sub-card-title').textContent = `${label} ${i+1}`;
+  });
+}
+
+// ── Nominee % validation ──────────────────────────────────────────
+function validateNomineePercentages() {
+  const inputs = document.querySelectorAll('input[name="nominee_percentage[]"]');
+  let total = 0;
+  inputs.forEach(inp => { total += parseFloat(inp.value) || 0; });
+  if (total > 100) {
+    alert(`Total nominee percentage is ${total}%. It cannot exceed 100%.`);
+    return false;
+  }
+  return true;
+}
+
+// ── Form submit ───────────────────────────────────────────────────
+document.getElementById('addPolicyForm').addEventListener('submit', function(e) {
+  const cat = document.getElementById('categorySelect').value;
+  if (!cat) { e.preventDefault(); alert('Please select an insurance category.'); return; }
+
+  const type = document.getElementById('typeSelect').value;
+  if (!type) { e.preventDefault(); alert('Please select an insurance type.'); return; }
+
+  if (cat === 'Life Insurance' && !validateNomineePercentages()) {
+    e.preventDefault(); return;
+  }
+
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('submitBtn').textContent = 'Saving…';
+});
+
+// ── Restore form state (edit mode or validation failure) ──────────
+window.addEventListener('DOMContentLoaded', function() {
+  {% if is_edit %}
+  // Edit mode — pre-populate from policy object
+  const editCat  = '{{ policy.category }}';
+  const editType = '{{ policy.insurance_type }}';
+  if (editCat) {
+    document.getElementById('categorySelect').value = editCat;
+    onCategoryChange(editCat);
+    setTimeout(function() {
+      document.getElementById('typeSelect').value = editType;
+      onTypeChange(editType);
+      // Pre-check motor addons
+      const existing_addons = {{ existing_addons | tojson }};
+      document.querySelectorAll('input[name="addons"]').forEach(cb => {
+        cb.checked = existing_addons.includes(cb.value);
+      });
+      // Show nominees/members if they exist
+      const nomineesList = document.getElementById('nomineesList');
+      if (nomineesList && nomineesList.children.length > 0) {
+        document.getElementById('nomineeEmpty').style.display = 'none';
+      }
+      const membersList = document.getElementById('membersList');
+      if (membersList && membersList.children.length > 0) {
+        document.getElementById('memberEmpty').style.display = 'none';
+      }
+    }, 50);
+  }
+  {% else %}
+  // Add mode — restore after validation failure
+  const savedCat = '{{ request.form.get("category", "") }}';
+  if (savedCat) {
+    document.getElementById('categorySelect').value = savedCat;
+    onCategoryChange(savedCat);
+    const savedType = '{{ request.form.get("insurance_type", "") }}';
+    if (savedType) {
+      setTimeout(function() {
+        document.getElementById('typeSelect').value = savedType;
+        onTypeChange(savedType);
+      }, 50);
+    }
+  }
+  {% endif %}
+});
+</script>
+{% endblock %}

@@ -250,6 +250,10 @@ class InsurancePolicy(db.Model):
     # ── Notes ────────────────────────────────────────────────────
     notes           = db.Column(db.Text, nullable=True)
 
+    # ── Life Insurance specific ──────────────────────────────────
+    agent_name      = db.Column(db.String(200), nullable=True)
+    agent_contact   = db.Column(db.String(50),  nullable=True)
+
     # ── Search support fields (Motor/Property specific) ──────────
     vehicle_number  = db.Column(db.String(50), nullable=True)
     property_name   = db.Column(db.String(200), nullable=True)
