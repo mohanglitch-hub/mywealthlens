@@ -1,44 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ category }} — Insurance Centre{% endblock %}
-
 {% block content %}
-<div style="max-width:1100px; margin:0 auto;">
-
-  <div style="display:flex; align-items:center; gap:12px; margin-bottom:28px; flex-wrap:wrap;">
-    <a href="/insurance-centre" style="color:var(--muted); text-decoration:none; font-size:0.85rem;">
-      ← Insurance Centre
-    </a>
-    <span style="color:var(--border);">›</span>
-    <span style="font-size:0.85rem; color:var(--text);">{{ category }}</span>
-  </div>
-
-  <div style="text-align:center; padding:60px 32px; background:var(--surface);
-              border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow-sm);">
-    <div style="font-size:3rem; margin-bottom:16px;">
-      {{ category_icons.get(category, '📋') }}
-    </div>
-    <h1 style="font-size:1.3rem; font-weight:700; color:var(--text); margin-bottom:8px;">
-      {{ category }}
-    </h1>
-    <p style="color:var(--muted); font-size:0.875rem; margin-bottom:24px; max-width:400px; margin-left:auto; margin-right:auto;">
-      Detailed category view with policy listing, filtering and management
-      will be available in Phase 4.
-    </p>
-    {% if policies %}
-    <div style="background:var(--accent-bg); border:1px solid var(--accent);
-                border-radius:8px; padding:12px 18px; display:inline-block;
-                color:var(--accent); font-size:0.85rem; font-weight:600; margin-bottom:20px;">
-      {{ policies|length }} polic{{ 'y' if policies|length == 1 else 'ies' }} in this category
-    </div>
-    {% endif %}
-    <br>
-    <a href="/insurance-centre"
-       style="background:var(--accent); color:#fff; text-decoration:none;
-              border-radius:8px; padding:10px 24px; font-weight:700;
-              font-size:0.875rem; display:inline-block;">
-      ← Back to Insurance Centre
-    </a>
-  </div>
-
+<script>window.location = '/insurance-centre/policies?category={{ category | urlencode }}';</script>
+<div style="text-align:center; padding:60px; color:var(--muted);">
+  Redirecting to {{ category }} policies...
 </div>
 {% endblock %}

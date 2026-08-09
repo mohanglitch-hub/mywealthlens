@@ -5,20 +5,12 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import bcrypt, pdfplumber, io, re, yfinance as yf
 from datetime import datetime as dt, timedelta
-from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, Insurance, NetWorthHistory, EmergencyFund, TaxEntry80C, Family, FamilyMember, FamilyInvite
-from insurance_centre import insurance_bp
-from insurance_centre.models import (
-    InsurancePolicy, InsuranceNominee, InsuranceMember,
-    InsuranceAddon, InsuranceDocument, InsuranceTimeline,
-    InsuranceCategory, InsuranceType, PolicyStatus,
-    PremiumFrequency, DocumentType, TimelineEvent
-)
+from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, NetWorthHistory, EmergencyFund, TaxEntry80C
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "mywealthlens-dev-secret-change-in-production"
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///mywealthlens.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB upload limit
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -96,7 +88,7 @@ def signup():
 
 @app.route('/login', methods=['GET', 'POST'])
 @csrf.exempt
-@limiter.limit('5 per 15 minutes', methods=['POST'])
+@limiter.limit('5 per 15 minutes')
 def login():
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
@@ -128,32 +120,6 @@ def forgot_password():
         flash('If an account exists for that email, a reset link has been sent.', 'success')
         return redirect(url_for('forgot_password'))
     return render_template('forgot_password.html')
-
-def _save_snapshot(user_id, assets, mfs, stocks, loans):
-    """Save one net worth snapshot per day."""
-    from datetime import date as _date
-    today = _date.today()
-    existing = NetWorthHistory.query.filter_by(
-        user_id=user_id, snapshot_date=today).first()
-    if existing:
-        return
-    equity = sum(m.value for m in mfs) + sum(s.value for s in stocks)
-    debt   = sum(a.value for a in assets if a.category in ["ppf","vpf","ssy","fd","nps"])
-    gold   = sum(a.value for a in assets if a.category in ["gold","silver"])
-    re_val = sum(a.value for a in assets if a.category.startswith("real_estate"))
-    cash   = sum(a.value for a in assets if a.category == "cash")
-    other  = sum(a.value for a in assets
-                 if a.category not in ["ppf","vpf","ssy","fd","nps","gold","silver","cash"]
-                 and not a.category.startswith("real_estate"))
-    liab   = sum(l.outstanding for l in loans)
-    total  = equity + debt + gold + re_val + cash + other - liab
-    snap   = NetWorthHistory(
-        user_id=user_id, snapshot_date=today, total=total,
-        equity=equity, debt=debt, gold=gold,
-        realestate=re_val, cash=cash, other=other, liabilities=liab)
-    db.session.add(snap)
-    db.session.commit()
-
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -1617,9 +1583,6 @@ def export_excel():
 
 @app.errorhandler(429)
 def rate_limit_exceeded(e):
-    if request.method == 'GET':
-        return render_template('login.html',
-            error='Too many login attempts. Please wait 15 minutes.'), 429
     flash('Too many attempts. Please wait 15 minutes before trying again.', 'error')
     return redirect(url_for('login')), 429
 
@@ -1643,8 +1606,6 @@ def change_password():
     db.session.commit()
     flash('Password changed successfully!', 'success')
     return redirect(url_for('account'))
-
-app.register_blueprint(insurance_bp)
 
 if __name__ == '__main__': 
      app.run(debug=True, port=5000, host='0.0.0.0')

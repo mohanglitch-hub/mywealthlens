@@ -254,6 +254,21 @@ class InsurancePolicy(db.Model):
     agent_name      = db.Column(db.String(200), nullable=True)
     agent_contact   = db.Column(db.String(50),  nullable=True)
 
+    # ── Health Insurance specific ─────────────────────────────────
+    cashless_available = db.Column(db.String(5), nullable=True)
+    # "yes" or "no"
+
+    # ── Motor Insurance specific ──────────────────────────────────
+    claim_history   = db.Column(db.Text, nullable=True)
+
+    # ── Property Insurance specific ───────────────────────────────
+    property_type   = db.Column(db.String(50), nullable=True)
+    # Apartment / Commercial / House / Land / Office / Shop / Other
+
+    # ── General Insurance specific ────────────────────────────────
+    policy_type     = db.Column(db.String(20), nullable=True)
+    # One-Time / Recurring
+
     # ── Search support fields (Motor/Property specific) ──────────
     vehicle_number  = db.Column(db.String(50), nullable=True)
     property_name   = db.Column(db.String(200), nullable=True)

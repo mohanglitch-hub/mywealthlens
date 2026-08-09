@@ -9,22 +9,21 @@
     <div>
       <h1 class="ic-title">Insurance Centre</h1>
       <p class="ic-subtitle">
-        Securely manage all your insurance policies, premiums,
-        documents and renewal reminders in one place.
+        Manage your policies, premiums, documents & renewals in one place.
       </p>
     </div>
-    <div class="ic-actions">
-      <button
-        class="ic-btn-secondary"
-        title="View and manage all policies"
-        onclick="window.location='/insurance-centre/policies'">
-        Manage Policies
-      </button>
+   <div class="ic-actions">
       <button
         class="ic-btn-primary"
         title="Add a new insurance policy"
         onclick="window.location='/insurance-centre/add'">
         + Add Policy
+      </button>
+      <button
+        class="ic-btn-primary"
+        title="View and manage all policies"
+        onclick="window.location='/insurance-centre/policies'">
+        Manage Policies
       </button>
     </div>
   </div>
@@ -51,50 +50,51 @@
   <!-- ── Summary Cards ── -->
   <div class="ic-summary-grid" role="region" aria-label="Insurance Summary">
 
-    <div class="ic-stat-card" tabindex="0">
+    <a href="/insurance-centre/policies?status=Active" class="ic-stat-card ic-stat-card--link" tabindex="0"
+       title="View all active policies">
       <div class="ic-stat-icon">📋</div>
       <div class="ic-stat-label">Active Policies</div>
       <div class="ic-stat-value">{{ data.policy_count }}</div>
-    </div>
+      <div class="ic-stat-hint">View policies →</div>
+    </a>
 
-    <div class="ic-stat-card" tabindex="0">
+    <a href="/insurance-centre/policies?sort=coverage_high" class="ic-stat-card ic-stat-card--link" tabindex="0"
+       title="View policies sorted by highest coverage">
       <div class="ic-stat-icon">🛡️</div>
       <div class="ic-stat-label">Total Coverage</div>
       <div class="ic-stat-value">
-        {% if data.total_coverage > 0 %}
-          {{ format_inr(data.total_coverage) }}
-        {% else %}
-          ₹0
-        {% endif %}
+        {% if data.total_coverage > 0 %}{{ format_inr(data.total_coverage) }}{% else %}₹0{% endif %}
       </div>
-    </div>
+      <div class="ic-stat-hint">Sort by coverage →</div>
+    </a>
 
-    <div class="ic-stat-card" tabindex="0">
+    <a href="/insurance-centre/policies?sort=premium_high" class="ic-stat-card ic-stat-card--link" tabindex="0"
+       title="View policies sorted by highest premium">
       <div class="ic-stat-icon">💳</div>
       <div class="ic-stat-label">Annual Premium</div>
       <div class="ic-stat-value">
-        {% if data.total_premium > 0 %}
-          {{ format_inr(data.total_premium) }}
-        {% else %}
-          ₹0
-        {% endif %}
+        {% if data.total_premium > 0 %}{{ format_inr(data.total_premium) }}{% else %}₹0{% endif %}
       </div>
-    </div>
+      <div class="ic-stat-hint">Sort by premium →</div>
+    </a>
 
-    <div class="ic-stat-card {% if data.renewals_soon > 0 %}ic-stat-card--warning{% endif %}"
-         tabindex="0">
+    <a href="/insurance-centre/policies?renewal=30days" class="ic-stat-card ic-stat-card--link {% if data.renewals_soon > 0 %}ic-stat-card--warning{% endif %}"
+       tabindex="0" title="View policies due for renewal">
       <div class="ic-stat-icon">🔔</div>
       <div class="ic-stat-label">Upcoming Renewals</div>
       <div class="ic-stat-value {% if data.renewals_soon > 0 %}ic-value-warning{% endif %}">
         {{ data.renewals_soon }}
       </div>
-    </div>
+      <div class="ic-stat-hint">View renewals →</div>
+    </a>
 
-    <div class="ic-stat-card" tabindex="0">
+    <a href="/insurance-centre/documents" class="ic-stat-card ic-stat-card--link" tabindex="0"
+       title="Open Document Vault">
       <div class="ic-stat-icon">📁</div>
       <div class="ic-stat-label">Documents Stored</div>
       <div class="ic-stat-value">{{ data.doc_count }}</div>
-    </div>
+      <div class="ic-stat-hint">Open vault →</div>
+    </a>
 
   </div>
 
@@ -106,19 +106,25 @@
     <div class="ic-category-grid" role="region" aria-label="Insurance Categories">
       {% for cat in categories %}
       {% set stats = data.category_stats.get(cat, {}) %}
+      {% if stats.get('has_policies') %}
       <a href="/insurance-centre/category/{{ category_to_slug(cat) }}"
-         class="ic-category-card {% if stats.get('has_policies') %}ic-category-card--active{% endif %}"
-         tabindex="0"
-         title="{{ cat }}">
+         class="ic-category-card ic-category-card--active"
+         tabindex="0" title="View {{ cat }} policies">
         <div class="ic-cat-icon">{{ category_icons.get(cat, '📋') }}</div>
         <div class="ic-cat-name">{{ cat }}</div>
-        {% if stats.get('has_policies') %}
         <div class="ic-cat-count">{{ stats.count }} polic{{ 'y' if stats.count == 1 else 'ies' }}</div>
         <div class="ic-cat-coverage">{{ format_inr(stats.coverage) }} covered</div>
-        {% else %}
-        <div class="ic-cat-empty">No policies added yet</div>
-        {% endif %}
       </a>
+      {% else %}
+      <a href="/insurance-centre/add?preset_category={{ cat | urlencode }}"
+         class="ic-category-card ic-category-card--empty"
+         tabindex="0" title="Add {{ cat }} policy">
+        <div class="ic-cat-icon">{{ category_icons.get(cat, '📋') }}</div>
+        <div class="ic-cat-name">{{ cat }}</div>
+        <div class="ic-cat-empty">No policies yet</div>
+        <div class="ic-cat-add">+ Add policy</div>
+      </a>
+      {% endif %}
       {% endfor %}
     </div>
   </div>
@@ -134,8 +140,8 @@
     </p>
     <button
       class="ic-btn-primary ic-btn-lg"
-      title="Add your first policy — coming in Phase 4"
-      onclick="alert('Add Policy will be available in the next phase.')">
+      title="Add your first policy"
+      onclick="window.location='/insurance-centre/add'">
       Add Your First Policy
     </button>
   </div>
@@ -189,18 +195,70 @@
     {% endif %}
   </div>
 
+  <!-- ── Renewal Centre Widget ── -->
+  {% if data.renewal_centre %}
+  <div class="ic-section">
+    <div class="ic-section-header">
+      <h2 class="ic-section-title">🔔 Renewal Centre</h2>
+      <a href="/insurance-centre/policies?renewal=90days" class="ic-link-sm">View all →</a>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      {% for p in data.renewal_centre %}
+      <a href="/insurance-centre/policy/{{ p.id }}" class="ic-renewal-row ic-renewal-{{ p.renewal_status }}">
+        <div style="display:flex; align-items:center; gap:12px; flex:1; min-width:0;">
+          <span style="font-size:1.3rem; flex-shrink:0;">{{ category_icons.get(p.category, '📋') }}</span>
+          <div style="min-width:0;">
+            <div style="font-weight:600; font-size:0.875rem; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              {{ p.policy_name or p.display_type }}
+            </div>
+            <div style="font-size:0.75rem; color:var(--muted);">{{ p.insurer }}</div>
+          </div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-size:0.82rem; font-weight:600;"
+               class="{% if p.renewal_status == 'overdue' %}ic-text-danger{% elif p.renewal_status == 'due_soon' %}ic-text-warning{% else %}ic-text-muted{% endif %}">
+            {{ format_date(p.renewal_date) }}
+          </div>
+          <div style="font-size:0.72rem; color:var(--muted); margin-top:2px;">
+            {% if p.days_to_renewal is not none %}
+              {% if p.days_to_renewal < 0 %}{{ (p.days_to_renewal * -1) }} days overdue
+              {% elif p.days_to_renewal == 0 %}Due today
+              {% else %}{{ p.days_to_renewal }} days left{% endif %}
+            {% endif %}
+          </div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ── Recent Activity ── -->
   <div class="ic-section">
     <div class="ic-section-header">
-      <h2 class="ic-section-title">Recent Activity</h2>
+      <h2 class="ic-section-title">Recent Activity <span style="font-size:0.72rem; font-weight:400; color:var(--muted);">— last 7 activities</span></h2>
     </div>
-
     {% if data.recent_activity %}
     <div class="ic-activity-list">
       {% for event in data.recent_activity %}
+      {% set badge_map = {
+        "Policy Created":      ("🟢", "badge-created"),
+        "Coverage Updated":    ("✏️",  "badge-updated"),
+        "Notes Updated":       ("✏️",  "badge-updated"),
+        "Document Uploaded":   ("📄", "badge-document"),
+        "Document Deleted":    ("🗑️",  "badge-deleted"),
+        "Policy Archived":     ("📦", "badge-archived"),
+        "Policy Restored":     ("♻️",  "badge-restored"),
+        "Nominee Updated":     ("👥", "badge-updated"),
+        "Member Updated":      ("👥", "badge-updated"),
+        "Add-on Updated":      ("⚙️",  "badge-updated"),
+        "Policy Renewed":      ("🔄", "badge-renewed"),
+      } %}
+      {% set badge = badge_map.get(event.event_type, ("📋", "badge-default")) %}
       <div class="ic-activity-row">
-        <div class="ic-activity-dot"></div>
+        <div class="ic-activity-badge {{ badge[1] }}">{{ badge[0] }}</div>
         <div class="ic-activity-content">
+          <div class="ic-activity-label {{ badge[1] }}">{{ event.event_type }}</div>
           <div class="ic-activity-desc">{{ event.description }}</div>
           <div class="ic-activity-time">{{ format_date(event.created_at) }}</div>
         </div>
@@ -210,7 +268,7 @@
     {% else %}
     <div class="ic-placeholder">
       <span class="ic-placeholder-icon">📅</span>
-      <span>No activity available.</span>
+      <span>No activity in the last 7 days.</span>
     </div>
     {% endif %}
   </div>
@@ -470,6 +528,42 @@
   .ic-placeholder-icon { font-size: 1.2rem; }
 
   /* ── Responsive ── */
+
+  /* Clickable stat cards */
+  .ic-stat-card--link   { text-decoration:none; cursor:pointer; }
+  .ic-stat-card--link:hover { box-shadow:var(--shadow-md); transform:translateY(-3px); border-color:var(--accent); }
+  .ic-stat-hint         { font-size:0.68rem; color:var(--accent); margin-top:6px; opacity:0; transition:opacity 0.2s; }
+  .ic-stat-card--link:hover .ic-stat-hint { opacity:1; }
+
+  /* Empty category card */
+  .ic-category-card--empty { border-style:dashed; }
+  .ic-category-card--empty:hover { border-color:var(--accent); border-style:solid; }
+  .ic-cat-add           { font-size:0.72rem; color:var(--accent); font-weight:600; margin-top:4px; }
+
+  /* Activity badges */
+  .ic-activity-badge    { width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.9rem; flex-shrink:0; margin-top:2px; }
+  .ic-activity-label    { font-size:0.7rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:3px; }
+  .badge-created  { background:var(--up-bg); color:var(--up); }
+  .badge-updated  { background:var(--accent-bg); color:var(--accent); }
+  .badge-document { background:#EFF6FF; color:#3B82F6; }
+  .badge-deleted  { background:var(--down-bg); color:var(--down); }
+  .badge-archived { background:#FEF3C7; color:#D97706; }
+  .badge-restored { background:var(--up-bg); color:var(--up); }
+  .badge-renewed  { background:#F0FDF4; color:#16A34A; }
+  .badge-default  { background:var(--surface2); color:var(--muted); }
+
+  /* Renewal Centre */
+  .ic-renewal-row   { display:flex; align-items:center; gap:14px; padding:12px 16px; background:var(--surface); border:1px solid var(--border); border-radius:10px; text-decoration:none; transition:border-color 0.2s; }
+  .ic-renewal-row:hover { border-color:var(--accent); }
+  .ic-renewal-overdue  { border-color:var(--down) !important; background:var(--down-bg); }
+  .ic-renewal-due_soon { border-color:var(--warning) !important; }
+  .ic-text-danger   { color:var(--down); }
+  .ic-text-warning  { color:var(--warning); }
+  .ic-text-muted    { color:var(--muted); }
+  .ic-link-sm       { font-size:0.78rem; color:var(--accent); text-decoration:none; }
+  .ic-link-sm:hover { text-decoration:underline; }
+  .ic-activity-event { font-size:0.75rem; font-weight:600; color:var(--accent); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:2px; }
+
   @media (max-width: 1024px) {
     .ic-summary-grid  { grid-template-columns: repeat(3, 1fr); }
     .ic-category-grid { grid-template-columns: repeat(3, 1fr); }

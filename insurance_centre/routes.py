@@ -63,10 +63,10 @@ def _category_icons():
 @insurance_bp.route("/")
 @login_required
 def dashboard():
-    """Insurance Centre dashboard — aggregated overview."""
-    data = services.get_dashboard_data(current_user.id)
+    """Insurance Centre dashboard — uses InsuranceStatisticsService."""
+    stats = services.InsuranceStatisticsService(current_user.id)
+    data  = stats.summary_dict()
 
-    # Attach renewal badge to recent policies
     for p in data["recent_policies"]:
         p._badge_label, p._badge_color = renewal_badge(p)
 
@@ -110,6 +110,9 @@ def add_policy():
         flash("Policy added successfully!", "success")
         return redirect(url_for("insurance_centre.dashboard"))
 
+    # Allow pre-selecting category from URL (e.g. from empty category card)
+    preset_category = request.args.get("preset_category", "")
+
     return render_template(
         "insurance_centre/add_policy.html",
         categories=InsuranceCategory.ALL,
@@ -120,6 +123,7 @@ def add_policy():
         member_relations=MemberRelation.ALL,
         motor_addons=MotorAddonType.ALL,
         category_icons=_category_icons(),
+        preset_category=preset_category,
     )
 
 
@@ -127,14 +131,76 @@ def add_policy():
 @insurance_bp.route("/policies")
 @login_required
 def policy_listing():
-    """View all active policies."""
-    policies = services.get_all_active_policies_for_listing(current_user.id)
+    """View all active policies with search, filter and sort."""
+    from datetime import date, timedelta
+
+    q          = request.args.get("q", "").strip()
+    cat_filter = request.args.get("category", "")
+    status_f   = request.args.get("status", "")
+    renewal_f  = request.args.get("renewal", "")
+    sort_by    = request.args.get("sort", "recently_added")
+
+    # Base query
+    if q:
+        policies = services.search_policies(current_user.id, q)
+    else:
+        policies = services.get_all_active_policies_for_listing(current_user.id)
+
+    # Category filter
+    if cat_filter:
+        policies = [p for p in policies if p.category == cat_filter]
+
+    # Status filter
+    if status_f:
+        policies = [p for p in policies if p.status == status_f]
+
+    # Renewal filter
+    if renewal_f:
+        today = date.today()
+        if renewal_f == "overdue":
+            policies = [p for p in policies
+                       if p.renewal_date and p.renewal_date < today]
+        elif renewal_f == "30days":
+            cutoff = today + timedelta(days=30)
+            policies = [p for p in policies
+                       if p.renewal_date and today <= p.renewal_date <= cutoff]
+        elif renewal_f == "90days":
+            cutoff = today + timedelta(days=90)
+            policies = [p for p in policies
+                       if p.renewal_date and today <= p.renewal_date <= cutoff]
+
+    # Sort
+    if sort_by == "az":
+        policies.sort(key=lambda p: p.insurer.lower())
+    elif sort_by == "za":
+        policies.sort(key=lambda p: p.insurer.lower(), reverse=True)
+    elif sort_by == "recently_updated":
+        policies.sort(key=lambda p: p.updated_at or p.created_at, reverse=True)
+    elif sort_by == "renewal_date":
+        policies.sort(key=lambda p: p.renewal_date or date.max)
+    elif sort_by == "coverage_high":
+        policies.sort(key=lambda p: p.sum_assured, reverse=True)
+    elif sort_by == "coverage_low":
+        policies.sort(key=lambda p: p.sum_assured)
+    elif sort_by == "premium_high":
+        policies.sort(key=lambda p: p.annual_premium, reverse=True)
+    elif sort_by == "premium_low":
+        policies.sort(key=lambda p: p.annual_premium)
+    else:  # recently_added (default)
+        policies.sort(key=lambda p: p.created_at, reverse=True)
+
     return render_template(
         "insurance_centre/policy_listing.html",
         policies=policies,
         category_icons=_category_icons(),
         format_inr=format_inr,
         format_date=format_date,
+        categories=InsuranceCategory.ALL,
+        policy_statuses=[s for s in PolicyStatus.ALL if s != "Archived"],
+        # Search state — persist selections
+        q=q, cat_filter=cat_filter,
+        status_f=status_f, renewal_f=renewal_f, sort_by=sort_by,
+        result_count=len(policies),
     )
 
 @insurance_bp.route("/policy/<int:policy_id>")
@@ -163,8 +229,8 @@ def policy_detail(policy_id):
 @insurance_bp.route("/policy/<int:policy_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_policy(policy_id):
-    """Edit an existing policy — reuses add_policy form."""
-    policy = _get_policy_or_404(policy_id)
+    """Edit an existing policy (active or archived) — reuses add_policy form."""
+    policy = _get_any_policy_or_404(policy_id)
 
     if request.method == "POST":
         updated, error = services.update_policy(
@@ -215,13 +281,43 @@ def edit_policy(policy_id):
 @login_required
 def archive_policy(policy_id):
     """Soft-delete — move policy to archive."""
-    policy = _get_policy_or_404(policy_id)
+    policy = _get_any_policy_or_404(policy_id)
+    if policy.is_archived:
+        flash("Policy is already archived.", "info")
+        return redirect(url_for("insurance_centre.archive_listing"))
     success, error = services.archive_policy(_db(), policy, current_user.id)
     if error:
         flash(error, "error")
-    else:
-        flash(f"Policy archived. You can restore it from the Archive.", "success")
-    return redirect(url_for("insurance_centre.policy_listing"))
+        return redirect(url_for("insurance_centre.policy_detail",
+                                policy_id=policy_id))
+    flash("Policy archived. You can restore it from the Archive.", "success")
+    # Redirect back to referring page or policy listing
+    referrer = request.form.get("next") or url_for("insurance_centre.policy_listing")
+    return redirect(referrer)
+
+
+@insurance_bp.route("/policy/<int:policy_id>/delete", methods=["POST"])
+@login_required
+def delete_policy_permanent(policy_id):
+    """Permanently delete an archived policy. Only allowed if archived."""
+    policy = InsurancePolicy.query.filter_by(
+        id=policy_id, user_id=current_user.id).first_or_404()
+
+    if not policy.is_archived:
+        flash("Only archived policies can be permanently deleted.", "error")
+        return redirect(url_for("insurance_centre.policy_detail",
+                                policy_id=policy_id))
+
+    # Delete all related documents from disk
+    from .utils import delete_document_file
+    for doc in policy.documents.all():
+        delete_document_file(doc.file_path)
+
+    # Delete policy (cascades to nominees, members, addons, timeline, documents)
+    _db().session.delete(policy)
+    _db().session.commit()
+    flash("Policy permanently deleted.", "success")
+    return redirect(url_for("insurance_centre.archive_listing"))
 
 @insurance_bp.route("/policy/<int:policy_id>/restore", methods=["POST"])
 @login_required
@@ -270,17 +366,24 @@ def renew_policy(policy_id):
 @insurance_bp.route("/category/<slug>")
 @login_required
 def category_view(slug):
-    """Placeholder — detailed category view coming in Phase 4."""
+    """Dedicated category page — shows only policies for that category."""
     from .models import InsuranceCategory
     category = slug_to_category(slug)
     if category not in InsuranceCategory.ALL:
         abort(404)
+
     policies = services.get_policies_by_category(current_user.id, category)
+    total_coverage = sum(p.sum_assured for p in policies)
+
+    icons = _category_icons()
+
     return render_template(
-        "insurance_centre/category_placeholder.html",
+        "insurance_centre/category_view.html",
         category=category,
+        slug=slug,
+        icon=icons.get(category, "📋"),
         policies=policies,
-        category_icons=_category_icons(),
+        total_coverage=total_coverage,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -301,17 +404,7 @@ def archive_listing():
     )
 
 
-@insurance_bp.route("/archive_old")
-@login_required
-def archive_old():
-    """View all archived policies."""
-    archived = services.get_archived_policies(current_user.id)
-    return render_template(
-        "insurance_centre/archive.html",
-        policies=archived,
-        format_inr=format_inr,
-        format_date=format_date,
-    )
+
 
 
 # ── Nominees ──────────────────────────────────────────────────────────────────
@@ -531,6 +624,224 @@ def search():
 
 # ── API — types for dynamic dropdown ─────────────────────────────────────────
 
+
+# ── Export ────────────────────────────────────────────────────────────────────
+
+
+
+@insurance_bp.route("/export/pdf")
+@login_required
+def export_pdf():
+    """Export all active policies to branded PDF."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import cm
+        from reportlab.lib import colors
+        from reportlab.platypus import (SimpleDocTemplate, Paragraph,
+                                         Spacer, Table, TableStyle,
+                                         HRFlowable, KeepTogether)
+        import io
+        from datetime import datetime as _dt
+    except ImportError:
+        flash("reportlab required for PDF export. Run: py -m pip install reportlab", "error")
+        return redirect(url_for("insurance_centre.policy_listing"))
+
+    policies = services.get_all_active_policies_for_listing(current_user.id)
+    stats    = services.InsuranceStatisticsService(current_user.id)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+        topMargin=3.5*cm, bottomMargin=2.5*cm,
+        leftMargin=2*cm, rightMargin=2*cm,
+        title="MyWealthLens — Insurance Centre",
+        author=current_user.name)
+
+    styles  = getSampleStyleSheet()
+    ACCENT  = colors.HexColor("#0F766E")
+    LIGHT   = colors.HexColor("#F0FDF9")
+    BORDER  = colors.HexColor("#E2E8F0")
+    DARK    = colors.HexColor("#0F172A")
+    MUTED   = colors.HexColor("#64748B")
+
+    brand   = ParagraphStyle("Brand", fontSize=10, textColor=ACCENT,
+                              fontName="Helvetica-Bold", spaceAfter=10)
+    title   = ParagraphStyle("Title", fontSize=22, textColor=DARK,
+                              fontName="Helvetica-Bold", spaceAfter=14, leading=28)
+    subtitle= ParagraphStyle("Sub",   fontSize=10, textColor=MUTED,
+                              spaceAfter=10, leading=16)
+    h1      = ParagraphStyle("H1",    fontSize=12, textColor=ACCENT,
+                              fontName="Helvetica-Bold", spaceAfter=6, spaceBefore=8)
+    h2      = ParagraphStyle("H2",    fontSize=9,  textColor=DARK,
+                              fontName="Helvetica-Bold", spaceAfter=4, spaceBefore=4)
+    body    = ParagraphStyle("Body",  fontSize=8,  textColor=DARK,
+                              spaceAfter=2, leading=12)
+    small   = ParagraphStyle("Small", fontSize=7,  textColor=MUTED, leading=10)
+    footer  = ParagraphStyle("Footer",fontSize=7,  textColor=MUTED,
+                              alignment=1)
+
+    story = []
+
+    # ── Cover ──
+    story.append(Paragraph("MyWealthLens", brand))
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph("Insurance Centre", title))
+    story.append(Spacer(1, 0.3*cm))
+    story.append(Paragraph(f"Policy Summary Report for {current_user.name}", subtitle))
+    story.append(Spacer(1, 0.25*cm))
+    story.append(Paragraph(f"Generated: {_dt.now().strftime('%d %b %Y, %I:%M %p')}", subtitle))
+    story.append(Spacer(1, 0.5*cm))
+    story.append(HRFlowable(width="100%", color=ACCENT, thickness=2))
+    story.append(Spacer(1, 0.5*cm))
+
+    # ── Summary Stats ──
+    summary_rows = [
+        ["Total Active Policies", str(stats.active_count()),
+         "Total Coverage",        f"Rs.{stats.total_coverage():,.0f}"],
+        ["Annual Premium",        f"Rs.{stats.total_annual_premium():,.0f}",
+         "Upcoming Renewals",     str(stats.upcoming_renewals_count())],
+    ]
+    sum_tbl = Table(summary_rows, colWidths=[4.5*cm, 4*cm, 4.5*cm, 4*cm])
+    sum_tbl.setStyle(TableStyle([
+        ("FONTSIZE",(0,0),(-1,-1),8),
+        ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
+        ("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),
+        ("TEXTCOLOR",(0,0),(0,-1),MUTED),
+        ("TEXTCOLOR",(2,0),(2,-1),MUTED),
+        ("FONTNAME",(1,0),(1,-1),"Helvetica-Bold"),
+        ("FONTNAME",(3,0),(3,-1),"Helvetica-Bold"),
+        ("TEXTCOLOR",(1,0),(1,-1),ACCENT),
+        ("TEXTCOLOR",(3,0),(3,-1),ACCENT),
+        ("FONTSIZE",(1,0),(1,-1),10),
+        ("FONTSIZE",(3,0),(3,-1),10),
+        ("BACKGROUND",(0,0),(-1,-1),LIGHT),
+        ("GRID",(0,0),(-1,-1),0.3,BORDER),
+        ("TOPPADDING",(0,0),(-1,-1),6),
+        ("BOTTOMPADDING",(0,0),(-1,-1),6),
+        ("LEFTPADDING",(0,0),(-1,-1),8),
+    ]))
+    story.append(sum_tbl)
+    story.append(Spacer(1, 0.5*cm))
+
+    # ── Policies ──
+    for p in policies:
+        block = []
+        block.append(HRFlowable(width="100%", color=ACCENT, thickness=0.5))
+        block.append(Spacer(1, 0.15*cm))
+        block.append(Paragraph(f"{p.display_type} — {p.insurer}", h1))
+
+        # Core details
+        rows = [
+            ["Category", p.category or "—",
+             "Status",   p.status or "—"],
+            ["Policy No.", p.policy_number or "—",
+             "Policy Holder", p.policy_holder or "—"],
+            ["Coverage", f"Rs.{p.sum_assured:,.0f}",
+             "Annual Premium", f"Rs.{p.annual_premium:,.0f}"],
+            ["Premium", f"Rs.{p.premium_amount:,.0f} / {p.premium_frequency}",
+             "Start Date", str(p.start_date or "—")],
+            ["Renewal Date", str(p.renewal_date or "—"),
+             "Maturity/Expiry", str(p.maturity_date or p.expiry_date or "—")],
+        ]
+        if p.agent_name:
+            rows.append(["Agent", p.agent_name, "Agent Contact", p.agent_contact or "—"])
+        if p.vehicle_number:
+            rows.append(["Vehicle No.", p.vehicle_number, "Claim History", (p.claim_history or "—")[:50]])
+        if p.property_name:
+            rows.append(["Property", p.property_name, "Property Type", p.property_type or "—"])
+        if p.cashless_available:
+            rows.append(["Cashless", p.cashless_available.title(), "Policy Type", p.policy_type or "—"])
+
+        tbl = Table(rows, colWidths=[3.5*cm, 5.5*cm, 3.5*cm, 4.5*cm])
+        tbl.setStyle(TableStyle([
+            ("FONTSIZE",(0,0),(-1,-1),8),
+            ("FONTNAME",(0,0),(0,-1),"Helvetica-Bold"),
+            ("FONTNAME",(2,0),(2,-1),"Helvetica-Bold"),
+            ("TEXTCOLOR",(0,0),(0,-1),MUTED),
+            ("TEXTCOLOR",(2,0),(2,-1),MUTED),
+            ("ROWBACKGROUNDS",(0,0),(-1,-1),[LIGHT, colors.white]),
+            ("GRID",(0,0),(-1,-1),0.3,BORDER),
+            ("TOPPADDING",(0,0),(-1,-1),4),
+            ("BOTTOMPADDING",(0,0),(-1,-1),4),
+            ("LEFTPADDING",(0,0),(-1,-1),6),
+        ]))
+        block.append(tbl)
+
+        # Nominees
+        nominees = p.nominees.all()
+        if nominees:
+            block.append(Paragraph("Nominees", h2))
+            for n in nominees:
+                pct = f" — {n.percentage}%" if n.percentage else ""
+                contact = f" | {n.contact}" if n.contact else ""
+                block.append(Paragraph(f"• {n.name} ({n.relationship}){pct}{contact}", body))
+
+        # Health Members
+        members = p.members.all()
+        if members:
+            block.append(Paragraph("Insured Members", h2))
+            for m in members:
+                age = f", Age {m.age}" if m.age else ""
+                block.append(Paragraph(f"• {m.member_name} ({m.relationship}){age}", body))
+
+        # Motor Add-ons
+        addons = p.addons.all()
+        if addons:
+            block.append(Paragraph("Motor Add-ons: " + ", ".join(a.addon_name for a in addons), body))
+
+        # Documents
+        docs = p.documents.all()
+        if docs:
+            block.append(Paragraph("Documents", h2))
+            for d in docs:
+                block.append(Paragraph(f"• {d.doc_type}: {d.original_name} ({d.file_size_display})", body))
+
+        if p.notes:
+            block.append(Paragraph(f"Notes: {p.notes}", small))
+
+        block.append(Spacer(1, 0.3*cm))
+        story.append(KeepTogether(block))
+
+    # ── Footer ──
+    story.append(Spacer(1, 0.5*cm))
+    story.append(HRFlowable(width="100%", color=BORDER, thickness=0.5))
+    story.append(Spacer(1, 0.2*cm))
+    story.append(Paragraph(
+        "Generated locally by MyWealthLens • Personal Use Only • "
+        f"{_dt.now().strftime('%d %b %Y')}",
+        footer))
+
+    doc.build(story)
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"insurance_policies_{_dt.now().strftime('%Y%m%d')}.pdf")
+
+
+@insurance_bp.route("/documents")
+@login_required
+def document_vault():
+    """Document Vault — all uploaded documents across all policies."""
+    from insurance_centre.models import InsuranceDocument
+    documents = (InsuranceDocument.query
+                 .filter_by(user_id=current_user.id)
+                 .order_by(InsuranceDocument.uploaded_at.desc())
+                 .all())
+
+    policy_map = {}
+    for doc in documents:
+        if doc.policy_id not in policy_map:
+            p = InsurancePolicy.query.filter_by(
+                id=doc.policy_id, user_id=current_user.id).first()
+            policy_map[doc.policy_id] = p
+        doc._policy = policy_map.get(doc.policy_id)
+
+    return render_template(
+        "insurance_centre/document_vault.html",
+        documents=documents,
+        format_date=format_date,
+        category_icons=_category_icons(),
+    )
+
 @insurance_bp.route("/api/types")
 @login_required
 def api_types():
@@ -543,7 +854,16 @@ def api_types():
 # ── Private Helpers ───────────────────────────────────────────────────────────
 
 def _get_policy_or_404(policy_id):
-    """Get policy — must belong to current user and not be archived."""
+    """Get active policy — must belong to current user."""
+    return InsurancePolicy.query.filter_by(
+        id=policy_id,
+        user_id=current_user.id,
+        is_archived=False,
+    ).first_or_404()
+
+
+def _get_any_policy_or_404(policy_id):
+    """Get any policy (active or archived) — must belong to current user."""
     return InsurancePolicy.query.filter_by(
         id=policy_id,
         user_id=current_user.id,

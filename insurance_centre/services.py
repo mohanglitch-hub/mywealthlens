@@ -61,9 +61,15 @@ def create_policy(db, user_id, data, multi_data=None):
         renewal_date      = _parse_date(data.get("renewal_date")),
         expiry_date       = _parse_date(data.get("expiry_date")),
         next_premium_due  = _parse_date(data.get("next_premium_due")),
-        vehicle_number    = data.get("vehicle_number", "").strip() or None,
-        property_name     = data.get("property_name", "").strip() or None,
-        notes             = data.get("notes", "").strip() or None,
+        vehicle_number     = data.get("vehicle_number", "").strip() or None,
+        property_name      = data.get("property_name", "").strip() or None,
+        cashless_available = data.get("cashless_available", "").strip() or None,
+        claim_history      = data.get("claim_history", "").strip() or None,
+        property_type      = data.get("property_type", "").strip() or None,
+        policy_type        = data.get("policy_type", "").strip() or None,
+        agent_name         = data.get("agent_name", "").strip() or None,
+        agent_contact      = data.get("agent_contact", "").strip() or None,
+        notes              = data.get("notes", "").strip() or None,
     )
     db.session.add(policy)
     db.session.flush()  # get policy.id before adding related records
@@ -75,17 +81,24 @@ def create_policy(db, user_id, data, multi_data=None):
         percentages   = multi_data.getlist("nominee_percentage[]")
         contacts      = multi_data.getlist("nominee_contact[]")
 
+        total_pct = 0
         for i, name in enumerate(names):
             name = name.strip()
             if not name:
                 continue
-            pct = percentages[i] if i < len(percentages) else ""
+            pct_raw = percentages[i] if i < len(percentages) else ""
+            pct = float(pct_raw) if pct_raw else None
+            if pct:
+                total_pct += pct
+                if total_pct > 100:
+                    db.session.rollback()
+                    return None, f"Total nominee percentage exceeds 100% ({total_pct:.1f}%). Please check nominee shares."
             db.session.add(InsuranceNominee(
                 policy_id    = policy.id,
                 user_id      = user_id,
                 name         = name,
                 relationship = relationships[i] if i < len(relationships) else "Other",
-                percentage   = float(pct) if pct else None,
+                percentage   = pct,
                 contact      = contacts[i].strip() if i < len(contacts) else None,
             ))
 
@@ -122,8 +135,7 @@ def create_policy(db, user_id, data, multi_data=None):
     # ── Timeline entry ─────────────────────────────────────────────
     log_timeline(db, policy.id, user_id,
                  TimelineEvent.CREATED,
-                 f"Policy created — {policy.category}: {policy.display_type} "
-                 f"with {policy.insurer}")
+                 f"{policy.insurer} {policy.display_type} added")
 
     db.session.commit()
     return policy, None
@@ -156,8 +168,8 @@ def update_policy(db, policy, user_id, data, multi_data=None):
             new_val = new_raw
 
         if str(old_val or "") != str(new_val or ""):
-            fmt = formatter or (lambda v: v)
-            changes.append(f"{label}: {fmt(old_val)} → {fmt(new_val)}")
+            fmt = formatter or (lambda v: str(v) if v else "—")
+            changes.append(f"{label} changed to {fmt(new_val)}")
             setattr(policy, field, new_val)
 
     fmt_inr = lambda v: f"₹{float(v):,.0f}" if v else "₹0"
@@ -174,10 +186,14 @@ def update_policy(db, policy, user_id, data, multi_data=None):
     _track("maturity_date",    "Maturity Date")
     _track("renewal_date",     "Renewal Date")
     _track("expiry_date",      "Expiry Date")
-    _track("vehicle_number",   "Vehicle Number")
-    _track("property_name",    "Property Name")
-    _track("agent_name",       "Agent Name")
-    _track("agent_contact",    "Agent Contact")
+    _track("vehicle_number",      "Vehicle Number")
+    _track("property_name",       "Property Name")
+    _track("agent_name",          "Agent Name")
+    _track("agent_contact",       "Agent Contact")
+    _track("cashless_available",  "Cashless Available")
+    _track("claim_history",       "Claim History")
+    _track("property_type",       "Property Type")
+    _track("policy_type",         "Policy Type")
 
     # Custom type
     if data.get("insurance_type") == "Other (Custom)":
@@ -292,7 +308,7 @@ def archive_policy(db, policy, user_id):
 
     log_timeline(db, policy.id, user_id,
                  TimelineEvent.ARCHIVED,
-                 f"Policy archived by user {user_id}")
+                 f"{policy.insurer} {policy.display_type} archived")
 
     db.session.commit()
     return True, None
@@ -310,7 +326,7 @@ def restore_policy(db, policy, user_id):
 
     log_timeline(db, policy.id, user_id,
                  TimelineEvent.RESTORED,
-                 f"Policy restored by user {user_id}")
+                 f"{policy.insurer} {policy.display_type} restored")
 
     db.session.commit()
     return True, None
@@ -352,7 +368,7 @@ def add_nominee(db, policy, user_id, data):
 
     log_timeline(db, policy.id, user_id,
                  TimelineEvent.NOMINEE_UPDATED,
-                 f"Nominee added: {nominee.name} ({nominee.relationship})")
+                 f"Nominee added: {nominee.name}")
 
     db.session.commit()
     return nominee, None
@@ -457,7 +473,7 @@ def save_document_metadata(db, policy, user_id,
 
     log_timeline(db, policy.id, user_id,
                  TimelineEvent.DOCUMENT_UPLOADED,
-                 f"Document uploaded: {doc_type} — {original_name}")
+                 f"{doc_type} uploaded: {original_name}")
 
     db.session.commit()
     return doc
@@ -470,7 +486,7 @@ def delete_document(db, doc, user_id):
     db.session.delete(doc)
     log_timeline(db, policy_id, user_id,
                  TimelineEvent.DOCUMENT_DELETED,
-                 f"Document deleted: {name}")
+                 f"Document removed: {name}")
     db.session.commit()
 
 
@@ -676,8 +692,8 @@ def get_recent_policies(user_id, limit=5):
         return []
 
 
-def get_recent_activity(user_id, limit=10):
-    """Most recent timeline entries across all policies."""
+def get_recent_activity(user_id, limit=7):
+    """Latest N timeline entries across all policies."""
     try:
         from insurance_centre.models import InsuranceTimeline
         return (InsuranceTimeline.query
@@ -792,3 +808,123 @@ def get_archived_policy_count(user_id):
             user_id=user_id, is_archived=True).count()
     except Exception:
         return 0
+
+
+# ════════════════════════════════════════════════════════════════════
+# INSURANCE STATISTICS SERVICE (Phase 8)
+# ════════════════════════════════════════════════════════════════════
+
+class InsuranceStatisticsService:
+    """
+    Centralised statistics for the Insurance Centre dashboard.
+    All dashboard metrics should come through this service.
+    """
+
+    def __init__(self, user_id):
+        self.user_id = user_id
+        self._policies = None  # cached
+
+    def _get_policies(self):
+        if self._policies is None:
+            self._policies = InsurancePolicy.query.filter_by(
+                user_id=self.user_id, is_archived=False).all()
+        return self._policies
+
+    def active_count(self):
+        try:
+            return len(self._get_policies())
+        except Exception:
+            return 0
+
+    def total_coverage(self):
+        try:
+            return sum(p.sum_assured for p in self._get_policies())
+        except Exception:
+            return 0
+
+    def total_annual_premium(self):
+        try:
+            return sum(p.annual_premium for p in self._get_policies())
+        except Exception:
+            return 0
+
+    def upcoming_renewals_count(self, days=30):
+        try:
+            return len([p for p in self._get_policies()
+                       if p.renewal_status in ("due_soon", "overdue")])
+        except Exception:
+            return 0
+
+    def overdue_count(self):
+        try:
+            return len([p for p in self._get_policies()
+                       if p.renewal_status == "overdue"])
+        except Exception:
+            return 0
+
+    def document_count(self):
+        try:
+            from insurance_centre.models import InsuranceDocument
+            return InsuranceDocument.query.filter_by(
+                user_id=self.user_id).count()
+        except Exception:
+            return 0
+
+    def category_totals(self):
+        try:
+            result = {}
+            for cat in InsuranceCategory.ALL:
+                cat_policies = [p for p in self._get_policies()
+                               if p.category == cat]
+                result[cat] = {
+                    "count":    len(cat_policies),
+                    "coverage": sum(p.sum_assured for p in cat_policies),
+                    "premium":  sum(p.annual_premium for p in cat_policies),
+                    "has_policies": len(cat_policies) > 0,
+                }
+            return result
+        except Exception:
+            return {cat: {"count":0,"coverage":0,"premium":0,"has_policies":False}
+                    for cat in InsuranceCategory.ALL}
+
+    def upcoming_renewals_list(self, limit=5):
+        """Next N policies due for renewal — for the Renewal Centre widget."""
+        try:
+            from datetime import date, timedelta
+            today  = date.today()
+            cutoff = today + timedelta(days=90)
+            due = [p for p in self._get_policies()
+                   if p.renewal_date and p.renewal_date <= cutoff]
+            due.sort(key=lambda p: p.renewal_date or date.max)
+            return due[:limit]
+        except Exception:
+            return []
+
+    def recent_activity(self, limit=7):
+        """Latest N timeline activities regardless of date."""
+        try:
+            from insurance_centre.models import InsuranceTimeline
+            events = (InsuranceTimeline.query
+                     .filter_by(user_id=self.user_id)
+                     .order_by(InsuranceTimeline.created_at.desc())
+                     .limit(limit)
+                     .all())
+            return events
+        except Exception:
+            return []
+
+    def summary_dict(self):
+        """Single call for all dashboard data."""
+        return {
+            "policy_count":    self.active_count(),
+            "total_coverage":  self.total_coverage(),
+            "total_premium":   self.total_annual_premium(),
+            "renewals_soon":   self.upcoming_renewals_count(),
+            "overdue_count":   self.overdue_count(),
+            "doc_count":       self.document_count(),
+            "category_stats":  self.category_totals(),
+            "renewal_centre":  self.upcoming_renewals_list(limit=5),
+            "recent_activity": self.recent_activity(limit=7),
+            "recent_policies": get_recent_policies(self.user_id, limit=5),
+            "has_policies":    self.active_count() > 0,
+        }

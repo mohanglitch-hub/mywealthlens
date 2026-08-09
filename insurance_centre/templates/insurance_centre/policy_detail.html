@@ -1,57 +1,40 @@
 {% extends "base.html" %}
-{% block title %}{{ policy.display_type }} — Insurance Centre<script>
-function confirmArchive(id, name) {
-  if (confirm('Archive "' + name + '"?\n\nThis policy will be moved to Archive. It can be restored later.')) {
-    document.getElementById('archiveFormDetail').submit();
-  }
-}
-</script>
+{% block title %}{{ policy.display_type }} — Insurance Centre<!-- Modal system -->
+<div class="mwl-modal-overlay" id="mwlModal">
+  <div class="mwl-modal">
+    <div class="mwl-modal-brand">MyWealthLens · Insurance Centre</div>
+    <div class="mwl-modal-title" id="mwlModalTitle"></div>
+    <div class="mwl-modal-body"  id="mwlModalBody"></div>
+    <div class="mwl-modal-actions">
+      <button class="mwl-modal-cancel"  id="mwlModalCancel">Cancel</button>
+      <button class="mwl-modal-confirm" id="mwlModalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
 
-<script>
-function toggleUploadForm() {
-  const form = document.getElementById('uploadForm');
-  form.style.display = form.style.display === 'none' ? 'block' : 'none';
-  if (form.style.display === 'block') {
-    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  }
-}
+<style>
+  .mwl-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px);}
+  .mwl-modal-overlay.active{display:flex;}
+  .mwl-modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:440px;width:90%;box-shadow:var(--shadow-lg);}
+  .mwl-modal-brand{font-size:0.72rem;color:var(--accent);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:12px;}
+  .mwl-modal-title{font-size:1.1rem;font-weight:700;color:var(--text);margin-bottom:10px;}
+  .mwl-modal-body{font-size:0.875rem;color:var(--text2);line-height:1.6;margin-bottom:24px;}
+  .mwl-modal-actions{display:flex;gap:10px;justify-content:flex-end;}
+  .mwl-modal-cancel{background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:8px;padding:9px 18px;font-size:0.875rem;font-family:var(--font-ui);cursor:pointer;}
+  .mwl-modal-confirm{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:0.875rem;font-weight:700;font-family:var(--font-ui);cursor:pointer;}
+  .mwl-modal-confirm.danger{background:var(--down);}
+  .ic-btn-restore{background:var(--up-bg);color:var(--up);border:1px solid var(--up);border-radius:8px;padding:10px 18px;font-size:0.82rem;font-weight:600;font-family:var(--font-ui);cursor:pointer;transition:all 0.2s;}
+  .ic-btn-restore:hover{background:var(--up);color:#fff;}
+  .ic-btn-delete-perm{background:none;color:var(--down);border:1px solid var(--down);border-radius:8px;padding:10px 18px;font-size:0.82rem;font-weight:600;font-family:var(--font-ui);cursor:pointer;transition:all 0.2s;}
+  .ic-btn-delete-perm:hover{background:var(--down);color:#fff;}
+</style>
 
-function showFileInfo(input) {
-  const info = document.getElementById('fileInfo');
-  if (input.files && input.files[0]) {
-    const file = input.files[0];
-    const size = file.size > 1024*1024
-      ? (file.size/(1024*1024)).toFixed(1) + ' MB'
-      : (file.size/1024).toFixed(0) + ' KB';
-    info.textContent = file.name + ' (' + size + ')';
-    info.style.color = file.size > 25*1024*1024 ? 'var(--down)' : 'var(--up)';
-  }
-}
 
-function confirmDeleteDoc(id, name) {
-  if (confirm(
-    'Delete Document?
 
-' +
-    '"' + name + '"
 
-' +
-    'This permanently removes the file from local storage.
 
-' +
-    'This action cannot be undone.'
-  )) {
-    document.getElementById('delDocForm' + id).submit();
-  }
-}
 
-document.getElementById('docUploadForm') && document.getElementById('docUploadForm')
-  .addEventListener('submit', function() {
-    const btn = document.getElementById('uploadSubmitBtn');
-    btn.textContent = 'Uploading…';
-    btn.disabled = true;
-  });
-</script>
+
 {% endblock %}
 
 {% block content %}
@@ -92,17 +75,38 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
       </div>
     </div>
     <div style="display:flex; gap:10px; flex-wrap:wrap;">
-      <a href="/insurance-centre/policy/{{ policy.id }}/edit" class="ic-btn-primary">✏️ Edit Policy</a>
+      {% if not policy.is_archived %}
+      <a href="/insurance-centre/policy/{{ policy.id }}/edit" class="ic-btn-primary">✏️ Edit</a>
       <button class="ic-btn-archive"
         onclick="confirmArchive({{ policy.id }}, '{{ policy.display_type }}')">
         Archive
       </button>
+      {% else %}
+      <a href="/insurance-centre/policy/{{ policy.id }}/edit" class="ic-btn-secondary">✏️ Edit</a>
+      <button class="ic-btn-restore"
+        onclick="confirmRestore({{ policy.id }}, '{{ policy.display_type }}')">
+        ↩ Restore
+      </button>
+      <button class="ic-btn-delete-perm"
+        onclick="confirmPermanentDelete({{ policy.id }}, '{{ policy.display_type }}')">
+        🗑 Delete Permanently
+      </button>
+      {% endif %}
       <a href="/insurance-centre/policies" class="ic-btn-secondary">← Back</a>
     </div>
 
-    <!-- Archive form -->
+    <!-- Hidden forms -->
     <form method="POST" action="/insurance-centre/policy/{{ policy.id }}/archive"
           id="archiveFormDetail" style="display:none;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <input type="hidden" name="next" value="/insurance-centre/policies" />
+    </form>
+    <form method="POST" action="/insurance-centre/policy/{{ policy.id }}/restore"
+          id="restoreFormDetail" style="display:none;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    </form>
+    <form method="POST" action="/insurance-centre/policy/{{ policy.id }}/delete"
+          id="deletePermFormDetail" style="display:none;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     </form>
   </div>
@@ -200,11 +204,16 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
         <div class="pd-field-value">{{ format_date(policy.maturity_date) }}</div>
       </div>
       {% endif %}
-      {% if policy.notes and 'Agent:' in policy.notes %}
-      {% set agent_info = policy.notes %}
+      {% if policy.agent_name %}
       <div class="pd-field">
-        <div class="pd-field-label">Agent Details</div>
-        <div class="pd-field-value">{{ agent_info }}</div>
+        <div class="pd-field-label">Agent Name</div>
+        <div class="pd-field-value">{{ policy.agent_name }}</div>
+      </div>
+      {% endif %}
+      {% if policy.agent_contact %}
+      <div class="pd-field">
+        <div class="pd-field-label">Agent Contact</div>
+        <div class="pd-field-value">{{ policy.agent_contact }}</div>
       </div>
       {% endif %}
     </div>
@@ -251,6 +260,12 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
         <div class="pd-field-value pd-renewal-{{ policy.renewal_status }}">
           {{ format_date(policy.renewal_date) }}
         </div>
+      </div>
+      {% endif %}
+      {% if policy.cashless_available %}
+      <div class="pd-field">
+        <div class="pd-field-label">Cashless Available</div>
+        <div class="pd-field-value">{{ policy.cashless_available.title() }}</div>
       </div>
       {% endif %}
     </div>
@@ -315,9 +330,15 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
     </div>
     {% endif %}
 
+    {% if policy.claim_history %}
+    <div class="pd-notes">
+      <div class="pd-field-label">Claim History</div>
+      <div class="pd-notes-text">{{ policy.claim_history }}</div>
+    </div>
+    {% endif %}
     {% if policy.notes %}
     <div class="pd-notes">
-      <div class="pd-field-label">Claim History / Notes</div>
+      <div class="pd-field-label">Notes</div>
       <div class="pd-notes-text">{{ policy.notes }}</div>
     </div>
     {% endif %}
@@ -329,6 +350,12 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
   <div class="pd-card">
     <div class="pd-card-title">🏠 Property Insurance Details</div>
     <div class="pd-fields-grid">
+      {% if policy.property_type %}
+      <div class="pd-field">
+        <div class="pd-field-label">Property Type</div>
+        <div class="pd-field-value">{{ policy.property_type }}</div>
+      </div>
+      {% endif %}
       {% if policy.property_name %}
       <div class="pd-field">
         <div class="pd-field-label">Property Name / Address</div>
@@ -358,6 +385,12 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
   <div class="pd-card">
     <div class="pd-card-title">📋 General Insurance Details</div>
     <div class="pd-fields-grid">
+      {% if policy.policy_type %}
+      <div class="pd-field">
+        <div class="pd-field-label">Policy Type</div>
+        <div class="pd-field-value">{{ policy.policy_type }}</div>
+      </div>
+      {% endif %}
       {% if policy.expiry_date %}
       <div class="pd-field">
         <div class="pd-field-label">Expiry Date</div>
@@ -569,10 +602,10 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
 <style>
   .ic-wrap            { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
   .ic-breadcrumb      { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .ic-breadcrumb-link { color:var(--muted); text-decoration:none; font-size:0.85rem; transition:color 0.2s; }
+  .ic-breadcrumb-link { color:var(--text); text-decoration:none; font-size:0.92rem; font-weight:600; transition:color 0.2s; }
   .ic-breadcrumb-link:hover { color:var(--accent); }
-  .ic-breadcrumb-sep  { color:var(--border); }
-  .ic-breadcrumb-current { font-size:0.85rem; color:var(--text2); }
+  .ic-breadcrumb-sep  { color:var(--text2); font-weight:600; }
+  .ic-breadcrumb-current { font-size:0.92rem; color:var(--text); font-weight:700; }
 
   /* Header */
   .pd-header       { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; }
@@ -653,7 +686,7 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
   .ic-badge-up     { background:var(--up-bg);      color:var(--up);      border-color:var(--up); }
   .ic-badge-down   { background:var(--down-bg);    color:var(--down);    border-color:var(--down); }
   .ic-badge-accent { background:var(--accent-bg);  color:var(--accent);  border-color:var(--accent); }
-  .ic-badge-muted  { background:var(--surface2);   color:var(--muted);   border-color:var(--border); }
+  .ic-badge-muted  { background:var(--surface2);   color:var(--muted);   border-color:var(--text2); font-weight:600; }
   .ic-badge-warning{ background:var(--warning-bg); color:var(--warning); border-color:var(--warning); }
 
 
@@ -688,11 +721,11 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
   .doc-actions      { display:flex; gap:6px; flex-wrap:wrap; }
 
   .doc-btn          { display:inline-flex; align-items:center; gap:4px; padding:5px 10px; border-radius:6px; font-size:0.75rem; font-weight:500; font-family:var(--font-ui); cursor:pointer; text-decoration:none; border:1px solid; transition:all 0.2s; white-space:nowrap; }
-  .doc-btn-preview  { background:var(--surface2); color:var(--text2); border-color:var(--border); }
+  .doc-btn-preview  { background:var(--surface2); color:var(--text2); border-color:var(--text2); font-weight:600; }
   .doc-btn-preview:hover { border-color:var(--accent); color:var(--accent); }
   .doc-btn-download { background:var(--accent-bg); color:var(--accent); border-color:var(--accent); }
   .doc-btn-download:hover { background:var(--accent); color:#fff; }
-  .doc-btn-delete   { background:none; color:var(--muted); border-color:var(--border); }
+  .doc-btn-delete   { background:none; color:var(--muted); border-color:var(--text2); font-weight:600; }
   .doc-btn-delete:hover { border-color:var(--down); color:var(--down); }
   .doc-btn-disabled { background:var(--surface2); color:var(--muted2); border-color:var(--border); cursor:not-allowed; opacity:0.5; }
 
@@ -717,17 +750,87 @@ document.getElementById('docUploadForm') && document.getElementById('docUploadFo
     .pd-summary-grid { grid-template-columns:1fr; }
   }
 </style>
-<script>
-function confirmArchive(id, name) {
-  if (confirm('Archive "' + name + '"?\n\nThis policy will be moved to Archive. It can be restored later.')) {
-    document.getElementById('archiveFormDetail').submit();
-  }
-}
-</script>
+<!-- Modal system -->
+<div class="mwl-modal-overlay" id="mwlModal">
+  <div class="mwl-modal">
+    <div class="mwl-modal-brand">MyWealthLens · Insurance Centre</div>
+    <div class="mwl-modal-title" id="mwlModalTitle"></div>
+    <div class="mwl-modal-body"  id="mwlModalBody"></div>
+    <div class="mwl-modal-actions">
+      <button class="mwl-modal-cancel"  id="mwlModalCancel">Cancel</button>
+      <button class="mwl-modal-confirm" id="mwlModalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .mwl-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px);}
+  .mwl-modal-overlay.active{display:flex;}
+  .mwl-modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:440px;width:90%;box-shadow:var(--shadow-lg);}
+  .mwl-modal-brand{font-size:0.72rem;color:var(--accent);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:12px;}
+  .mwl-modal-title{font-size:1.1rem;font-weight:700;color:var(--text);margin-bottom:10px;}
+  .mwl-modal-body{font-size:0.875rem;color:var(--text2);line-height:1.6;margin-bottom:24px;}
+  .mwl-modal-actions{display:flex;gap:10px;justify-content:flex-end;}
+  .mwl-modal-cancel{background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:8px;padding:9px 18px;font-size:0.875rem;font-family:var(--font-ui);cursor:pointer;}
+  .mwl-modal-confirm{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:0.875rem;font-weight:700;font-family:var(--font-ui);cursor:pointer;}
+  .mwl-modal-confirm.danger{background:var(--down);}
+  .ic-btn-restore{background:var(--up-bg);color:var(--up);border:1px solid var(--up);border-radius:8px;padding:10px 18px;font-size:0.82rem;font-weight:600;font-family:var(--font-ui);cursor:pointer;transition:all 0.2s;}
+  .ic-btn-restore:hover{background:var(--up);color:#fff;}
+  .ic-btn-delete-perm{background:none;color:var(--down);border:1px solid var(--down);border-radius:8px;padding:10px 18px;font-size:0.82rem;font-weight:600;font-family:var(--font-ui);cursor:pointer;transition:all 0.2s;}
+  .ic-btn-delete-perm:hover{background:var(--down);color:#fff;}
+</style>
+
+
+
+
 
 <script>
+// ── Modal System ──────────────────────────────────────────────────
+function showModal(title, body, onConfirm, confirmText, isDanger) {
+  document.getElementById('mwlModalTitle').innerHTML = title;
+  document.getElementById('mwlModalBody').innerHTML  = body;
+  document.getElementById('mwlModalConfirm').textContent = confirmText || 'Confirm';
+  document.getElementById('mwlModalConfirm').className = 'mwl-modal-confirm' + (isDanger ? ' danger' : '');
+  document.getElementById('mwlModalConfirm').onclick = function() { closeModal(); onConfirm(); };
+  document.getElementById('mwlModalCancel').onclick  = closeModal;
+  document.getElementById('mwlModal').onclick = function(e) { if(e.target===this) closeModal(); };
+  document.getElementById('mwlModal').classList.add('active');
+}
+function closeModal() {
+  document.getElementById('mwlModal').classList.remove('active');
+}
+
+// ── Archive / Restore / Delete ────────────────────────────────────
+function confirmArchive(id, name) {
+  showModal(
+    'Archive "' + name + '"?',
+    'This policy will be moved to Archive.<br>You can restore it at any time.',
+    function() { document.getElementById('archiveFormDetail').submit(); },
+    'Archive Policy', false
+  );
+}
+function confirmRestore(id, name) {
+  showModal(
+    'Restore "' + name + '"?',
+    'This policy will be returned to your active list.',
+    function() { document.getElementById('restoreFormDetail').submit(); },
+    'Restore Policy', false
+  );
+}
+function confirmPermanentDelete(id, name) {
+  showModal(
+    'Permanently Delete "' + name + '"?',
+    '<strong style="color:var(--down);">This action cannot be undone.</strong><br><br>' +
+    'All policy data, documents, nominees, and timeline history will be permanently removed.',
+    function() { document.getElementById('deletePermFormDetail').submit(); },
+    'Delete Permanently', true
+  );
+}
+
+// ── Document Upload ───────────────────────────────────────────────
 function toggleUploadForm() {
-  const form = document.getElementById('uploadForm');
+  var form = document.getElementById('uploadForm');
+  if (!form) return;
   form.style.display = form.style.display === 'none' ? 'block' : 'none';
   if (form.style.display === 'block') {
     form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -735,10 +838,11 @@ function toggleUploadForm() {
 }
 
 function showFileInfo(input) {
-  const info = document.getElementById('fileInfo');
+  var info = document.getElementById('fileInfo');
+  if (!info) return;
   if (input.files && input.files[0]) {
-    const file = input.files[0];
-    const size = file.size > 1024*1024
+    var file = input.files[0];
+    var size = file.size > 1024*1024
       ? (file.size/(1024*1024)).toFixed(1) + ' MB'
       : (file.size/1024).toFixed(0) + ' KB';
     info.textContent = file.name + ' (' + size + ')';
@@ -747,27 +851,24 @@ function showFileInfo(input) {
 }
 
 function confirmDeleteDoc(id, name) {
-  if (confirm(
-    'Delete Document?
-
-' +
-    '"' + name + '"
-
-' +
-    'This permanently removes the file from local storage.
-
-' +
-    'This action cannot be undone.'
-  )) {
-    document.getElementById('delDocForm' + id).submit();
-  }
+  showModal(
+    'Delete Document?',
+    '"' + name + '"<br><br>This permanently removes the file from local storage.<br>This action cannot be undone.',
+    function() { document.getElementById('delDocForm' + id).submit(); },
+    'Delete', true
+  );
 }
 
-document.getElementById('docUploadForm') && document.getElementById('docUploadForm')
-  .addEventListener('submit', function() {
-    const btn = document.getElementById('uploadSubmitBtn');
-    btn.textContent = 'Uploading…';
-    btn.disabled = true;
-  });
+// ── Upload form submit state ──────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  var uploadForm = document.getElementById('docUploadForm');
+  if (uploadForm) {
+    uploadForm.addEventListener('submit', function() {
+      var btn = document.getElementById('uploadSubmitBtn');
+      if (btn) { btn.textContent = 'Uploading…'; btn.disabled = true; }
+    });
+  }
+});
 </script>
+
 {% endblock %}
