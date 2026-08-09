@@ -2,6 +2,20 @@
 {% block title %}Archive — Insurance Centre{% endblock %}
 
 {% block content %}
+
+<!-- Modal -->
+<div class="mwl-modal-overlay" id="mwlModal">
+  <div class="mwl-modal">
+    <div class="mwl-modal-brand">MyWealthLens · Insurance Centre</div>
+    <div class="mwl-modal-title" id="mwlModalTitle"></div>
+    <div class="mwl-modal-body"  id="mwlModalBody"></div>
+    <div class="mwl-modal-actions">
+      <button class="mwl-modal-cancel"  id="mwlModalCancel">Cancel</button>
+      <button class="mwl-modal-confirm" id="mwlModalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
 <div class="ic-wrap">
 
   <div class="ic-breadcrumb">
@@ -17,7 +31,7 @@
       <h1 class="ic-title">🗄 Archived Policies</h1>
       <p class="ic-subtitle">Archived policies are hidden from active views but never deleted.</p>
     </div>
-    <a href="/insurance-centre/policies" class="ic-btn-secondary">← Back to Policies</a>
+    <a href="/insurance-centre/policies" class="ic-back-btn">← Back to Policies</a>
   </div>
 
   {% if policies %}
@@ -62,20 +76,29 @@
         {% endif %}
       </div>
 
-      <!-- Actions -->
       <div class="pl-actions">
-        <a href="/insurance-centre/policy/{{ p.id }}" class="pl-view-btn">View →</a>
-        <button class="pl-restore-btn"
+        <a href="/insurance-centre/policy/{{ p.id }}" class="pl-btn pl-btn-view">View →</a>
+        <a href="/insurance-centre/policy/{{ p.id }}/edit" class="pl-btn pl-btn-edit">Edit</a>
+        <button class="pl-btn pl-btn-restore"
           onclick="confirmRestore({{ p.id }}, '{{ p.display_type }}')">
           Restore
         </button>
+        <button class="pl-btn pl-btn-delete"
+          onclick="confirmPermanentDelete({{ p.id }}, '{{ p.display_type }}')">
+          🗑 Delete
+        </button>
       </div>
 
-      <!-- Hidden restore form -->
+      <!-- Hidden forms -->
       <form method="POST" action="/insurance-centre/policy/{{ p.id }}/restore"
             id="restoreForm{{ p.id }}" style="display:none;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       </form>
+      <form method="POST" action="/insurance-centre/policy/{{ p.id }}/delete"
+            id="deletePermForm{{ p.id }}" style="display:none;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      </form>
+
     </div>
     {% endfor %}
   </div>
@@ -92,56 +115,104 @@
 </div>
 
 <style>
-  .ic-wrap            { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
-  .ic-breadcrumb      { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .ic-breadcrumb-link { color:var(--muted); text-decoration:none; font-size:0.85rem; }
+  .ic-wrap         { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
+  .ic-breadcrumb   { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .ic-breadcrumb-link { color:var(--text); text-decoration:none; font-size:0.92rem; font-weight:600; }
   .ic-breadcrumb-link:hover { color:var(--accent); }
-  .ic-breadcrumb-sep  { color:var(--border); }
-  .ic-breadcrumb-current { font-size:0.85rem; color:var(--text2); }
-  .ic-header          { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; }
-  .ic-title           { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
-  .ic-subtitle        { font-size:0.875rem; color:var(--muted); }
-  .ic-btn-primary     { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:0.875rem; font-weight:700; text-decoration:none; display:inline-block; transition:opacity 0.2s; }
-  .ic-btn-primary:hover { opacity:0.88; }
-  .ic-btn-lg          { padding:12px 28px; font-size:0.95rem; }
-  .ic-btn-secondary   { background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:10px 18px; font-size:0.82rem; font-weight:500; text-decoration:none; transition:all 0.2s; }
-  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
-  .ic-empty-state     { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:60px 32px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
-  .ic-empty-icon      { font-size:3.5rem; }
-  .ic-empty-title     { font-size:1.2rem; font-weight:700; color:var(--text); }
-  .ic-empty-desc      { font-size:0.875rem; color:var(--muted); max-width:400px; line-height:1.6; }
-  .ic-badge           { display:inline-block; padding:3px 10px; border-radius:12px; font-size:0.7rem; font-weight:600; border:1px solid; }
-  .ic-badge-accent    { background:var(--accent-bg);  color:var(--accent);  border-color:var(--accent); }
-  .ic-badge-muted     { background:var(--surface2);   color:var(--muted);   border-color:var(--border); }
-  .pl-grid            { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
-  .pl-card            { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:12px; }
-  .pl-card--archived  { opacity:0.85; border-style:dashed; }
-  .pl-card-top        { display:flex; justify-content:space-between; align-items:flex-start; }
-  .pl-icon-wrap       { width:44px; height:44px; border-radius:10px; background:var(--surface2); display:flex; align-items:center; justify-content:center; }
-  .pl-icon            { font-size:1.4rem; }
-  .pl-badges          { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
-  .pl-type            { font-size:1rem; font-weight:700; color:var(--text); }
-  .pl-insurer         { font-size:0.85rem; color:var(--muted); font-weight:500; }
-  .pl-policy-name     { font-size:0.78rem; color:var(--muted2); }
-  .pl-details         { display:flex; flex-direction:column; gap:6px; padding:12px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
-  .pl-detail-row      { display:flex; justify-content:space-between; }
-  .pl-detail-label    { font-size:0.75rem; color:var(--muted); }
-  .pl-detail-value    { font-size:0.82rem; color:var(--text2); font-weight:500; }
-  .pl-coverage        { font-family:var(--font-data); color:var(--accent); font-weight:700; }
-  .pl-actions         { display:flex; gap:8px; margin-top:auto; }
-  .pl-view-btn        { flex:1; text-align:center; background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:9px; font-size:0.82rem; font-weight:500; text-decoration:none; transition:all 0.2s; }
-  .pl-view-btn:hover  { border-color:var(--accent); color:var(--accent); }
-  .pl-restore-btn     { flex:1; background:var(--up-bg); color:var(--up); border:1px solid var(--up); border-radius:8px; padding:9px; font-size:0.82rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; transition:all 0.2s; }
-  .pl-restore-btn:hover { background:var(--up); color:#fff; }
+  .ic-breadcrumb-sep  { color:var(--text2); font-weight:600; }
+  .ic-breadcrumb-current { font-size:0.92rem; color:var(--text); font-weight:700; }
+  .ic-header       { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; }
+  .ic-title        { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+  .ic-subtitle     { font-size:0.875rem; color:var(--muted); }
+  .ic-back-btn     { background:none; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 18px; font-size:0.82rem; font-weight:600; text-decoration:none; transition:all 0.2s; }
+  .ic-back-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .ic-btn-primary  { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:0.875rem; font-weight:700; text-decoration:none; display:inline-block; }
+  .ic-btn-lg       { padding:12px 28px; font-size:0.95rem; }
+  .ic-empty-state  { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:60px 32px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .ic-empty-icon   { font-size:3.5rem; }
+  .ic-empty-title  { font-size:1.2rem; font-weight:700; color:var(--text); }
+  .ic-empty-desc   { font-size:0.875rem; color:var(--muted); max-width:400px; line-height:1.6; }
+
+  .ic-badge        { display:inline-block; padding:3px 10px; border-radius:12px; font-size:0.7rem; font-weight:600; border:1px solid; }
+  .ic-badge-accent { background:var(--accent-bg); color:var(--accent); border-color:var(--accent); }
+  .ic-badge-muted  { background:var(--surface2); color:var(--muted); border-color:var(--border); }
+
+  .pl-grid         { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; }
+  .pl-card         { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:12px; }
+  .pl-card--archived { opacity:0.9; border-style:dashed; }
+  .pl-card-top     { display:flex; justify-content:space-between; align-items:flex-start; }
+  .pl-icon-wrap    { width:44px; height:44px; border-radius:10px; background:var(--surface2); display:flex; align-items:center; justify-content:center; }
+  .pl-icon         { font-size:1.4rem; }
+  .pl-badges       { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
+  .pl-type         { font-size:1rem; font-weight:700; color:var(--text); }
+  .pl-insurer      { font-size:0.85rem; color:var(--muted); font-weight:500; }
+  .pl-policy-name  { font-size:0.78rem; color:var(--muted2); }
+  .pl-details      { display:flex; flex-direction:column; gap:6px; padding:12px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .pl-detail-row   { display:flex; justify-content:space-between; }
+  .pl-detail-label { font-size:0.75rem; color:var(--muted); }
+  .pl-detail-value { font-size:0.82rem; color:var(--text2); font-weight:500; }
+  .pl-coverage     { font-family:var(--font-data); color:var(--accent); font-weight:700; }
+
+  /* Equal-width buttons */
+  .pl-actions      { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:6px; margin-top:auto; }
+  .pl-btn          { text-align:center; border-radius:8px; padding:9px 4px; font-size:0.78rem; font-weight:600; font-family:var(--font-ui); cursor:pointer; transition:all 0.2s; border:1px solid; text-decoration:none; display:block; }
+  .pl-btn-view     { background:var(--surface2); color:var(--text); border-color:var(--border); }
+  .pl-btn-view:hover { border-color:var(--accent); color:var(--accent); }
+  .pl-btn-edit     { background:var(--surface2); color:var(--text); border-color:var(--border); }
+  .pl-btn-edit:hover { border-color:var(--accent); color:var(--accent); }
+  .pl-btn-restore  { background:var(--up-bg); color:var(--up); border-color:var(--up); }
+  .pl-btn-restore:hover { background:var(--up); color:#fff; }
+  .pl-btn-delete   { background:var(--down-bg); color:var(--down); border-color:var(--down); }
+  .pl-btn-delete:hover { background:var(--down); color:#fff; }
+
+  /* Modal */
+  .mwl-modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center; backdrop-filter:blur(2px); }
+  .mwl-modal-overlay.active { display:flex; }
+  .mwl-modal       { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:32px; max-width:440px; width:90%; box-shadow:var(--shadow-lg); animation:modalIn 0.2s ease; }
+  @keyframes modalIn { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
+  .mwl-modal-brand { font-size:0.72rem; color:var(--accent); font-weight:700; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:12px; }
+  .mwl-modal-title { font-size:1.1rem; font-weight:700; color:var(--text); margin-bottom:10px; }
+  .mwl-modal-body  { font-size:0.875rem; color:var(--text2); line-height:1.6; margin-bottom:24px; }
+  .mwl-modal-actions { display:flex; gap:10px; justify-content:flex-end; }
+  .mwl-modal-cancel  { background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:9px 18px; font-size:0.875rem; font-family:var(--font-ui); cursor:pointer; }
+  .mwl-modal-confirm { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 18px; font-size:0.875rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; }
+  .mwl-modal-confirm.danger { background:var(--down); }
+
   @media (max-width:1024px) { .pl-grid { grid-template-columns:repeat(2,1fr); } }
-  @media (max-width:640px)  { .pl-grid { grid-template-columns:1fr; } }
+  @media (max-width:640px)  { .pl-grid { grid-template-columns:1fr; } .pl-actions { grid-template-columns:1fr 1fr; } }
 </style>
 
 <script>
+function showModal(title, body, onConfirm, confirmText, isDanger) {
+  document.getElementById('mwlModalTitle').innerHTML = title;
+  document.getElementById('mwlModalBody').innerHTML  = body;
+  document.getElementById('mwlModalConfirm').textContent = confirmText || 'Confirm';
+  document.getElementById('mwlModalConfirm').className = 'mwl-modal-confirm' + (isDanger ? ' danger' : '');
+  document.getElementById('mwlModalConfirm').onclick = function() { closeModal(); onConfirm(); };
+  document.getElementById('mwlModalCancel').onclick  = closeModal;
+  document.getElementById('mwlModal').onclick = function(e) { if(e.target===this) closeModal(); };
+  document.getElementById('mwlModal').classList.add('active');
+}
+function closeModal() {
+  document.getElementById('mwlModal').classList.remove('active');
+}
 function confirmRestore(id, name) {
-  if (confirm('Restore "' + name + '"?\n\nThis policy will return to your active list.')) {
-    document.getElementById('restoreForm' + id).submit();
-  }
+  showModal(
+    'Restore "' + name + '"?',
+    'This policy will be returned to your active list.',
+    function() { document.getElementById('restoreForm' + id).submit(); },
+    'Restore Policy', false
+  );
+}
+function confirmPermanentDelete(id, name) {
+  showModal(
+    'Permanently Delete "' + name + '"?',
+    '<strong style="color:var(--down);">This action cannot be undone.</strong><br><br>' +
+    'All policy data, documents, nominees, and timeline history will be permanently removed from local storage.',
+    function() { document.getElementById('deletePermForm' + id).submit(); },
+    'Delete Permanently', true
+  );
 }
 </script>
+
 {% endblock %}

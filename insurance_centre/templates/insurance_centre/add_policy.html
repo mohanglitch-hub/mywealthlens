@@ -1,5 +1,51 @@
 {% extends "base.html" %}
-{% block title %}{% if is_edit %}Edit Policy{% else %}Add Policy{% endif %} — Insurance Centre{% endblock %}
+{% block title %}{% if is_edit %}Edit Policy{% else %}Add Policy{% endif %} — Insurance Centre
+</script>
+
+<!-- ── MyWealthLens Modal ── -->
+<div class="mwl-modal-overlay" id="mwlModal">
+  <div class="mwl-modal">
+    <div class="mwl-modal-brand">MyWealthLens · Insurance Centre</div>
+    <div class="mwl-modal-title" id="mwlModalTitle"></div>
+    <div class="mwl-modal-body"  id="mwlModalBody"></div>
+    <div class="mwl-modal-actions">
+      <button class="mwl-modal-cancel"  id="mwlModalCancel">Cancel</button>
+      <button class="mwl-modal-confirm" id="mwlModalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showModal(title, body, onConfirm, confirmText, cancelText, isDanger) {
+  document.getElementById('mwlModalTitle').innerHTML   = title || '';
+  document.getElementById('mwlModalBody').innerHTML    = body  || '';
+  document.getElementById('mwlModalConfirm').textContent = confirmText || 'Confirm';
+  document.getElementById('mwlModalCancel').textContent  = cancelText  || 'Cancel';
+  const btn = document.getElementById('mwlModalConfirm');
+  btn.className = 'mwl-modal-confirm' + (isDanger ? ' danger' : '');
+
+  if (!onConfirm) {
+    document.getElementById('mwlModalConfirm').style.display = 'none';
+    document.getElementById('mwlModalCancel').textContent = cancelText || 'OK';
+  } else {
+    document.getElementById('mwlModalConfirm').style.display = '';
+    btn.onclick = function() {
+      closeModal();
+      onConfirm();
+    };
+  }
+
+  document.getElementById('mwlModal').classList.add('active');
+  document.getElementById('mwlModalCancel').onclick = closeModal;
+  document.getElementById('mwlModal').onclick = function(e) {
+    if (e.target === this) closeModal();
+  };
+}
+
+function closeModal() {
+  document.getElementById('mwlModal').classList.remove('active');
+}
+{% endblock %}
 
 {% block content %}
 <div class="ic-wrap">
@@ -65,7 +111,7 @@
         <label class="ic-label">Custom Insurance Type <span class="ic-required">*</span></label>
         <input type="text" name="custom_type" id="customTypeInput" class="ic-input"
                placeholder="e.g. Pet Insurance, Crop Insurance"
-               value="{{ request.form.get('custom_type', '') }}" />
+               value="{% if is_edit and policy.custom_type %}{{ policy.custom_type }}{% else %}{{ request.form.get('custom_type', '') }}{% endif %}" />
       </div>
     </div>
 
@@ -80,13 +126,13 @@
           <label class="ic-label">Insurance Company <span class="ic-required">*</span></label>
           <input type="text" name="insurer" class="ic-input"
                  placeholder="e.g. LIC, HDFC Ergo, Star Health"
-                 value="{{ request.form.get('insurer', '') }}" required />
+                 value="{% if is_edit and policy.insurer %}{{ policy.insurer }}{% else %}{{ request.form.get('insurer', '') }}{% endif %}" required />
         </div>
         <div class="ic-field">
           <label class="ic-label">Policy Name</label>
           <input type="text" name="policy_name" class="ic-input"
                  placeholder="e.g. Jeevan Anand, Optima Restore"
-                 value="{{ request.form.get('policy_name', '') }}" />
+                 value="{% if is_edit and policy.policy_name %}{{ policy.policy_name }}{% else %}{{ request.form.get('policy_name', '') }}{% endif %}" />
         </div>
       </div>
 
@@ -95,13 +141,13 @@
           <label class="ic-label">Policy Number</label>
           <input type="text" name="policy_number" class="ic-input"
                  placeholder="e.g. 123456789"
-                 value="{{ request.form.get('policy_number', '') }}" />
+                 value="{% if is_edit and policy.policy_number %}{{ policy.policy_number }}{% else %}{{ request.form.get('policy_number', '') }}{% endif %}" />
         </div>
         <div class="ic-field">
           <label class="ic-label">Policy Holder Name</label>
           <input type="text" name="policy_holder" class="ic-input"
                  placeholder="Name on the policy"
-                 value="{{ request.form.get('policy_holder', '') }}" />
+                 value="{% if is_edit and policy.policy_holder %}{{ policy.policy_holder }}{% else %}{{ request.form.get('policy_holder', '') }}{% endif %}" />
         </div>
       </div>
 
@@ -110,7 +156,7 @@
         <label class="ic-label">Vehicle Number</label>
         <input type="text" name="vehicle_number" class="ic-input"
                placeholder="e.g. KA01AB1234"
-               value="{{ request.form.get('vehicle_number', '') }}" />
+               value="{% if is_edit and policy.vehicle_number %}{{ policy.vehicle_number }}{% else %}{{ request.form.get('vehicle_number', '') }}{% endif %}" />
       </div>
 
       <!-- Property Name — Property only -->
@@ -118,7 +164,7 @@
         <label class="ic-label">Property Name / Address</label>
         <input type="text" name="property_name" class="ic-input"
                placeholder="e.g. Flat 4B, Prestige Tower, Koramangala"
-               value="{{ request.form.get('property_name', '') }}" />
+               value="{% if is_edit and policy.property_name %}{{ policy.property_name }}{% else %}{{ request.form.get('property_name', '') }}{% endif %}" />
       </div>
 
       <!-- Property Type — Property only -->
@@ -127,25 +173,9 @@
         <select name="property_type" class="ic-select">
           <option value="">— Select —</option>
           {% for pt in ['Apartment','Commercial','House','Land','Office','Shop','Other'] %}
-          <option value="{{ pt }}" {% if request.form.get('property_type') == pt %}selected{% endif %}>{{ pt }}</option>
+          <option value="{{ pt }}" {% if (is_edit and policy.property_type == pt) or request.form.get("property_type") == pt %}selected{% endif %}>{{ pt }}</option>
           {% endfor %}
         </select>
-      </div>
-    </div>
-
-    <!-- Agent Details — Life only (inline in Step 2) -->
-    <div class="ic-form-grid-2 ic-life-only" style="display:none;" id="agentFieldsInline">
-      <div class="ic-field">
-        <label class="ic-label">Agent Name</label>
-        <input type="text" name="agent_name" class="ic-input"
-               placeholder="e.g. Ramesh Kumar"
-               value="{% if is_edit and policy.agent_name %}{{ policy.agent_name }}{% else %}{{ request.form.get('agent_name', '') }}{% endif %}" />
-      </div>
-      <div class="ic-field">
-        <label class="ic-label">Agent Contact</label>
-        <input type="text" name="agent_contact" class="ic-input"
-               placeholder="+91 98765 43210"
-               value="{% if is_edit and policy.agent_contact %}{{ policy.agent_contact }}{% else %}{{ request.form.get('agent_contact', '') }}{% endif %}" />
       </div>
     </div>
 
@@ -160,20 +190,20 @@
           <label class="ic-label">Sum Assured / Cover (₹) <span class="ic-required">*</span></label>
           <input type="number" name="sum_assured" class="ic-input"
                  placeholder="e.g. 1000000" min="0" step="1"
-                 value="{{ request.form.get('sum_assured', '') }}" required />
+                 value="{% if is_edit and policy.sum_assured %}{{ policy.sum_assured }}{% else %}{{ request.form.get('sum_assured', '') }}{% endif %}" required />
         </div>
         <div class="ic-field">
           <label class="ic-label">Premium Amount (₹) <span class="ic-required">*</span></label>
           <input type="number" name="premium_amount" class="ic-input"
                  placeholder="e.g. 15000" min="0" step="0.01"
-                 value="{{ request.form.get('premium_amount', '') }}" required />
+                 value="{% if is_edit and policy.premium_amount %}{{ policy.premium_amount }}{% else %}{{ request.form.get('premium_amount', '') }}{% endif %}" required />
         </div>
         <div class="ic-field">
           <label class="ic-label">Premium Frequency <span class="ic-required">*</span></label>
           <select name="premium_frequency" class="ic-select" required>
             {% for freq in premium_frequencies %}
             <option value="{{ freq }}"
-              {% if request.form.get('premium_frequency', 'Yearly') == freq %}selected{% endif %}>
+              {% if (is_edit and policy.premium_frequency == freq) or (not is_edit and request.form.get('premium_frequency', 'Yearly') == freq) %}selected{% endif %}>
               {{ freq }}
             </option>
             {% endfor %}
@@ -185,8 +215,8 @@
       <div class="ic-field ic-general-only" style="display:none;">
         <label class="ic-label">Policy Type</label>
         <select name="policy_type" class="ic-select">
-          <option value="Recurring" {% if request.form.get('policy_type') == 'Recurring' %}selected{% endif %}>Recurring</option>
-          <option value="One-Time" {% if request.form.get('policy_type') == 'One-Time' %}selected{% endif %}>One-Time</option>
+          <option value="Recurring" {% if (is_edit and policy.policy_type == "Recurring") or request.form.get("policy_type") == "Recurring" %}selected{% endif %}>Recurring</option>
+          <option value="One-Time" {% if (is_edit and policy.policy_type == "One-Time") or request.form.get("policy_type") == "One-Time" %}selected{% endif %}>One-Time</option>
         </select>
       </div>
     </div>
@@ -204,7 +234,7 @@
             {% for s in policy_statuses %}
             {% if s != 'Archived' %}
             <option value="{{ s }}"
-              {% if request.form.get('status', 'Active') == s %}selected{% endif %}>
+              {% if (is_edit and policy.status == s) or (not is_edit and request.form.get('status', 'Active') == s) %}selected{% endif %}>
               {{ s }}
             </option>
             {% endif %}
@@ -214,7 +244,7 @@
         <div class="ic-field">
           <label class="ic-label">Policy Start Date</label>
           <input type="date" name="start_date" class="ic-input"
-                 value="{{ request.form.get('start_date', '') }}" />
+                 value="{% if is_edit and policy.start_date %}{{ policy.start_date }}{% else %}{{ request.form.get('start_date', '') }}{% endif %}" />
         </div>
       </div>
 
@@ -223,37 +253,32 @@
         <div class="ic-field ic-life-only" style="display:none;">
           <label class="ic-label">Maturity Date</label>
           <input type="date" name="maturity_date" class="ic-input"
-                 value="{{ request.form.get('maturity_date', '') }}" />
+                 value="{% if is_edit and policy.maturity_date %}{{ policy.maturity_date }}{% else %}{{ request.form.get('maturity_date', '') }}{% endif %}" />
         </div>
 
         <!-- Renewal Date — Health, Motor, Property, General -->
         <div class="ic-field ic-no-life" style="display:none;">
           <label class="ic-label">Renewal Date</label>
           <input type="date" name="renewal_date" class="ic-input"
-                 value="{{ request.form.get('renewal_date', '') }}" />
+                 value="{% if is_edit and policy.renewal_date %}{{ policy.renewal_date }}{% else %}{{ request.form.get('renewal_date', '') }}{% endif %}" />
         </div>
 
         <!-- Expiry Date — General -->
         <div class="ic-field ic-general-only" style="display:none;">
           <label class="ic-label">Expiry Date</label>
           <input type="date" name="expiry_date" class="ic-input"
-                 value="{{ request.form.get('expiry_date', '') }}" />
+                 value="{% if is_edit and policy.expiry_date %}{{ policy.expiry_date }}{% else %}{{ request.form.get('expiry_date', '') }}{% endif %}" />
         </div>
 
-        <!-- Start Date for General -->
-        <div class="ic-field ic-general-only" style="display:none;">
-          <label class="ic-label">Policy Start Date</label>
-          <input type="date" name="start_date_general" class="ic-input"
-                 value="{{ request.form.get('start_date_general', '') }}" />
-        </div>
+
       </div>
 
       <!-- Health: Cashless -->
       <div class="ic-field ic-health-only" style="display:none;">
         <label class="ic-label">Cashless Available</label>
         <select name="cashless_available" class="ic-select">
-          <option value="yes" {% if request.form.get('cashless_available') == 'yes' %}selected{% endif %}>Yes</option>
-          <option value="no"  {% if request.form.get('cashless_available') == 'no'  %}selected{% endif %}>No</option>
+          <option value="yes" {% if (is_edit and policy.cashless_available == "yes") or request.form.get("cashless_available") == "yes" %}selected{% endif %}>Yes</option>
+          <option value="no" {% if (is_edit and policy.cashless_available == "no") or request.form.get("cashless_available") == "no" %}selected{% endif %}>No</option>
         </select>
       </div>
 
@@ -261,7 +286,7 @@
       <div class="ic-field ic-motor-only" style="display:none;">
         <label class="ic-label">Claim History</label>
         <textarea name="claim_history" class="ic-textarea" rows="2"
-                  placeholder="e.g. 1 claim in 2023 for ₹25,000">{{ request.form.get('claim_history', '') }}</textarea>
+                  placeholder="e.g. 1 claim in 2023 for ₹25,000">{% if is_edit and policy.claim_history %}{{ policy.claim_history }}{% else %}{{ request.form.get("claim_history", "") }}{% endif %}</textarea>
       </div>
     </div>
 
@@ -275,13 +300,13 @@
           <label class="ic-label">Agent Name</label>
           <input type="text" name="agent_name" class="ic-input"
                  placeholder="e.g. Ramesh Kumar"
-                 value="{{ request.form.get('agent_name', '') }}" />
+                 value="{% if is_edit and policy.agent_name %}{{ policy.agent_name }}{% else %}{{ request.form.get('agent_name', '') }}{% endif %}" />
         </div>
         <div class="ic-field">
           <label class="ic-label">Agent Contact</label>
           <input type="text" name="agent_contact" class="ic-input"
                  placeholder="e.g. +91 98765 43210"
-                 value="{{ request.form.get('agent_contact', '') }}" />
+                 value="{% if is_edit and policy.agent_contact %}{{ policy.agent_contact }}{% else %}{{ request.form.get('agent_contact', '') }}{% endif %}" />
         </div>
       </div>
     </div>
@@ -399,7 +424,7 @@
       <div class="ic-field">
         <label class="ic-label">Notes</label>
         <textarea name="notes" class="ic-textarea" rows="3"
-                  placeholder="Any additional information about this policy...">{{ request.form.get('notes', '') }}</textarea>
+                  placeholder="Any additional information about this policy...">{% if is_edit and policy.notes %}{{ policy.notes }}{% else %}{{ request.form.get("notes", "") }}{% endif %}</textarea>
       </div>
     </div>
 
@@ -482,10 +507,10 @@
 <style>
   .ic-wrap           { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
   .ic-breadcrumb     { display:flex; align-items:center; gap:8px; }
-  .ic-breadcrumb-link{ color:var(--muted); text-decoration:none; font-size:0.85rem; transition:color 0.2s; }
+  .ic-breadcrumb-link{ color:var(--text); text-decoration:none; font-size:0.92rem; font-weight:600; transition:color 0.2s; }
   .ic-breadcrumb-link:hover { color:var(--accent); }
-  .ic-breadcrumb-sep { color:var(--border); }
-  .ic-breadcrumb-current { font-size:0.85rem; color:var(--text2); }
+  .ic-breadcrumb-sep { color:var(--text2); font-weight:600; }
+  .ic-breadcrumb-current { font-size:0.92rem; color:var(--text); font-weight:700; }
 
   .ic-form-header    { margin-bottom:4px; }
   .ic-title          { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
@@ -588,6 +613,30 @@
   .ic-btn-submit:hover    { opacity:0.88; }
   .ic-btn-submit:disabled { opacity:0.5; cursor:not-allowed; }
 
+
+  /* ── Modal System ── */
+  .mwl-modal-overlay {
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5);
+    z-index:1000; align-items:center; justify-content:center;
+    backdrop-filter:blur(2px);
+  }
+  .mwl-modal-overlay.active { display:flex; }
+  .mwl-modal {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:16px; padding:32px; max-width:440px; width:90%;
+    box-shadow:var(--shadow-lg); animation:modalIn 0.2s ease;
+  }
+  @keyframes modalIn { from { opacity:0; transform:scale(0.95); } to { opacity:1; transform:scale(1); } }
+  .mwl-modal-brand  { font-size:0.72rem; color:var(--accent); font-weight:700; letter-spacing:0.1em; text-transform:uppercase; margin-bottom:12px; }
+  .mwl-modal-title  { font-size:1.1rem; font-weight:700; color:var(--text); margin-bottom:10px; }
+  .mwl-modal-body   { font-size:0.875rem; color:var(--text2); line-height:1.6; margin-bottom:24px; }
+  .mwl-modal-actions{ display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap; }
+  .mwl-modal-cancel { background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:9px 18px; font-size:0.875rem; font-family:var(--font-ui); cursor:pointer; transition:all 0.2s; }
+  .mwl-modal-cancel:hover { border-color:var(--muted); }
+  .mwl-modal-confirm{ background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 18px; font-size:0.875rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; transition:opacity 0.2s; }
+  .mwl-modal-confirm:hover { opacity:0.88; }
+  .mwl-modal-confirm.danger { background:var(--down); }
+
   @media (max-width:768px) {
     .ic-form-grid-2, .ic-form-grid-3 { grid-template-columns:1fr; }
     .ic-form-card { padding:16px; }
@@ -688,13 +737,28 @@ function renumberCards(type) {
 // ── Nominee % validation ──────────────────────────────────────────
 function validateNomineePercentages() {
   const inputs = document.querySelectorAll('input[name="nominee_percentage[]"]');
+  if (inputs.length === 0) return true;
   let total = 0;
   inputs.forEach(inp => { total += parseFloat(inp.value) || 0; });
-  if (total > 100) {
-    alert(`Total nominee percentage is ${total}%. It cannot exceed 100%.`);
+  if (Math.abs(total - 100) > 0.01 && total > 0) {
+    showModal('Nominee Allocation Error',
+      `Total nominee percentage is <strong>${total.toFixed(1)}%</strong>.<br>
+       Nominees must total exactly <strong>100%</strong>.`,
+      null, null, 'OK', false);
     return false;
   }
   return true;
+}
+
+function updateRemainingPercentage() {
+  const inputs = document.querySelectorAll('input[name="nominee_percentage[]"]');
+  let total = 0;
+  inputs.forEach(inp => { total += parseFloat(inp.value) || 0; });
+  const remaining = Math.max(0, 100 - total);
+  document.querySelectorAll('.nominee-remaining').forEach(el => {
+    el.textContent = `Remaining: ${remaining.toFixed(1)}%`;
+    el.style.color = remaining === 0 ? 'var(--up)' : 'var(--warning)';
+  });
 }
 
 // ── Form submit ───────────────────────────────────────────────────
@@ -742,11 +806,13 @@ window.addEventListener('DOMContentLoaded', function() {
     }, 50);
   }
   {% else %}
-  // Add mode — restore after validation failure
-  const savedCat = '{{ request.form.get("category", "") }}';
-  if (savedCat) {
-    document.getElementById('categorySelect').value = savedCat;
-    onCategoryChange(savedCat);
+  // Add mode — restore after validation failure OR apply preset
+  const savedCat   = '{{ request.form.get("category", "") }}';
+  const presetCat  = '{{ preset_category | default("") }}';
+  const activeCat  = savedCat || presetCat;
+  if (activeCat) {
+    document.getElementById('categorySelect').value = activeCat;
+    onCategoryChange(activeCat);
     const savedType = '{{ request.form.get("insurance_type", "") }}';
     if (savedType) {
       setTimeout(function() {
@@ -758,4 +824,50 @@ window.addEventListener('DOMContentLoaded', function() {
   {% endif %}
 });
 </script>
+
+</script>
+
+<!-- ── MyWealthLens Modal ── -->
+<div class="mwl-modal-overlay" id="mwlModal">
+  <div class="mwl-modal">
+    <div class="mwl-modal-brand">MyWealthLens · Insurance Centre</div>
+    <div class="mwl-modal-title" id="mwlModalTitle"></div>
+    <div class="mwl-modal-body"  id="mwlModalBody"></div>
+    <div class="mwl-modal-actions">
+      <button class="mwl-modal-cancel"  id="mwlModalCancel">Cancel</button>
+      <button class="mwl-modal-confirm" id="mwlModalConfirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showModal(title, body, onConfirm, confirmText, cancelText, isDanger) {
+  document.getElementById('mwlModalTitle').innerHTML   = title || '';
+  document.getElementById('mwlModalBody').innerHTML    = body  || '';
+  document.getElementById('mwlModalConfirm').textContent = confirmText || 'Confirm';
+  document.getElementById('mwlModalCancel').textContent  = cancelText  || 'Cancel';
+  const btn = document.getElementById('mwlModalConfirm');
+  btn.className = 'mwl-modal-confirm' + (isDanger ? ' danger' : '');
+
+  if (!onConfirm) {
+    document.getElementById('mwlModalConfirm').style.display = 'none';
+    document.getElementById('mwlModalCancel').textContent = cancelText || 'OK';
+  } else {
+    document.getElementById('mwlModalConfirm').style.display = '';
+    btn.onclick = function() {
+      closeModal();
+      onConfirm();
+    };
+  }
+
+  document.getElementById('mwlModal').classList.add('active');
+  document.getElementById('mwlModalCancel').onclick = closeModal;
+  document.getElementById('mwlModal').onclick = function(e) {
+    if (e.target === this) closeModal();
+  };
+}
+
+function closeModal() {
+  document.getElementById('mwlModal').classList.remove('active');
+}
 {% endblock %}
