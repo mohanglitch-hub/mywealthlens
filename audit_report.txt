@@ -1,0 +1,278 @@
+======================================================================
+1. PROJECT FILE TREE
+======================================================================
+  app.py
+  assets_fixed.html
+  audit_mywealthlens.py
+  check_db.py
+  dashboard.html
+  export_routes.py
+  fix_csrf.py
+  goals.html
+  insurance.html
+  loans.html
+  models.py
+  phase3_write.py
+  phase3b_write.py
+  phase_insurance_a.py
+  requirements.txt
+  write_app.py
+  write_base.py
+  insurance_centre/
+    __init__.py
+    app.py
+    migrate.py
+    migrate_phase6.py
+    migrate_phase8.py
+    models.py
+    register.py
+    routes.py
+    services.py
+    utils.py
+    validators.py
+    templates/
+      insurance_centre/
+        add_policy.html
+        archive_listing.html
+        category_placeholder.html
+        category_view.html
+        dashboard.html
+        document_vault.html
+        policy_detail.html
+        policy_listing.html
+  templates/
+    assets.html
+    base.html
+    dashboard.html
+    family.html
+    family_manage.html
+    forgot_password.html
+    goals.html
+    login.html
+    preferences.html
+    signup.html
+    upload.html
+
+======================================================================
+2. ALL @app.route ENTRIES IN app.py
+======================================================================
+  line 59: @app.route('/')
+  line 65: @app.route('/signup', methods=['GET', 'POST'])
+  line 97: @app.route('/login', methods=['GET', 'POST'])
+  line 115: @app.route('/logout')
+  line 122: @app.route('/forgot-password', methods=['GET', 'POST'])
+  line 157: @app.route('/dashboard')
+  line 204: @app.route('/assets')
+  line 210: @app.route('/preferences')
+  line 231: @app.route('/account')
+  line 236: @app.route('/settings')
+  line 241: @app.route('/api/mcx-prices')
+  line 245: @app.route('/assets/add', methods=['POST'])
+  line 328: @app.route('/assets/delete/<int:asset_id>', methods=['POST'])
+  line 503: @app.route('/upload')
+  line 510: @app.route('/upload/cams', methods=['POST'])
+  line 541: @app.route('/upload/cdsl', methods=['POST'])
+  line 581: @app.route('/upload/delete-mf', methods=['POST'])
+  line 589: @app.route('/upload/delete-stocks', methods=['POST'])
+  line 638: @app.route('/goals')
+  line 648: @app.route('/goals/add', methods=['POST'])
+  line 677: @app.route('/goals/delete/<int:goal_id>', methods=['POST'])
+  line 856: @app.route('/life-stage')
+  line 882: @app.route('/life-stage/save-profile', methods=['POST'])
+  line 907: @app.route('/life-stage/widget-data')
+  line 1051: @app.route('/export/pdf')
+  line 1347: @app.route('/export/excel')
+  line 1647: @app.route('/account/change-password', methods=['POST'])
+
+======================================================================
+3. IMPORTS & BLUEPRINT REGISTRATIONS IN app.py
+======================================================================
+  line 1: from flask import Flask, jsonify, render_template, redirect, url_for, request, flash, session
+  line 2: from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+  line 3: from flask_wtf.csrf import CSRFProtect
+  line 4: from flask_limiter import Limiter
+  line 5: from flask_limiter.util import get_remote_address
+  line 6: import bcrypt, pdfplumber, io, re, yfinance as yf
+  line 7: from datetime import datetime as dt, timedelta
+  line 8: from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, Insurance, NetWorthHistory, Family, FamilyMember, FamilyInvite
+  line 9: from insurance_centre import insurance_bp
+  line 10: from insurance_centre.models import (
+  line 134: from datetime import date as _date
+  line 598: import math as _math
+  line 599: from datetime import datetime as _dt
+  line 931: from flask import send_file
+  line 932: from reportlab.lib import colors
+  line 933: from reportlab.lib.pagesizes import A4
+  line 934: from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+  line 935: from reportlab.lib.units import mm
+  line 936: from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+  line 937: from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+  line 939: from reportlab.platypus import PageBreak
+  line 940: import openpyxl
+  line 941: from openpyxl.styles import (Font, PatternFill, Alignment, Border, Side,
+  line 943: from openpyxl.utils import get_column_letter
+  line 944: import io as _io
+  line 945: from datetime import datetime as _dt
+  line 1668: app.register_blueprint(insurance_bp)
+
+======================================================================
+4. REFERENCES TO "Insurance" (excluding InsurancePolicy/InsuranceCentre etc.)
+======================================================================
+  app.py:8: from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, Insurance, NetWorthHistory, Family, FamilyMember, FamilyInvite
+  audit_mywealthlens.py:8: top-level imports, blueprint registrations, every place "Insurance"
+  audit_mywealthlens.py:73: # ── 4. Every reference to "Insurance" (old model) across .py files ───
+  audit_mywealthlens.py:75: p('4. REFERENCES TO "Insurance" (excluding InsurancePolicy/InsuranceCentre etc.)')
+  models.py:12: 8. Insurance        — insurance policies
+  models.py:135: class Insurance(db.Model):
+  models.py:150: return f"<Insurance {self.insurance_type} {self.insurer}>"
+  phase3_write.py:38: class Insurance(db.Model):
+  phase3_write.py:104: new_import = "from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, Insurance, NetWorthHistory, EmergencyFund, TaxEntry80C"
+  phase3_write.py:190: policies  = Insurance.query.filter_by(user_id=current_user.id).order_by(Insurance.renewal_date).all()
+  phase3_write.py:203: pol = Insurance(
+  phase3_write.py:221: pol = Insurance.query.get_or_404(pol_id)
+  phase3_write.py:366: '      <a href="/insurance">Insurance</a>\n'
+  phase3_write.py:374: '      <a href="/insurance">Insurance</a>\n'
+  phase_insurance_a.py:2: Insurance Centre — Phase A
+  write_base.py:302: <a href="/insurance">Insurance</a>
+  write_base.py:322: <a href="/insurance">Insurance</a>
+  insurance_centre\migrate.py:2: Insurance Centre — Migration Script
+  insurance_centre\migrate.py:22: print("Insurance Centre — Phase 2 Migration")
+  insurance_centre\migrate.py:100: "term":    "Term Insurance",
+  insurance_centre\migrate.py:101: "health":  "Individual Health Insurance",
+  insurance_centre\migrate.py:102: "vehicle": "Car Insurance (Comprehensive)",
+  insurance_centre\migrate.py:103: "home":    "Home Insurance",
+  insurance_centre\migrate_phase6.py:2: Insurance Centre — Phase 6 Migration
+  insurance_centre\migrate_phase8.py:2: Insurance Centre — Phase 8 Migration
+  insurance_centre\models.py:2: Insurance Centre — Models
+  insurance_centre\models.py:4: Phase 2: Full database architecture for MyWealthLens Insurance Centre.
+  insurance_centre\models.py:29: LIFE       = "Life Insurance"
+  insurance_centre\models.py:30: HEALTH     = "Health Insurance"
+  insurance_centre\models.py:31: MOTOR      = "Motor Insurance"
+  insurance_centre\models.py:32: PROPERTY   = "Property Insurance"
+  insurance_centre\models.py:33: GENERAL    = "General Insurance"
+  insurance_centre\models.py:41: "Term Insurance",
+  insurance_centre\models.py:42: "Whole Life Insurance",
+  insurance_centre\models.py:44: "ULIP (Unit Linked Insurance Plan)",
+  insurance_centre\models.py:48: "Group Term Insurance",
+  insurance_centre\models.py:52: "Individual Health Insurance",
+  insurance_centre\models.py:54: "Senior Citizen Health Insurance",
+  insurance_centre\models.py:56: "Personal Accident Insurance",
+  insurance_centre\models.py:57: "Group Health Insurance",
+  insurance_centre\models.py:60: "Maternity Insurance",
+  insurance_centre\models.py:64: "Car Insurance (Comprehensive)",
+  insurance_centre\models.py:65: "Car Insurance (Third Party)",
+  insurance_centre\models.py:66: "Two-Wheeler Insurance (Comprehensive)",
+  insurance_centre\models.py:67: "Two-Wheeler Insurance (Third Party)",
+  insurance_centre\models.py:68: "Commercial Vehicle Insurance",
+  insurance_centre\models.py:72: "Home Insurance",
+  insurance_centre\models.py:73: "Renter's Insurance",
+  insurance_centre\models.py:74: "Fire Insurance",
+  insurance_centre\models.py:75: "Flood Insurance",
+  insurance_centre\models.py:76: "Burglary Insurance",
+  insurance_centre\models.py:77: "Shop / Office Insurance",
+  insurance_centre\models.py:81: "Travel Insurance",
+  insurance_centre\models.py:82: "Marine Insurance",
+  insurance_centre\models.py:83: "Liability Insurance",
+  insurance_centre\models.py:84: "Cyber Insurance",
+  insurance_centre\models.py:85: "Event Insurance",
+  insurance_centre\models.py:86: "Pet Insurance",
+  insurance_centre\models.py:87: "Mobile Insurance",
+  insurance_centre\models.py:253: # ── Life Insurance specific ──────────────────────────────────
+  insurance_centre\models.py:257: # ── Health Insurance specific ─────────────────────────────────
+  insurance_centre\models.py:261: # ── Motor Insurance specific ──────────────────────────────────
+  insurance_centre\models.py:264: # ── Property Insurance specific ───────────────────────────────
+  insurance_centre\models.py:268: # ── General Insurance specific ────────────────────────────────
+  insurance_centre\models.py:368: Health insured members — only for Health Insurance category.
+  insurance_centre\models.py:400: Motor insurance add-ons — only for Motor Insurance category.
+  insurance_centre\register.py:2: Insurance Centre — App Registration
+  insurance_centre\register.py:32: old = "from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, Insurance, NetWorthHistory, EmergencyFund, TaxEntry80C, Family, FamilyMember, FamilyInvite"
+  insurance_centre\register.py:51: # ── Step 3: Update navbar Insurance link in base.html ─────────────
+  insurance_centre\register.py:58: 'href="/insurance">Insurance',
+  insurance_centre\register.py:59: 'href="/insurance-centre">Insurance'
+  insurance_centre\register.py:63: print("✓ Step 3: Navbar updated — Insurance now points to /insurance-centre")
+  insurance_centre\register.py:74: ║  Insurance Centre registration complete!             ║
+  insurance_centre\routes.py:2: Insurance Centre — Routes
+  insurance_centre\routes.py:54: "Life Insurance":     "🛡️",
+  insurance_centre\routes.py:55: "Health Insurance":   "🏥",
+  insurance_centre\routes.py:56: "Motor Insurance":    "🚗",
+  insurance_centre\routes.py:57: "Property Insurance": "🏠",
+  insurance_centre\routes.py:58: "General Insurance":  "📋",
+  insurance_centre\routes.py:66: """Insurance Centre dashboard — uses InsuranceStatisticsService."""
+  insurance_centre\routes.py:656: title="MyWealthLens — Insurance Centre",
+  insurance_centre\routes.py:687: story.append(Paragraph("Insurance Centre", title))
+  insurance_centre\services.py:2: Insurance Centre — Services
+  insurance_centre\services.py:77: # ── Nominees (Life Insurance) ──────────────────────────────────
+  insurance_centre\services.py:105: # ── Insured Members (Health Insurance) ────────────────────────
+  insurance_centre\services.py:124: # ── Motor Add-ons (Motor Insurance) ───────────────────────────
+  insurance_centre\services.py:390: """Add a health insured member. Only valid for Health Insurance."""
+  insurance_centre\services.py:392: return None, "Members can only be added to Health Insurance policies."
+  insurance_centre\services.py:433: return None, "Add-ons are only valid for Motor Insurance."
+  insurance_centre\services.py:819: Centralised statistics for the Insurance Centre dashboard.
+  insurance_centre\utils.py:2: Insurance Centre — Utilities
+  insurance_centre\utils.py:135: "life":     "Life Insurance",
+  insurance_centre\utils.py:136: "health":   "Health Insurance",
+  insurance_centre\utils.py:137: "motor":    "Motor Insurance",
+  insurance_centre\utils.py:138: "property": "Property Insurance",
+  insurance_centre\utils.py:139: "general":  "General Insurance",
+  insurance_centre\utils.py:146: """Convert category name to URL slug. e.g. 'Life Insurance' → 'life'"""
+  insurance_centre\utils.py:151: """Convert URL slug to category name. e.g. 'life' → 'Life Insurance'"""
+  insurance_centre\validators.py:2: Insurance Centre — Validators
+  insurance_centre\validators.py:4: All validation logic for the Insurance Centre.
+  insurance_centre\validators.py:34: errors.append("Insurance category is required.")
+  insurance_centre\validators.py:40: errors.append("Insurance type is required.")
+  insurance_centre\validators.py:53: errors.append("Insurance company name is required.")
+  insurance_centre\validators.py:165: errors.append("Members can only be added to Health Insurance policies.")
+  insurance_centre\__init__.py:2: Insurance Centre Blueprint
+
+======================================================================
+5. LOCAL .py FILES vs WHETHER app.py IMPORTS THEM
+======================================================================
+  check_db.py  ->  NOT imported (likely inert/dead file)
+  export_routes.py  ->  NOT imported (likely inert/dead file)
+  fix_csrf.py  ->  NOT imported (likely inert/dead file)
+  models.py  ->  IMPORTED (live)
+  phase3_write.py  ->  NOT imported (likely inert/dead file)
+  phase3b_write.py  ->  NOT imported (likely inert/dead file)
+  phase_insurance_a.py  ->  NOT imported (likely inert/dead file)
+  write_app.py  ->  NOT imported (likely inert/dead file)
+  write_base.py  ->  NOT imported (likely inert/dead file)
+
+======================================================================
+6. DATABASE TABLES & ROW COUNTS
+======================================================================
+  Using database: instance\mywealthlens.db
+  asset: 36 rows
+  emergency_fund: 1 rows
+  family: 1 rows
+  family_invite: 0 rows
+  family_member: 1 rows
+  goal: 1 rows
+  insurance: 1 rows
+  insurance_addon: 0 rows
+  insurance_document: 0 rows
+  insurance_member: 0 rows
+  insurance_nominee: 0 rows
+  insurance_policy: 1 rows
+  insurance_timeline: 1 rows
+  loan: 0 rows
+  mutual_fund: 0 rows
+  net_worth_history: 12 rows
+  stock: 5 rows
+  tax_entry_80c: 0 rows
+  user: 2 rows
+  user_profile: 2 rows
+
+======================================================================
+7. TEMPLATES FOLDER
+======================================================================
+  assets.html  (16873 bytes)
+  base.html  (14510 bytes)
+  dashboard.html  (13669 bytes)
+  family.html  (7507 bytes)
+  family_manage.html  (9199 bytes)
+  forgot_password.html  (3456 bytes)
+  goals.html  (12790 bytes)
+  login.html  (3879 bytes)
+  preferences.html  (23761 bytes)
+  signup.html  (6483 bytes)
+  upload.html  (9048 bytes)

@@ -5,8 +5,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import bcrypt, pdfplumber, io, re, yfinance as yf
 from datetime import datetime as dt, timedelta
-from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, Insurance, NetWorthHistory, EmergencyFund, TaxEntry80C, Family, FamilyMember, FamilyInvite
+from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, NetWorthHistory, Family, FamilyMember, FamilyInvite
 from insurance_centre import insurance_bp
+from retirement_centre import retirement_bp
 from insurance_centre.models import (
     InsurancePolicy, InsuranceNominee, InsuranceMember,
     InsuranceAddon, InsuranceDocument, InsuranceTimeline,
@@ -207,15 +208,36 @@ def assets():
     all_assets = Asset.query.filter_by(user_id=current_user.id).order_by(Asset.created_at.desc()).all()
     return render_template('assets.html', assets=all_assets, mcx={'gold': None, 'silver': None})
 
+@app.route('/preferences')
+@login_required
+def preferences():
+    try:
+        db.session.execute(db.text('SELECT 1'))
+        db_connected, db_status = True, 'Healthy'
+    except Exception:
+        db_connected, db_status = False, 'Error'
+    try:
+        doc_count = InsuranceDocument.query.filter_by(user_id=current_user.id).count()
+    except Exception:
+        doc_count = 'Not Available'
+    system_health = {
+        'db_connected': db_connected,
+        'db_status': db_status,
+        'privacy_mode': 'Local Only',
+        'version': 'v1.0.0',
+        'documents_stored': doc_count,
+    }
+    return render_template('preferences.html', user=current_user, system_health=system_health)
+
 @app.route('/account')
 @login_required
 def account():
-    return render_template('account.html', user=current_user)
+    return redirect(url_for('preferences'))
 
 @app.route('/settings')
 @login_required
 def settings():
-    return render_template('settings.html', user=current_user)
+    return redirect(url_for('preferences'))
 
 @app.route('/api/mcx-prices')
 @login_required
@@ -666,246 +688,6 @@ def delete_goal(goal_id):
     return redirect(url_for('goals'))
 
 
-# ── Life Stage helper ──────────────────────────────────────────────────────
-
-LIFE_STAGES = {
-    "early_career": {
-        "name": "Early Career",
-        "icon": "🌱",
-        "description": "Build a strong foundation. Maximise equity growth while you have time on your side.",
-        "benchmarks": {"equity": 70, "debt": 20, "gold": 5, "realestate": 5},
-    },
-    "family_building": {
-        "name": "Family Building",
-        "icon": "🏡",
-        "description": "Balance growth with stability. Start protecting what you've built.",
-        "benchmarks": {"equity": 55, "debt": 25, "gold": 10, "realestate": 10},
-    },
-    "pre_retirement": {
-        "name": "Pre-Retirement",
-        "icon": "📈",
-        "description": "Shift towards preservation. Reduce risk while keeping pace with inflation.",
-        "benchmarks": {"equity": 35, "debt": 40, "gold": 10, "realestate": 15},
-    },
-    "retirement": {
-        "name": "Retirement",
-        "icon": "🌅",
-        "description": "Protect and distribute. Prioritise income, safety and liquidity.",
-        "benchmarks": {"equity": 20, "debt": 55, "gold": 15, "realestate": 10},
-    },
-}
-
-INSTRUMENT_MAP = {
-    "equity": {
-        "increase": ["ELSS (tax-saving MF)", "Nifty 50 Index Fund", "Flexi-cap MF", "Direct Stocks (bluechip)"],
-        "reduce":   ["Book partial profits on stocks", "Switch equity MF to balanced advantage fund"],
-    },
-    "debt": {
-        "increase": ["PPF", "VPF", "Bank FD", "Liquid / Short Duration MF", "Govt Bonds via RBI Retail Direct"],
-        "reduce":   ["Avoid rolling over maturing FDs", "Redeploy FD maturity into equity SIPs"],
-    },
-    "gold": {
-        "increase": ["Sovereign Gold Bond (SGB)", "Gold ETF (e.g. ICICI Pru Gold ETF)", "Gold MF"],
-        "reduce":   ["Gradually liquidate physical gold into financial assets"],
-    },
-    "realestate": {
-        "increase": ["REITs (listed, liquid alternative)", "Second property if loan-free"],
-        "reduce":   ["Avoid new real estate purchases for now", "Consider REITs for diversification within limits"],
-    },
-}
-
-def detect_life_stage(age, marital_status, dependents):
-    if age >= 58:
-        return "retirement"
-    if age >= 45:
-        return "pre_retirement"
-    if age >= 35 or dependents > 0 or marital_status == "married":
-        return "family_building"
-    return "early_career"
-
-def compute_life_stage_data(profile, assets, mfs, stocks):
-    # Current bucket values
-    equity_val    = (sum(m.value for m in mfs) + sum(s.value for s in stocks))
-    debt_val      = sum(a.value for a in assets if a.category in ["ppf", "vpf", "ssy", "fd"])
-    gold_val      = sum(a.value for a in assets if a.category in ["gold", "silver"])
-    realestate_val = sum(a.value for a in assets if a.category.startswith("real_estate"))
-    total         = equity_val + debt_val + gold_val + realestate_val
-
-    stage_key = detect_life_stage(profile.age, profile.marital_status, profile.dependents)
-    stage     = LIFE_STAGES[stage_key]
-    bm        = stage["benchmarks"]
-
-    def pct(val):
-        return round(val / total * 100, 1) if total > 0 else 0
-
-    actual = {
-        "equity":      pct(equity_val),
-        "debt":        pct(debt_val),
-        "gold":        pct(gold_val),
-        "realestate":  pct(realestate_val),
-    }
-
-    bucket_meta = [
-        {"key": "equity",     "label": "Equity",       "icon": "📊"},
-        {"key": "debt",       "label": "Debt",          "icon": "🏛️"},
-        {"key": "gold",       "label": "Gold / Silver", "icon": "🥇"},
-        {"key": "realestate", "label": "Real Estate",   "icon": "🏠"},
-    ]
-    current_vals = {
-        "equity": equity_val, "debt": debt_val,
-        "gold": gold_val, "realestate": realestate_val,
-    }
-
-    allocation = []
-    for b in bucket_meta:
-        k = b["key"]
-        act = actual[k]
-        tgt = bm[k]
-        gap = round(tgt - act, 1)   # positive = under, negative = over
-        allocation.append({
-            "icon": b["icon"], "label": b["label"],
-            "actual": act, "target": tgt, "gap": gap,
-        })
-
-    # Table rows
-    table_rows = []
-    for b in bucket_meta:
-        k = b["key"]
-        cur = current_vals[k]
-        tgt_val = total * bm[k] / 100
-        table_rows.append({
-            "icon": b["icon"], "label": b["label"],
-            "current_val": cur,
-            "actual": actual[k],
-            "target": bm[k],
-            "ideal_val": tgt_val,
-            "delta": cur - tgt_val,
-        })
-
-    # Recommendations
-    recommendations = []
-    for b in bucket_meta:
-        k = b["key"]
-        gap = bm[k] - actual[k]
-        instruments = INSTRUMENT_MAP.get(k, {})
-        if gap > 5:
-            recommendations.append({
-                "type": "increase",
-                "icon": b["icon"],
-                "headline": f"Increase {b['label']} allocation by ~{gap}%",
-                "detail": f"Your {b['label'].lower()} is {actual[k]}% vs the recommended {bm[k]}% for your stage. "
-                          f"That's ₹{abs(total * gap / 100):,.0f} to rebalance.",
-                "instruments": instruments.get("increase", []),
-            })
-        elif gap < -5:
-            recommendations.append({
-                "type": "reduce",
-                "icon": b["icon"],
-                "headline": f"Trim {b['label']} allocation by ~{abs(gap)}%",
-                "detail": f"Your {b['label'].lower()} is {actual[k]}% vs the recommended {bm[k]}% for your stage. "
-                          f"Consider gradually moving ₹{abs(total * gap / 100):,.0f} to under-allocated buckets.",
-                "instruments": instruments.get("reduce", []),
-            })
-        else:
-            recommendations.append({
-                "type": "ok",
-                "icon": b["icon"],
-                "headline": f"{b['label']} is well-balanced",
-                "detail": f"At {actual[k]}%, your {b['label'].lower()} is within range of the {bm[k]}% benchmark. Keep it up.",
-                "instruments": [],
-            })
-
-    if not recommendations:
-        recommendations.append({
-            "type": "ok", "icon": "🎯",
-            "headline": "Portfolio is well-balanced!",
-            "detail": "All buckets are within 5% of their targets. Revisit when your life stage changes.",
-            "instruments": [],
-        })
-
-    # Health score: deduct points per bucket gap
-    health = 100
-    for b in allocation:
-        health -= min(abs(b["gap"]) * 1.5, 25)
-    health_score = max(0, round(health))
-
-    return stage, allocation, recommendations, table_rows, health_score, total
-
-
-@app.route('/life-stage')
-@login_required
-def life_stage():
-    profile    = UserProfile.query.filter_by(user_id=current_user.id).first()
-    assets     = Asset.query.filter_by(user_id=current_user.id).all()
-    mfs        = MutualFund.query.filter_by(user_id=current_user.id).all()
-    stocks     = Stock.query.filter_by(user_id=current_user.id).all()
-
-    stage = allocation = recommendations = table_rows = health_score = total_value = None
-
-    if profile:
-        stage, allocation, recommendations, table_rows, health_score, total_value = \
-            compute_life_stage_data(profile, assets, mfs, stocks)
-
-    return render_template(
-        "life_stage.html",
-        profile=profile,
-        stage=stage,
-        allocation=allocation,
-        recommendations=recommendations,
-        table_rows=table_rows,
-        health_score=health_score,
-        total_value=total_value,
-    )
-
-
-@app.route('/life-stage/save-profile', methods=['POST'])
-@login_required
-def save_life_stage_profile():
-    age            = int(request.form.get('age', 30))
-    marital_status = request.form.get('marital_status', 'single')
-    dependents     = int(request.form.get('dependents', 0))
-
-    profile = UserProfile.query.filter_by(user_id=current_user.id).first()
-    if profile:
-        profile.age            = age
-        profile.marital_status = marital_status
-        profile.dependents     = dependents
-    else:
-        profile = UserProfile(
-            user_id=current_user.id,
-            age=age,
-            marital_status=marital_status,
-            dependents=dependents,
-        )
-        db.session.add(profile)
-    db.session.commit()
-    flash("Life stage profile saved!", "success")
-    return redirect(url_for('life_stage'))
-
-
-@app.route('/life-stage/widget-data')
-@login_required
-def life_stage_widget_data():
-    """JSON endpoint used by the dashboard widget."""
-    profile = UserProfile.query.filter_by(user_id=current_user.id).first()
-    if not profile:
-        return jsonify({"configured": False})
-
-    assets  = Asset.query.filter_by(user_id=current_user.id).all()
-    mfs     = MutualFund.query.filter_by(user_id=current_user.id).all()
-    stocks  = Stock.query.filter_by(user_id=current_user.id).all()
-
-    stage, allocation, _, _, health_score, _ = compute_life_stage_data(profile, assets, mfs, stocks)
-
-    return jsonify({
-        "configured": True,
-        "stage_name": stage["name"],
-        "stage_icon": stage["icon"],
-        "health_score": health_score,
-        "allocation": allocation,
-    })
-
-
 # ── Step 7: Export routes (PDF + Excel) ──────────────────────────────────────
 from flask import send_file
 from reportlab.lib import colors
@@ -1035,7 +817,6 @@ def export_pdf():
     mfs     = MutualFund.query.filter_by(user_id=current_user.id).all()
     stocks  = Stock.query.filter_by(user_id=current_user.id).all()
     goals   = Goal.query.filter_by(user_id=current_user.id).order_by(Goal.target_year).all()
-    profile = UserProfile.query.filter_by(user_id=current_user.id).first()
 
     equity_val     = sum(m.value for m in mfs) + sum(s.value for s in stocks)
     debt_val       = sum(a.value for a in assets if a.category in ['ppf','vpf','ssy','fd'])
@@ -1044,13 +825,6 @@ def export_pdf():
     cash_val       = sum(a.value for a in assets if a.category == 'cash')
     other_val      = sum(a.value for a in assets if a.category == 'other')
     total          = equity_val + debt_val + gold_val + realestate_val + cash_val + other_val
-
-    stage = stage_data = allocation = recommendations = health_score = None
-    if profile:
-        stage_key = detect_life_stage(profile.age, profile.marital_status, profile.dependents)
-        stage_data = LIFE_STAGES[stage_key]
-        _, allocation, recommendations, _, health_score, _ = \
-            compute_life_stage_data(profile, assets, mfs, stocks)
 
     # ── build PDF ──
     buf = _io.BytesIO()
@@ -1078,16 +852,6 @@ def export_pdf():
     profile_data = [
         ['Name', current_user.name, 'Email', current_user.email],
     ]
-    if profile:
-        stage_label = stage_data['name'] if stage_data else '—'
-        profile_data += [
-            ['Age', str(profile.age),
-             'Life Stage', f"{stage_data['icon']} {stage_label}" if stage_data else '—'],
-            ['Marital Status', profile.marital_status.title(),
-             'Dependents', str(profile.dependents)],
-        ]
-    else:
-        profile_data.append(['Life Stage Profile', 'Not configured', '', ''])
 
     pt = Table(profile_data, colWidths=[W*0.18, W*0.32, W*0.18, W*0.32])
     pt.setStyle(TableStyle([
@@ -1201,45 +965,6 @@ def export_pdf():
         ]))
         story += [pht, Spacer(1, 3*mm)]
 
-    # ── LIFE STAGE ANALYSIS ──
-    if profile and allocation:
-        story += _section_header(f"🧭  Life Stage Analysis — {stage_data['icon']} {stage_data['name']}", S)
-        story.append(Paragraph(stage_data['description'], S['muted']))
-        story.append(Spacer(1, 3*mm))
-
-        story.append(Paragraph(f"Portfolio Health Score: {health_score}/100", ParagraphStyle(
-            'hs', fontSize=12, fontName='Helvetica-Bold',
-            textColor=_GREEN if health_score >= 75 else _AMBER if health_score >= 50 else _RED,
-            spaceAfter=4)))
-
-        ls_data = [['Asset Class', 'Actual %', 'Target %', 'Gap', 'Status']]
-        for b in allocation:
-            gap = b['gap']
-            status = '✓ On Track' if abs(gap) <= 5 else (f'▲ Under {gap}%' if gap > 0 else f'▼ Over {abs(gap)}%')
-            ls_data.append([
-                f"{b['icon']} {b['label']}",
-                _pct(b['actual']),
-                _pct(b['target']),
-                f"{'+' if gap>0 else ''}{gap}%",
-                status,
-            ])
-        lst = Table(ls_data, colWidths=[W*0.32, W*0.15, W*0.15, W*0.15, W*0.23])
-        lst.setStyle(_tbl_style())
-        lst.setStyle(TableStyle([('ALIGN',(1,0),(-1,-1),'CENTER')]))
-        story += [lst, Spacer(1, 3*mm)]
-
-        story.append(Paragraph("Recommendations", S['h3']))
-        for rec in recommendations:
-            color = _RED if rec['type'] == 'increase' else _AMBER if rec['type'] == 'reduce' else _GREEN
-            story.append(Paragraph(
-                f"<font color='#{color.hexval()[2:]}'>{rec['icon']} {rec['headline']}</font>",
-                S['body']))
-            story.append(Paragraph(rec['detail'], S['muted']))
-            if rec['instruments']:
-                story.append(Paragraph(
-                    "  Suggested: " + " · ".join(rec['instruments']), S['muted']))
-            story.append(Spacer(1, 3*mm))
-
     # ── GOALS + SIP PROJECTIONS ──
     if goals:
         story += _section_header("🎯  Financial Goals & SIP Projections", S)
@@ -1330,7 +1055,6 @@ def export_excel():
     mfs     = MutualFund.query.filter_by(user_id=current_user.id).all()
     stocks  = Stock.query.filter_by(user_id=current_user.id).all()
     goals   = Goal.query.filter_by(user_id=current_user.id).order_by(Goal.target_year).all()
-    profile = UserProfile.query.filter_by(user_id=current_user.id).first()
 
     equity_val     = sum(m.value for m in mfs) + sum(s.value for s in stocks)
     debt_val       = sum(a.value for a in assets if a.category in ['ppf','vpf','ssy','fd'])
@@ -1339,13 +1063,6 @@ def export_excel():
     cash_val       = sum(a.value for a in assets if a.category == 'cash')
     other_val      = sum(a.value for a in assets if a.category == 'other')
     total          = equity_val + debt_val + gold_val + realestate_val + cash_val + other_val
-
-    stage_data = allocation = recommendations = health_score = None
-    if profile:
-        stage_key  = detect_life_stage(profile.age, profile.marital_status, profile.dependents)
-        stage_data = LIFE_STAGES[stage_key]
-        _, allocation, recommendations, _, health_score, _ = \
-            compute_life_stage_data(profile, assets, mfs, stocks)
 
     wb = openpyxl.Workbook()
 
@@ -1426,14 +1143,6 @@ def export_excel():
         ('Name', current_user.name),
         ('Email', current_user.email),
     ]
-    if profile:
-        profile_rows += [
-            ('Age', profile.age),
-            ('Life Stage', f"{stage_data['icon']} {stage_data['name']}" if stage_data else '—'),
-            ('Marital Status', profile.marital_status.title()),
-            ('Dependents', profile.dependents),
-            ('Portfolio Health Score', f"{health_score}/100" if health_score is not None else '—'),
-        ]
     for i, (k, v) in enumerate(profile_rows):
         _data_row(ws1, r, [k, v], alt=i%2==1)
         r += 1
@@ -1499,57 +1208,7 @@ def export_excel():
     _freeze(ws2, 'A4')
 
     # ════════════════════════════════════════════════
-    # SHEET 3 — Life Stage
-    # ════════════════════════════════════════════════
-    ws3 = wb.create_sheet("Life Stage")
-    _tab_color(ws3, '10B981')
-    ws3.sheet_view.showGridLines = False
-    for row in ws3.iter_rows(min_row=1, max_row=60, min_col=1, max_col=8):
-        for cell in row:
-            cell.fill = _fill(DARK_HEX)
-
-    _title_cell(ws3, 1, 1, "Life Stage Analysis", sz=14)
-    r3 = 3
-
-    if profile and allocation and stage_data:
-        ws3.cell(row=r3, column=1, value=f"Life Stage: {stage_data['icon']} {stage_data['name']}").font = _font(TEAL_HEX, bold=True)
-        r3 += 1
-        ws3.cell(row=r3, column=1, value=stage_data['description']).font = _font(MUTED_HEX, sz=9)
-        r3 += 1
-        ws3.cell(row=r3, column=1, value=f"Portfolio Health Score: {health_score}/100").font = \
-            _font(GREEN_HEX if health_score >= 75 else AMBER_HEX if health_score >= 50 else RED_HEX, bold=True)
-        r3 += 2
-
-        _hdr_row(ws3, r3, ['Asset Class', 'Actual %', 'Target %', 'Gap', 'Status'])
-        r3 += 1
-        for i, b in enumerate(allocation):
-            gap = b['gap']
-            status = '✓ On Track' if abs(gap) <= 5 else (f'▲ Under {gap}%' if gap > 0 else f'▼ Over {abs(gap)}%')
-            _data_row(ws3, r3, [f"{b['icon']} {b['label']}", f"{b['actual']}%",
-                                 f"{b['target']}%", f"{'+' if gap>0 else ''}{gap}%", status], alt=i%2==1)
-            # colour gap cell
-            gap_color = RED_HEX if gap > 5 else AMBER_HEX if gap < -5 else GREEN_HEX
-            ws3.cell(row=r3, column=4).font = _font(gap_color, bold=True, sz=9)
-            r3 += 1
-
-        r3 += 1
-        _title_cell(ws3, r3, 1, "Recommendations", sz=11)
-        r3 += 1
-        _hdr_row(ws3, r3, ['Asset Class', 'Type', 'Action Required', 'Suggested Instruments'])
-        r3 += 1
-        for i, rec in enumerate(recommendations):
-            insts = ' · '.join(rec.get('instruments', []))
-            _data_row(ws3, r3, [rec['icon'], rec['type'].title(),
-                                 rec['headline'], insts], alt=i%2==1)
-            r3 += 1
-    else:
-        ws3.cell(row=r3, column=1, value="Life stage profile not configured.").font = _font(MUTED_HEX)
-
-    _set_col_widths(ws3, [20, 12, 12, 10, 16, 50])
-    _freeze(ws3, 'A4')
-
-    # ════════════════════════════════════════════════
-    # SHEET 4 — Goals + SIP Projections
+    # SHEET 3 — Goals + SIP Projections
     # ════════════════════════════════════════════════
     ws4 = wb.create_sheet("Goals & Projections")
     _tab_color(ws4, 'F59E0B')
@@ -1631,20 +1290,21 @@ def change_password():
     confirm_pw = request.form.get('confirm_password', '')
     if not bcrypt.checkpw(current_pw.encode('utf-8'), current_user.password.encode('utf-8')):
         flash('Current password is incorrect.', 'error')
-        return redirect(url_for('account'))
+        return redirect(url_for('preferences'))
     if len(new_pw) < 8:
         flash('New password must be at least 8 characters.', 'error')
-        return redirect(url_for('account'))
+        return redirect(url_for('preferences'))
     if new_pw != confirm_pw:
         flash('New passwords do not match.', 'error')
-        return redirect(url_for('account'))
+        return redirect(url_for('preferences'))
     hashed = bcrypt.hashpw(new_pw.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     current_user.password = hashed
     db.session.commit()
     flash('Password changed successfully!', 'success')
-    return redirect(url_for('account'))
+    return redirect(url_for('preferences'))
 
 app.register_blueprint(insurance_bp)
+app.register_blueprint(retirement_bp)
 
 if __name__ == '__main__': 
      app.run(debug=True, port=5000, host='0.0.0.0')

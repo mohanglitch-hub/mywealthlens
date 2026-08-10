@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if is_edit else 'Add' }} Retirement Scheme — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:760px; margin:0 auto;">
+
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">
+    {{ 'Edit Retirement Scheme' if is_edit else 'Add Retirement Scheme' }}
+  </h1>
+  <p style="color:var(--muted); font-size:0.875rem; margin-bottom:28px;">
+    {{ 'Update the details for this scheme.' if is_edit else 'Add a new EPF, VPF, PPF, NPS, SSY or other retirement scheme.' }}
+  </p>
+
+  <form method="POST" action="{{ url_for('retirement_centre.edit_scheme', scheme_id=scheme.id) if is_edit else url_for('retirement_centre.add_scheme') }}" id="schemeForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <!-- ── Scheme Information ── -->
+    <div class="ret-card">
+      <div class="ret-card-label">Scheme Information</div>
+
+      <div class="form-group">
+        <label for="scheme_type">Scheme Type</label>
+        <select name="scheme_type" id="scheme_type" class="ret-select" required
+                {% if is_edit %}onfocus="this.dataset.prev = this.value" onchange="confirmTypeChange(this); applySchemeType()"
+                {% else %}onchange="applySchemeType()"{% endif %}>
+          <option value="">— Select scheme type —</option>
+          {% for t in scheme_types %}
+            <option value="{{ t }}" data-groups="{{ field_groups.get(t, [])|join(',') }}"
+              {{ 'selected' if values.scheme_type == t }}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group ret-group" id="grp-custom">
+        <label for="custom_type">Custom Scheme Name *</label>
+        <input type="text" name="custom_type" id="custom_type"
+               value="{{ values.custom_type }}"
+               placeholder="e.g. Company Pension Trust" />
+      </div>
+    </div>
+
+    <!-- ── Account Information ── -->
+    <div class="ret-card">
+      <div class="ret-card-label">Account Information</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="institution">Institution</label>
+          <input type="text" name="institution" id="institution"
+                 value="{{ values.institution }}"
+                 placeholder="e.g. EPFO, SBI, Post Office" required />
+        </div>
+        <div class="form-group">
+          <label for="account_number">Account Number</label>
+          <input type="text" name="account_number" id="account_number"
+                 value="{{ values.account_number }}"
+                 placeholder="Optional" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="opening_date">Opening Date</label>
+        <input type="date" name="opening_date" id="opening_date"
+               value="{{ values.opening_date }}" />
+      </div>
+    </div>
+
+    <!-- ── Balance & Growth ── -->
+    <div class="ret-card">
+      <div class="ret-card-label">Balance &amp; Growth</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="current_balance">Current Balance (₹)</label>
+          <input type="number" name="current_balance" id="current_balance"
+                 step="0.01" min="0" value="{{ values.current_balance }}" />
+        </div>
+        <div class="form-group">
+          <label for="balance_updated_at">Balance Last Verified On</label>
+          <input type="date" name="balance_updated_at" id="balance_updated_at"
+                 value="{{ values.balance_updated_at }}" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="growth_method">Growth Method</label>
+          <select name="growth_method" id="growth_method" class="ret-select">
+            {% for gm in growth_methods %}
+              <option value="{{ gm }}" {{ 'selected' if values.growth_method == gm }}>
+                {{ growth_method_labels.get(gm, gm) }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="rate_or_return_assumption">
+            <span id="rateLabelText">Interest Rate / Return Assumption (%)</span>
+          </label>
+          <input type="number" name="rate_or_return_assumption" id="rate_or_return_assumption"
+                 step="0.01" min="0" max="100" value="{{ values.rate_or_return_assumption }}" />
+          <div style="font-size:0.75rem; color:var(--muted); margin-top:4px;" id="rateHint">
+            This is an informational assumption — rates change over time and are not guaranteed.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Scheme-Specific: Employer ── -->
+    <div class="ret-card ret-group" id="grp-employer">
+      <div class="ret-card-label">Employer Information</div>
+      <div class="form-group">
+        <label for="employer_name">Employer Name</label>
+        <input type="text" name="employer_name" id="employer_name"
+               value="{{ values.employer_name }}" />
+      </div>
+    </div>
+
+    <!-- ── Scheme-Specific: UAN + Salary (EPF/VPF) ── -->
+    <div class="ret-card ret-group" id="grp-uan_salary">
+      <div class="ret-card-label">EPF / VPF Details</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="uan_number">UAN</label>
+          <input type="text" name="uan_number" id="uan_number"
+                 value="{{ values.uan_number }}" placeholder="Universal Account Number" />
+        </div>
+        <div class="form-group">
+          <label for="basic_salary">Basic / Eligible Salary (₹) — optional</label>
+          <input type="number" name="basic_salary" id="basic_salary"
+                 step="0.01" min="0" value="{{ values.basic_salary }}" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Scheme-Specific: Contribution % (EPF/VPF/NPS) ── -->
+    <div class="ret-card ret-group" id="grp-contribution_pct">
+      <div class="ret-card-label">Contribution Percentages</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="employee_contribution_pct">Employee Contribution %</label>
+          <input type="number" name="employee_contribution_pct" id="employee_contribution_pct"
+                 step="0.01" min="0" max="100" value="{{ values.employee_contribution_pct }}" />
+        </div>
+        <div class="form-group">
+          <label for="employer_contribution_pct">Employer Contribution % — if applicable</label>
+          <input type="number" name="employer_contribution_pct" id="employer_contribution_pct"
+                 step="0.01" min="0" max="100" value="{{ values.employer_contribution_pct }}" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Scheme-Specific: Target Retirement Year (EPF/VPF/NPS/Superannuation) ── -->
+    <div class="ret-card ret-group" id="grp-target_year">
+      <div class="ret-card-label">Target Retirement Year</div>
+      <div class="form-group">
+        <label for="target_retirement_year">Target Retirement Year</label>
+        <input type="number" name="target_retirement_year" id="target_retirement_year"
+               step="1" value="{{ values.target_retirement_year }}"
+               placeholder="e.g. 2045" />
+      </div>
+    </div>
+
+    <!-- ── Scheme-Specific: PPF ── -->
+    <div class="ret-card ret-group" id="grp-ppf">
+      <div class="ret-card-label">PPF Details</div>
+      <div class="form-group">
+        <label for="extension_opted">Extension Opted (after the initial 15-year term)</label>
+        <select name="extension_opted" id="extension_opted" class="ret-select">
+          <option value="no" {{ 'selected' if values.extension_opted != 'yes' }}>No</option>
+          <option value="yes" {{ 'selected' if values.extension_opted == 'yes' }}>Yes</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- ── Scheme-Specific: SSY ── -->
+    <div class="ret-card ret-group" id="grp-ssy">
+      <div class="ret-card-label">Sukanya Samriddhi Yojana Details</div>
+      <div class="form-group">
+        <label for="girl_child_name">Girl Child Name</label>
+        <input type="text" name="girl_child_name" id="girl_child_name"
+               value="{{ values.girl_child_name }}" />
+      </div>
+      <div class="form-group">
+        <label for="girl_child_dob">Girl Child Date of Birth</label>
+        <input type="date" name="girl_child_dob" id="girl_child_dob"
+               value="{{ values.girl_child_dob }}" />
+      </div>
+      <div style="font-size:0.78rem; color:var(--muted);">
+        The account remains owned by you (the MyWealthLens user) — these details identify the
+        beneficiary, not the account holder.
+      </div>
+    </div>
+
+    <!-- ── Scheme-Specific: NPS ── -->
+    <div class="ret-card ret-group" id="grp-nps">
+      <div class="ret-card-label">NPS Details</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="pran_number">PRAN</label>
+          <input type="text" name="pran_number" id="pran_number"
+                 value="{{ values.pran_number }}" placeholder="Permanent Retirement Account Number" />
+        </div>
+        <div class="form-group">
+          <label for="tier">Tier</label>
+          <select name="tier" id="tier" class="ret-select">
+            <option value="">— Select tier —</option>
+            {% for t in nps_tiers %}
+              <option value="{{ t }}" {{ 'selected' if values.tier == t }}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Contribution Preference ── -->
+    <div class="ret-card">
+      <div class="ret-card-label">Contribution Preference</div>
+      <div class="form-group">
+        <label for="contribution_preference">Planned Contribution Pattern — optional</label>
+        <select name="contribution_preference" id="contribution_preference" class="ret-select">
+          <option value="">— Not set —</option>
+          {% for cp in contribution_preferences %}
+            <option value="{{ cp }}" {{ 'selected' if values.contribution_preference == cp }}>{{ cp }}</option>
+          {% endfor %}
+        </select>
+        <div style="font-size:0.75rem; color:var(--muted); margin-top:4px;">
+          This records how you plan to contribute — it isn't your actual contribution history.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Status & Notes ── -->
+    <div class="ret-card">
+      <div class="ret-card-label">Status &amp; Notes</div>
+      <div class="form-group">
+        <label for="status">Status</label>
+        <select name="status" id="status" class="ret-select">
+          {% for s in statuses %}
+            <option value="{{ s }}" {{ 'selected' if values.status == s }}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea name="notes" id="notes" rows="3"
+                  style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; resize:vertical;">{{ values.notes }}</textarea>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button type="submit" class="btn-primary" style="width:auto; padding:11px 28px;">
+        {{ 'Save Changes' if is_edit else 'Add Scheme' }}
+      </button>
+      <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) if is_edit else url_for('retirement_centre.dashboard') }}"
+         style="display:inline-flex; align-items:center; padding:11px 20px; color:var(--muted); text-decoration:none; font-size:0.9rem;">
+        Cancel
+      </a>
+    </div>
+
+  </form>
+</div>
+
+<style>
+  .ret-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .ret-card-label {
+    font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
+  }
+  .ret-select {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 11px 14px; color: var(--text);
+    font-family: 'Inter', sans-serif; font-size: 0.9rem; outline: none;
+  }
+  .ret-select:focus { border-color: var(--accent); }
+  .ret-group { display: none; }
+
+  @media (max-width: 640px) {
+    .ret-card > div[style*="grid-template-columns:1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+  }
+</style>
+
+<script>
+  function applySchemeType() {
+    const select = document.getElementById('scheme_type');
+    const opt = select.options[select.selectedIndex];
+    const groups = opt && opt.dataset.groups ? opt.dataset.groups.split(',').filter(Boolean) : [];
+
+    document.querySelectorAll('.ret-group').forEach(function (el) {
+      el.style.display = 'none';
+    });
+    groups.forEach(function (g) {
+      const el = document.getElementById('grp-' + g);
+      if (el) el.style.display = 'block';
+    });
+
+    // NPS is market-linked — never call its return "guaranteed"
+    const rateLabel = document.getElementById('rateLabelText');
+    const rateHint  = document.getElementById('rateHint');
+    if (select.value === 'NPS') {
+      rateLabel.textContent = 'Expected Return Assumption (%)';
+      rateHint.textContent  = 'NPS is market-linked — this is an assumption, not a guaranteed return.';
+    } else {
+      rateLabel.textContent = 'Interest Rate / Return Assumption (%)';
+      rateHint.textContent  = 'This is an informational assumption — rates change over time and are not guaranteed.';
+    }
+  }
+
+  function confirmTypeChange(select) {
+    const prev = select.dataset.prev;
+    if (prev && prev !== select.value && prev !== '') {
+      const ok = confirm('Changing the scheme type may hide previously entered scheme-specific information (it will not be deleted, just hidden). Continue?');
+      if (!ok) {
+        select.value = prev;
+      }
+    }
+  }
+
+  // Apply visibility on load — critical for Edit mode pre-population
+  // and for redisplaying a form that failed validation.
+  window.addEventListener('DOMContentLoaded', applySchemeType);
+</script>
+{% endblock %}

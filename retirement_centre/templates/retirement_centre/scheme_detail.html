@@ -1,0 +1,419 @@
+{% extends "base.html" %}
+{% block title %}{{ scheme.display_type }} — Retirement Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:820px; margin:0 auto;">
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
+    <div>
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">
+        {{ scheme.scheme_type }}
+        {% if scheme.is_archived %}<span class="ret-badge ret-badge-muted">Archived</span>{% endif %}
+      </div>
+      <h1 style="font-size:1.4rem; font-weight:700; color:var(--text);">{{ scheme.display_type }}</h1>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <a href="{{ url_for('retirement_centre.edit_scheme', scheme_id=scheme.id) }}" class="btn-outline">Edit Scheme</a>
+      {% if scheme.is_archived %}
+        <form method="POST" action="{{ url_for('retirement_centre.restore_scheme', scheme_id=scheme.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="btn-outline">Restore</button>
+        </form>
+      {% else %}
+        <form method="POST" action="{{ url_for('retirement_centre.archive_scheme', scheme_id=scheme.id) }}"
+              onsubmit="return confirm('Archive this scheme? You can restore it any time.')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="btn-outline">Archive</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Scheme Overview ── -->
+  <div class="ret-card">
+    <div class="ret-card-label">Scheme Details</div>
+    <div class="ret-detail-grid">
+      <div class="ret-field"><span class="ret-field-label">Institution</span><span class="ret-field-value">{{ scheme.institution or '—' }}</span></div>
+      <div class="ret-field"><span class="ret-field-label">Account Number</span><span class="ret-field-value">{{ scheme.account_number or '—' }}</span></div>
+      <div class="ret-field"><span class="ret-field-label">Opening Date</span><span class="ret-field-value">{{ format_date(scheme.opening_date) }}</span></div>
+      <div class="ret-field"><span class="ret-field-label">Status</span><span class="ret-field-value">{{ scheme.status }}</span></div>
+    </div>
+  </div>
+
+  <!-- ── Current Balance ── -->
+  <div class="ret-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+      <div class="ret-card-label" style="margin-bottom:0;">Current Balance</div>
+      <button type="button" class="ret-btn-small" onclick="toggle('balanceForm')">Update Balance</button>
+    </div>
+    <div class="ret-detail-grid">
+      <div class="ret-field"><span class="ret-field-label">Current Balance</span><span class="ret-field-value ret-accent">{{ format_inr(scheme.current_balance) }}</span></div>
+      <div class="ret-field"><span class="ret-field-label">Last Verified</span><span class="ret-field-value">{{ format_date(scheme.balance_updated_at) }}</span></div>
+      <div class="ret-field"><span class="ret-field-label">Growth Method</span><span class="ret-field-value">{{ scheme.growth_method.replace('_',' ').title() }}</span></div>
+      <div class="ret-field"><span class="ret-field-label">Rate / Return Assumption</span><span class="ret-field-value">{{ (scheme.rate_or_return_assumption ~ '%') if scheme.rate_or_return_assumption is not none else '—' }}</span></div>
+    </div>
+
+    <div id="balanceForm" class="ret-inline-form" style="display:none;">
+      <form method="POST" action="{{ url_for('retirement_centre.update_balance', scheme_id=scheme.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="ret-inline-grid">
+          <div class="form-group"><label>New Balance (₹)</label><input type="number" name="new_balance" step="0.01" min="0" required /></div>
+          <div class="form-group"><label>Balance Date</label><input type="date" name="balance_date" required /></div>
+        </div>
+        <div class="form-group"><label>Note — optional</label><input type="text" name="balance_note" placeholder="e.g. Monthly statement update" /></div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Balance</button>
+      </form>
+    </div>
+
+    <!-- ── Balance History ── -->
+    <div style="margin-top:20px; padding-top:16px; border-top:1px solid var(--border);">
+      <div class="ret-card-label">Balance History</div>
+      {% if balance_history %}
+        <div class="ret-list">
+          {% for b in balance_history %}
+          <div class="ret-list-row">
+            <div><span class="ret-list-primary">{{ format_inr(b.balance) }}</span><span class="ret-list-secondary">{{ format_date(b.balance_date) }}{% if b.note %} · {{ b.note }}{% endif %}</span></div>
+          </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="ret-empty">No balance history available.<br>Update your balance to begin tracking its history.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Contribution History ── -->
+  <div class="ret-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+      <div class="ret-card-label" style="margin-bottom:0;">Contribution History</div>
+      <button type="button" class="ret-btn-small" onclick="toggle('contribForm')">+ Add Contribution</button>
+    </div>
+
+    <div class="ret-summary-row">
+      <div class="ret-summary-item"><span class="ret-summary-label">Current FY</span><span class="ret-summary-value">{{ format_inr(summary.current_fy_total) }}</span></div>
+      <div class="ret-summary-item"><span class="ret-summary-label">Total Recorded</span><span class="ret-summary-value">{{ format_inr(summary.total_recorded) }}</span></div>
+      <div class="ret-summary-item"><span class="ret-summary-label">Number of Contributions</span><span class="ret-summary-value">{{ summary.count }}</span></div>
+    </div>
+
+    <div id="contribForm" class="ret-inline-form" style="display:none;">
+      <form method="POST" action="{{ url_for('retirement_centre.add_contribution', scheme_id=scheme.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="ret-inline-grid">
+          <div class="form-group"><label>Contribution Date</label><input type="date" name="contribution_date" required /></div>
+          <div class="form-group"><label>Amount (₹)</label><input type="number" name="amount" step="0.01" min="0.01" required /></div>
+        </div>
+        <div class="form-group"><label>Note — optional</label><input type="text" name="note" placeholder="e.g. Monthly EPF contribution" /></div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Contribution</button>
+      </form>
+    </div>
+
+    {% if fy_options %}
+    <form method="GET" action="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) }}" style="margin-bottom:14px;">
+      <label style="font-size:0.78rem; color:var(--muted); margin-right:8px;">Financial Year</label>
+      <select name="fy" class="ret-select" style="width:auto; display:inline-block;" onchange="this.form.submit()">
+        <option value="">All Years</option>
+        {% for opt in fy_options %}
+          <option value="{{ opt.year }}" {{ 'selected' if fy_filter == opt.year }}>{{ opt.label }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    {% endif %}
+
+    {% if contributions %}
+      <div class="ret-list">
+        {% for c in contributions %}
+        <div class="ret-list-row" id="contrib-row-{{ c.id }}">
+          <div>
+            <span class="ret-list-primary">{{ format_inr(c.amount) }}</span>
+            <span class="ret-list-secondary">{{ format_date(c.contribution_date) }}{% if c.note %} · {{ c.note }}{% endif %}</span>
+          </div>
+          <div class="ret-list-actions">
+            <button type="button" class="ret-link-btn" onclick="toggle('contrib-edit-{{ c.id }}')">Edit</button>
+            <form method="POST" action="{{ url_for('retirement_centre.delete_contribution', contribution_id=c.id) }}"
+                  onsubmit="return confirm('Delete Contribution?\n\nThis contribution will be permanently removed from your contribution history.')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="ret-link-btn ret-link-danger">Delete</button>
+            </form>
+          </div>
+        </div>
+        <div id="contrib-edit-{{ c.id }}" class="ret-inline-form" style="display:none;">
+          <form method="POST" action="{{ url_for('retirement_centre.edit_contribution', contribution_id=c.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <div class="ret-inline-grid">
+              <div class="form-group"><label>Contribution Date</label><input type="date" name="contribution_date" value="{{ c.contribution_date.isoformat() }}" required /></div>
+              <div class="form-group"><label>Amount (₹)</label><input type="number" name="amount" step="0.01" min="0.01" value="{{ c.amount }}" required /></div>
+            </div>
+            <div class="form-group"><label>Note</label><input type="text" name="note" value="{{ c.note or '' }}" /></div>
+            <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Changes</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="ret-empty">No contributions recorded yet.<br>Start adding your deposits to build your contribution history.</div>
+    {% endif %}
+  </div>
+
+  <!-- ── Nominee Information ── -->
+  <div class="ret-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+      <div class="ret-card-label" style="margin-bottom:0;">Nominee Information</div>
+      <button type="button" class="ret-btn-small" onclick="toggle('nomineeForm')">+ Add Nominee</button>
+    </div>
+
+    <div id="nomineeForm" class="ret-inline-form" style="display:none;">
+      <form method="POST" action="{{ url_for('retirement_centre.add_nominee', scheme_id=scheme.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="ret-inline-grid">
+          <div class="form-group"><label>Name</label><input type="text" name="name" required /></div>
+          <div class="form-group">
+            <label>Relationship</label>
+            <select name="relationship" class="ret-select" required>
+              <option value="">— Select —</option>
+              {% for r in nominee_relations %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="ret-inline-grid">
+          <div class="form-group"><label>Percentage — optional</label><input type="number" name="percentage" step="0.01" min="0" max="100" /></div>
+          <div class="form-group"><label>Contact — optional</label><input type="text" name="contact" /></div>
+        </div>
+        <div class="form-group"><label>Notes — optional</label><input type="text" name="notes" /></div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Nominee</button>
+      </form>
+    </div>
+
+    {% if nominees %}
+      <div class="ret-list">
+        {% for n in nominees %}
+        <div class="ret-list-row" id="nominee-row-{{ n.id }}">
+          <div>
+            <span class="ret-list-primary">{{ n.name }} <span style="color:var(--muted); font-weight:400;">({{ n.relationship }})</span></span>
+            <span class="ret-list-secondary">
+              {% if n.percentage is not none %}{{ n.percentage }}%{% endif %}
+              {% if n.contact %} · {{ n.contact }}{% endif %}
+            </span>
+          </div>
+          <div class="ret-list-actions">
+            <button type="button" class="ret-link-btn" onclick="toggle('nominee-edit-{{ n.id }}')">Edit</button>
+            <form method="POST" action="{{ url_for('retirement_centre.delete_nominee', nominee_id=n.id) }}"
+                  onsubmit="return confirm('Delete this nominee?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="ret-link-btn ret-link-danger">Delete</button>
+            </form>
+          </div>
+        </div>
+        <div id="nominee-edit-{{ n.id }}" class="ret-inline-form" style="display:none;">
+          <form method="POST" action="{{ url_for('retirement_centre.edit_nominee', nominee_id=n.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <div class="ret-inline-grid">
+              <div class="form-group"><label>Name</label><input type="text" name="name" value="{{ n.name }}" required /></div>
+              <div class="form-group">
+                <label>Relationship</label>
+                <select name="relationship" class="ret-select" required>
+                  {% for r in nominee_relations %}<option value="{{ r }}" {{ 'selected' if n.relationship == r }}>{{ r }}</option>{% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="ret-inline-grid">
+              <div class="form-group"><label>Percentage</label><input type="number" name="percentage" step="0.01" min="0" max="100" value="{{ n.percentage if n.percentage is not none else '' }}" /></div>
+              <div class="form-group"><label>Contact</label><input type="text" name="contact" value="{{ n.contact or '' }}" /></div>
+            </div>
+            <div class="form-group"><label>Notes</label><input type="text" name="notes" value="{{ n.notes or '' }}" /></div>
+            <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Changes</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="ret-empty">No nominees added.<br>Add nominees to keep your retirement records complete.</div>
+    {% endif %}
+  </div>
+
+  <!-- ── Documents ── -->
+  <div class="ret-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+      <div class="ret-card-label" style="margin-bottom:0;">Documents</div>
+      <button type="button" class="ret-btn-small" onclick="toggle('docForm')">+ Upload Document</button>
+    </div>
+    <div style="font-size:0.78rem; color:var(--muted); margin-bottom:14px;">
+      Documents are stored locally on your computer — never uploaded anywhere.
+    </div>
+
+    <div id="docForm" class="ret-inline-form" style="display:none;">
+      <form method="POST" action="{{ url_for('retirement_centre.upload_document', scheme_id=scheme.id) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="ret-inline-grid">
+          <div class="form-group">
+            <label>Document Type</label>
+            <select name="doc_type" class="ret-select" required>
+              {% for dt in doc_types %}<option value="{{ dt }}">{{ dt }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group"><label>Choose File</label><input type="file" name="document" required /></div>
+        </div>
+        <div class="form-group"><label>Note — optional</label><input type="text" name="doc_notes" /></div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Upload</button>
+      </form>
+    </div>
+
+    {% if documents %}
+      <div class="ret-list">
+        {% for d in documents %}
+        <div class="ret-list-row">
+          <div>
+            <span class="ret-list-primary">{{ d.original_name }}</span>
+            <span class="ret-list-secondary">{{ d.doc_type }} · {{ format_date(d.uploaded_at) }} · {{ d.file_size_display }}</span>
+          </div>
+          <div class="ret-list-actions">
+            <a href="{{ url_for('retirement_centre.preview_document', doc_id=d.id) }}" target="_blank" class="ret-link-btn">View</a>
+            <a href="{{ url_for('retirement_centre.download_document', doc_id=d.id) }}" class="ret-link-btn">Download</a>
+            <form method="POST" action="{{ url_for('retirement_centre.delete_document', doc_id=d.id) }}"
+                  onsubmit="return confirm('Delete Document?\n\nThis document will be permanently removed from your local MyWealthLens storage.')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="ret-link-btn ret-link-danger">Delete</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="ret-empty">No documents uploaded yet.<br>Store your statements, receipts and retirement documents locally with this scheme.</div>
+    {% endif %}
+  </div>
+
+  <!-- ── Maturity / Retirement Information ── -->
+  <div class="ret-card">
+    <div class="ret-card-label">Maturity / Retirement Information</div>
+    {% if not maturity.available %}
+      <div class="ret-empty">{{ maturity.message or 'Not applicable for this scheme type.' }}</div>
+    {% elif maturity.kind == 'maturity' %}
+      <div class="ret-detail-grid">
+        <div class="ret-field"><span class="ret-field-label">Maturity Date</span><span class="ret-field-value">{{ format_date(maturity.date) }}</span></div>
+        <div class="ret-field"><span class="ret-field-label">Status</span><span class="ret-field-value">
+          {% if maturity.status == 'reached' %}Maturity reached
+          {% else %}{{ (maturity.days // 365) }} year(s) remaining{% endif %}
+        </span></div>
+      </div>
+    {% elif maturity.kind == 'ssy' %}
+      <div class="ret-detail-grid">
+        <div class="ret-field"><span class="ret-field-label">Contribution Period Ends</span><span class="ret-field-value">{{ format_date(maturity.contribution_period_end) }}</span></div>
+        <div class="ret-field"><span class="ret-field-label">Partial Withdrawal Eligible</span><span class="ret-field-value">{{ format_date(maturity.partial_withdrawal_date) }}</span></div>
+        <div class="ret-field"><span class="ret-field-label">Maturity Date</span><span class="ret-field-value">{{ format_date(maturity.maturity_date) }}</span></div>
+        <div class="ret-field"><span class="ret-field-label">Status</span><span class="ret-field-value">{{ 'Maturity reached' if maturity.status == 'reached' else 'On track' }}</span></div>
+      </div>
+    {% elif maturity.kind == 'target_year' %}
+      <div class="ret-detail-grid">
+        <div class="ret-field"><span class="ret-field-label">Target Retirement</span><span class="ret-field-value">{{ maturity.year }}</span></div>
+        <div class="ret-field"><span class="ret-field-label">Status</span><span class="ret-field-value">
+          {% if maturity.years_remaining <= 0 %}Target year reached
+          {% else %}{{ maturity.years_remaining }} year(s) remaining{% endif %}
+        </span></div>
+      </div>
+    {% endif %}
+  </div>
+
+  {% if scheme.notes %}
+  <div class="ret-card">
+    <div class="ret-card-label">Notes</div>
+    <div style="font-size:0.9rem; color:var(--text2); white-space:pre-wrap;">{{ scheme.notes }}</div>
+  </div>
+  {% endif %}
+
+  <!-- ── Activity ── -->
+  {% if timeline %}
+  <div class="ret-card">
+    <div class="ret-card-label">Activity</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      {% for t in timeline %}
+      <div style="display:flex; justify-content:space-between; gap:12px; font-size:0.82rem; padding-bottom:10px; border-bottom:1px solid var(--border);">
+        <div>
+          <div style="color:var(--text2); font-weight:500;">{{ t.event_type }}</div>
+          <div style="color:var(--muted); margin-top:2px;">{{ t.description }}</div>
+        </div>
+        <div style="color:var(--muted); white-space:nowrap;">{{ format_date(t.created_at) }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .ret-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .ret-card-label {
+    font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
+  }
+  .ret-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .ret-field { display: flex; flex-direction: column; gap: 4px; }
+  .ret-field-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .ret-field-value { font-size: 0.92rem; color: var(--text); font-weight: 500; }
+  .ret-field-value.ret-accent { color: var(--accent); font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 1.1rem; }
+  .ret-badge {
+    display: inline-block; margin-left: 8px; font-size: 0.68rem;
+    padding: 2px 8px; border-radius: 10px; font-weight: 600;
+  }
+  .ret-badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+  .ret-btn-small {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 14px; font-size: 0.8rem;
+    font-weight: 600; color: var(--accent); cursor: pointer;
+    font-family: 'Inter', sans-serif; transition: border-color 0.2s;
+  }
+  .ret-btn-small:hover { border-color: var(--accent); }
+
+  .ret-summary-row { display: flex; gap: 24px; margin-bottom: 18px; flex-wrap: wrap; }
+  .ret-summary-item { display: flex; flex-direction: column; gap: 4px; }
+  .ret-summary-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .ret-summary-value { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--text); font-size: 1rem; }
+
+  .ret-inline-form {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px; margin-bottom: 16px;
+  }
+  .ret-inline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .ret-list { display: flex; flex-direction: column; gap: 2px; }
+  .ret-list-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
+  }
+  .ret-list-row:last-child { border-bottom: none; }
+  .ret-list-primary { font-weight: 600; color: var(--text); font-size: 0.9rem; }
+  .ret-list-secondary { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+  .ret-list-actions { display: flex; gap: 10px; align-items: center; }
+  .ret-link-btn {
+    background: none; border: none; color: var(--accent); font-size: 0.78rem;
+    cursor: pointer; font-family: 'Inter', sans-serif; padding: 0;
+  }
+  .ret-link-btn.ret-link-danger { color: var(--muted); }
+  .ret-link-btn.ret-link-danger:hover { color: var(--down); }
+
+  .ret-empty { color: var(--muted); font-size: 0.85rem; line-height: 1.6; padding: 8px 0; }
+
+  .ret-select {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; color: var(--text);
+    font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+
+  @media (max-width: 600px) {
+    .ret-detail-grid, .ret-inline-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+  function toggle(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+  }
+</script>
+{% endblock %}

@@ -11,8 +11,6 @@ Tables:
   7. Loan             — loans and liabilities
   8. Insurance        — insurance policies
   9. NetWorthHistory  — daily net worth snapshots
-  10. EmergencyFund   — emergency fund target
-  11. TaxEntry80C     — manual 80C entries
 """
 
 from flask_sqlalchemy import SQLAlchemy
@@ -132,26 +130,6 @@ class Loan(db.Model):
 
     def __repr__(self):
         return f"<Loan {self.loan_type} {self.lender}>"
-
-
-class Insurance(db.Model):
-    __tablename__ = "insurance"
-    id             = db.Column(db.Integer, primary_key=True)
-    user_id        = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    insurance_type = db.Column(db.String(30), nullable=False)
-    insurer        = db.Column(db.String(200), nullable=False)
-    policy_number  = db.Column(db.String(100), nullable=True)
-    cover_amount   = db.Column(db.Float, nullable=False)
-    annual_premium = db.Column(db.Float, nullable=False)
-    renewal_date   = db.Column(db.Date, nullable=True)
-    notes          = db.Column(db.String(500), nullable=True)
-    created_at     = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at     = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<Insurance {self.insurance_type} {self.insurer}>"
-
-
 class NetWorthHistory(db.Model):
     __tablename__ = "net_worth_history"
     id            = db.Column(db.Integer, primary_key=True)
@@ -172,32 +150,6 @@ class NetWorthHistory(db.Model):
 
     def __repr__(self):
         return f"<NetWorthHistory {self.snapshot_date} total={self.total}>"
-
-
-class EmergencyFund(db.Model):
-    __tablename__ = "emergency_fund"
-    id               = db.Column(db.Integer, primary_key=True)
-    user_id          = db.Column(db.Integer, db.ForeignKey("user.id"), unique=True, nullable=False)
-    monthly_expenses = db.Column(db.Float, nullable=False)
-    target_months    = db.Column(db.Integer, default=6)
-    target_amount    = db.Column(db.Float, nullable=False)
-    updated_at       = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<EmergencyFund target={self.target_amount}>"
-
-
-class TaxEntry80C(db.Model):
-    __tablename__ = "tax_entry_80c"
-    id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    label      = db.Column(db.String(200), nullable=False)
-    amount     = db.Column(db.Float, nullable=False)
-    fy         = db.Column(db.String(10), default="2024-25")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<TaxEntry80C {self.label} {self.amount}>"
 
 
 class Family(db.Model):
