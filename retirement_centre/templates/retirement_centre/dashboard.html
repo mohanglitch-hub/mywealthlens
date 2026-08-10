@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %}Retirement Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ret-wrap">
+
+  <div class="ret-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+    <div>
+      <h1>Retirement Centre</h1>
+      <p>Track your retirement savings, contributions and long-term investments in one place.</p>
+    </div>
+    {% if data.schemes %}
+    <a href="{{ url_for('retirement_centre.export_pdf') }}" class="ret-btn-outline">Download Retirement Summary PDF</a>
+    {% endif %}
+  </div>
+
+  <!-- ── Summary Cards ── -->
+  <div class="ret-summary-grid">
+    <div class="ret-stat-card">
+      <div class="ret-stat-label">Total Retirement Corpus</div>
+      <div class="ret-stat-value">{{ format_inr(data.total_corpus) }}</div>
+    </div>
+    <div class="ret-stat-card">
+      <div class="ret-stat-label">Current FY Contributions</div>
+      <div class="ret-stat-value">{{ format_inr(data.current_fy_contributions) }}</div>
+    </div>
+    <div class="ret-stat-card">
+      <div class="ret-stat-label">Active Schemes</div>
+      <div class="ret-stat-value">{{ data.active_schemes }}</div>
+    </div>
+    <div class="ret-stat-card">
+      <div class="ret-stat-label">Upcoming Dates</div>
+      <div class="ret-stat-value {{ 'ret-stat-muted' if data.upcoming_dates == 0 }}">{{ data.upcoming_dates }}</div>
+    </div>
+  </div>
+
+  <!-- ── Scheme Type Breakdown ── -->
+  {% if data.category_breakdown %}
+  <div class="ret-schemes-card">
+    <div class="ret-section-label" style="margin-bottom:16px;">Retirement Scheme Breakdown</div>
+    <div class="ret-category-grid">
+      {% for c in data.category_breakdown %}
+      <div class="ret-category-card">
+        <div class="ret-category-type">{{ c.scheme_type }}</div>
+        <div class="ret-category-count">{{ c.count }} Scheme{{ 's' if c.count != 1 }}</div>
+        <div class="ret-category-balance">{{ format_inr(c.total_balance) }}</div>
+        <div class="ret-category-fy">FY Contributions: {{ format_inr(c.current_fy_contributions) }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Upcoming Milestones ── -->
+  {% if data.upcoming_milestones %}
+  <div class="ret-schemes-card">
+    <div class="ret-section-label" style="margin-bottom:16px;">Upcoming Maturities / Retirement Targets</div>
+    <div class="ret-scheme-list">
+      {% for m in data.upcoming_milestones %}
+      <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=m.scheme.id) }}" class="ret-scheme-row">
+        <div class="ret-scheme-info">
+          <div class="ret-scheme-type">{{ m.scheme.display_type }}</div>
+          <div class="ret-scheme-meta">
+            {% if m.info.kind == 'maturity' %}
+              Maturity: {{ format_date(m.info.date) }}
+            {% elif m.info.kind == 'ssy' %}
+              Maturity: {{ format_date(m.info.maturity_date) }}
+            {% elif m.info.kind == 'target_year' %}
+              Target Retirement: {{ m.info.year }}
+            {% endif %}
+          </div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Scheme Area ── -->
+  <div class="ret-schemes-card">
+    <div class="ret-schemes-header">
+      <div class="ret-section-label">Retirement Schemes</div>
+      <a href="{{ url_for('retirement_centre.add_scheme') }}" class="ret-btn-add">
+        + Add Scheme
+      </a>
+    </div>
+
+    {% if data.schemes %}
+      <div class="ret-scheme-list">
+        {% for scheme in data.schemes %}
+        <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) }}" class="ret-scheme-row">
+          <div class="ret-scheme-info">
+            <div class="ret-scheme-type">{{ scheme.display_type }}</div>
+            <div class="ret-scheme-meta">
+              {{ scheme.institution or '—' }}
+              {% if scheme.account_number %} · {{ scheme.account_number }}{% endif %}
+            </div>
+          </div>
+          <div class="ret-scheme-balance">{{ format_inr(scheme.current_balance) }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="ret-empty-state">
+        <div class="ret-empty-icon">🏦</div>
+        <div class="ret-empty-title">No retirement schemes added yet.</div>
+        <div class="ret-empty-sub">Once schemes can be added, they'll show up here alongside your contributions and balance history.</div>
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+  .ret-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+  .ret-header h1 {
+    font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text);
+  }
+  .ret-header p {
+    color: var(--muted); font-size: 0.875rem;
+  }
+
+  .ret-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .ret-stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; box-shadow: var(--shadow-sm);
+  }
+  .ret-stat-label {
+    font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px;
+  }
+  .ret-stat-value {
+    font-family: 'Roboto Mono', monospace; font-size: 1.3rem;
+    font-weight: 700; color: var(--accent);
+  }
+  .ret-stat-value.ret-stat-muted { color: var(--muted2); font-size: 1.1rem; }
+
+  .ret-schemes-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm);
+  }
+  .ret-schemes-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
+  }
+  .ret-section-label {
+    font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .ret-btn-add {
+    background: var(--accent); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 8px 16px; font-size: 0.82rem;
+    font-weight: 700; color: #fff; font-family: 'Inter', sans-serif;
+    text-decoration: none; display: inline-block; transition: opacity 0.2s;
+  }
+  .ret-btn-add:hover { opacity: 0.88; }
+
+  .ret-btn-outline {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 16px; font-size: 0.82rem;
+    font-weight: 600; color: var(--accent); font-family: 'Inter', sans-serif;
+    text-decoration: none; display: inline-block; transition: border-color 0.2s;
+  }
+  .ret-btn-outline:hover { border-color: var(--accent); }
+
+  .ret-category-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;
+  }
+  .ret-category-card {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px;
+  }
+  .ret-category-type { font-size: 0.78rem; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .ret-category-count { font-size: 0.72rem; color: var(--muted); margin-bottom: 8px; }
+  .ret-category-balance {
+    font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); font-size: 1rem;
+  }
+  .ret-category-fy { font-size: 0.7rem; color: var(--muted); margin-top: 4px; }
+
+  .ret-scheme-list { display: flex; flex-direction: column; gap: 8px; }
+  .ret-scheme-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; gap: 12px; flex-wrap: wrap;
+    text-decoration: none; color: inherit; transition: border-color 0.2s;
+  }
+  .ret-scheme-row:hover { border-color: var(--accent); }
+  .ret-scheme-type { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+  .ret-scheme-meta { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+  .ret-scheme-balance {
+    font-family: 'Roboto Mono', monospace; font-weight: 700;
+    color: var(--accent); font-size: 1rem; white-space: nowrap;
+  }
+
+  .ret-empty-state {
+    text-align: center; padding: 48px 20px; color: var(--muted);
+  }
+  .ret-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  .ret-empty-title {
+    font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text);
+  }
+  .ret-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  @media (max-width: 900px) {
+    .ret-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 480px) {
+    .ret-summary-grid { grid-template-columns: 1fr; }
+    .ret-schemes-card { padding: 18px; }
+  }
+</style>
+{% endblock %}

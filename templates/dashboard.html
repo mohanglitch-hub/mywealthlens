@@ -39,33 +39,6 @@
     </div>
   </div>
 
-  <!-- ── Row 4: Life Stage (compact) ── -->
-  <div class="ls-card">
-    <div class="ls-header">
-      <div class="card-label" style="margin-bottom:0;">Life Stage Planner</div>
-      <a href="/life-stage" class="ls-link">View full analysis →</a>
-    </div>
-    <div id="lsLoading" style="color:var(--muted); font-size:0.85rem; padding:8px 0;">Loading…</div>
-    <div id="lsContent" style="display:none;">
-      <div class="ls-top">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <span id="lsIcon" style="font-size:1.6rem;"></span>
-          <div>
-            <div id="lsStageName" style="font-weight:700; color:var(--accent); font-size:0.95rem;"></div>
-            <div style="font-size:0.78rem; color:var(--muted);">
-              Health: <span id="lsHealth" style="font-weight:700;"></span>/100
-            </div>
-          </div>
-        </div>
-        <div class="ls-bars" id="lsBars"></div>
-      </div>
-    </div>
-    <div id="lsSetup" style="display:none; padding:8px 0;">
-      <span style="color:var(--muted); font-size:0.85rem;">Profile not set — </span>
-      <a href="/life-stage" style="color:var(--accent); font-size:0.85rem; font-weight:600;">Set up now →</a>
-    </div>
-  </div>
-
   <!-- ── Row 4b: Net Worth History ── -->
   {% if history_data and history_data|length > 1 %}
   <div class="chart-card">
@@ -219,31 +192,6 @@
         });
       }
     }
-
-    // Life Stage widget
-    fetch('/life-stage/widget-data')
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('lsLoading').style.display = 'none';
-        if (!data.configured) { document.getElementById('lsSetup').style.display='block'; return; }
-        document.getElementById('lsIcon').textContent      = data.stage_icon;
-        document.getElementById('lsStageName').textContent = data.stage_name;
-        const h = data.health_score;
-        const hEl = document.getElementById('lsHealth');
-        hEl.textContent  = h;
-        hEl.style.color  = h>=75?'var(--up)':h>=50?'var(--warning)':'var(--down)';
-        const bars = document.getElementById('lsBars');
-        data.allocation.forEach(b => {
-          const c = b.gap>5?'var(--down)':b.gap<-5?'var(--warning)':'var(--up)';
-          bars.innerHTML += `<div class="ls-bar-row">
-            <span class="ls-bar-label">${b.icon} ${b.label}</span>
-            <div class="ls-bar-track"><div style="height:5px;border-radius:3px;width:${Math.min(b.actual,100)}%;background:${c};"></div></div>
-            <span class="ls-bar-pct">${b.actual}%</span>
-          </div>`;
-        });
-        document.getElementById('lsContent').style.display='block';
-      })
-      .catch(() => { document.getElementById('lsLoading').textContent='Unable to load.'; });
   </script>
 
   {% else %}
@@ -300,26 +248,13 @@
   }
   .chart-wrap { position:relative; height:260px; width:100%; overflow:hidden; box-sizing:border-box; }
 
-  /* ── Row 4: Life Stage ── */
-  .ls-card {
-    background:var(--surface); border:1px solid var(--border);
-    border-radius:12px; padding:20px; box-shadow:var(--shadow-sm);
-  }
-  .ls-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
-  .ls-link   { font-size:0.78rem; color:var(--accent); text-decoration:none; }
-  .ls-top    { display:flex; align-items:flex-start; gap:20px; flex-wrap:wrap; }
-  .ls-bars   { flex:1; min-width:200px; display:flex; flex-direction:column; gap:8px; }
-  .ls-bar-row{ display:flex; align-items:center; gap:8px; }
-  .ls-bar-label { font-size:0.75rem; color:var(--muted); width:90px; flex-shrink:0; }
-  .ls-bar-track { flex:1; height:5px; background:var(--border); border-radius:3px; overflow:hidden; }
-  .ls-bar-pct   { font-size:0.72rem; color:var(--text2); width:36px; text-align:right; flex-shrink:0; }
-
   /* ── Row 5: Holdings ── */
   .holdings-card {
     background:var(--surface); border:1px solid var(--border);
     border-radius:12px; padding:20px; box-shadow:var(--shadow-sm);
   }
   .holdings-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px; }
+  .ls-link   { font-size:0.78rem; color:var(--accent); text-decoration:none; }
   .count-badge {
     background:var(--accent-bg); color:var(--accent); border:1px solid var(--border);
     border-radius:12px; font-size:0.72rem; padding:2px 8px; font-weight:600; margin-left:6px;
@@ -349,8 +284,6 @@
     .top-row { padding:18px; }
     .hero-value { font-size:1.8rem; }
     .hero-actions { width:100%; justify-content:flex-start; }
-    .ls-top { flex-direction:column; }
-    .ls-bars { width:100%; }
     .h-name { white-space:normal; }
   }
   @media (max-width: 400px) {

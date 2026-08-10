@@ -1,0 +1,521 @@
+{% extends "base.html" %}
+{% block title %}My Account — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:0 auto;">
+
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">My Account</h1>
+  <p style="color:var(--muted); font-size:0.875rem; margin-bottom:24px;">Your profile, security, and app preferences</p>
+
+  <!-- ── System Health ── -->
+  <div class="settings-card health-card">
+    <div class="section-label">System Health</div>
+    <div class="health-grid">
+      <div class="health-item">
+        <span class="health-icon {{ 'ok' if system_health.db_connected else 'bad' }}">
+          {{ '✓' if system_health.db_connected else '✕' }}
+        </span>
+        <span>Database Connected</span>
+      </div>
+      <div class="health-item">
+        <span class="health-icon ok">✓</span>
+        <span>Privacy Mode: {{ system_health.privacy_mode }}</span>
+      </div>
+      <div class="health-item">
+        <span class="health-label">Version</span>
+        <span class="health-value">{{ system_health.version }}</span>
+      </div>
+      <div class="health-item">
+        <span class="health-label">Documents Stored</span>
+        <span class="health-value">{{ system_health.documents_stored }}</span>
+      </div>
+      <div class="health-item">
+        <span class="health-label">Database Status</span>
+        <span class="health-value" style="color:{{ 'var(--up)' if system_health.db_status == 'Healthy' else 'var(--down)' }};">
+          {{ system_health.db_status }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Two panel layout ── -->
+  <div class="pref-layout">
+
+    <!-- Left nav -->
+    <nav class="pref-nav">
+      <button class="pref-nav-item" data-section="profile" onclick="showSection('profile', this)">👤 Profile</button>
+      <button class="pref-nav-item" data-section="security" onclick="showSection('security', this)">🔒 Security</button>
+      <button class="pref-nav-item" data-section="appearance" onclick="showSection('appearance', this)">🎨 Appearance</button>
+      <button class="pref-nav-item" data-section="privacy" onclick="showSection('privacy', this)">🔐 Data &amp; Privacy</button>
+      <button class="pref-nav-item" data-section="notifications" onclick="showSection('notifications', this)">🔔 Notifications</button>
+      <button class="pref-nav-item" data-section="backup" onclick="showSection('backup', this)">💾 Backup &amp; Restore</button>
+      <button class="pref-nav-item" data-section="about" onclick="showSection('about', this)">ℹ️ About</button>
+    </nav>
+
+    <!-- Right content -->
+    <div class="pref-content">
+
+      <!-- ═══ Profile ═══ -->
+      <section class="pref-section" id="sec-profile">
+        <div class="settings-card" style="margin-bottom:20px;">
+          <div style="display:flex; align-items:center; gap:20px; margin-bottom:28px; flex-wrap:wrap;">
+            <div class="avatar">
+              <span>{{ user.name[0].upper() }}</span>
+            </div>
+            <div>
+              <div style="font-size:1.1rem; font-weight:700; color:var(--text);">{{ user.name }}</div>
+              <div style="font-size:0.85rem; color:var(--muted); margin-top:2px;">{{ user.email }}</div>
+            </div>
+          </div>
+
+          <div class="profile-field">
+            <div class="field-label">Full Name</div>
+            <div class="field-value">{{ user.name }}</div>
+          </div>
+          <div class="profile-field">
+            <div class="field-label">Email Address</div>
+            <div class="field-value">{{ user.email }}</div>
+          </div>
+          <div class="profile-field" style="border-bottom:none; padding-bottom:0; margin-bottom:0;">
+            <div class="field-label">Password</div>
+            <div class="field-value" style="color:var(--muted2); letter-spacing:0.15em;">••••••••••••</div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="section-label">Account Summary</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+            <div class="stat-box">
+              <div class="stat-label">Member Since</div>
+              <div class="stat-value">{{ user.created_at.strftime('%b %Y') if user.created_at else '—' }}</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Account Status</div>
+              <div class="stat-value" style="color:var(--up);">Active ✓</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Security ═══ -->
+      <section class="pref-section" id="sec-security" style="display:none;">
+        <div class="settings-card">
+          <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Change Password</div>
+          <div style="color:var(--muted); font-size:0.875rem; margin-bottom:20px;">
+            Choose a strong password of at least 8 characters
+          </div>
+
+          <form method="POST" action="/account/change-password" id="pwForm" novalidate>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+            <div class="form-group">
+              <label for="current_password">Current Password</label>
+              <div class="input-wrapper">
+                <input type="password" id="current_password" name="current_password"
+                       placeholder="Enter current password" required />
+                <button type="button" class="toggle-pw" onclick="togglePw('current_password',this)">Show</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="new_password">New Password</label>
+              <div class="input-wrapper">
+                <input type="password" id="new_password" name="new_password"
+                       placeholder="Minimum 8 characters" required minlength="8"
+                       oninput="checkStrength(this.value)" />
+                <button type="button" class="toggle-pw" onclick="togglePw('new_password',this)">Show</button>
+              </div>
+              <div style="margin-top:8px;">
+                <div style="height:4px; background:var(--border); border-radius:2px; overflow:hidden;">
+                  <div id="strengthBar" style="height:4px; width:0%; border-radius:2px; transition:width 0.3s, background 0.3s;"></div>
+                </div>
+                <div id="strengthLabel" style="font-size:0.72rem; color:var(--muted2); margin-top:4px; min-height:16px;"></div>
+              </div>
+              <div class="field-error" id="err-pw"></div>
+            </div>
+
+            <div class="form-group">
+              <label for="confirm_password">Confirm New Password</label>
+              <div class="input-wrapper">
+                <input type="password" id="confirm_password" name="confirm_password"
+                       placeholder="Repeat new password" required minlength="8" />
+                <button type="button" class="toggle-pw" onclick="togglePw('confirm_password',this)">Show</button>
+              </div>
+              <div class="field-error" id="err-confirm"></div>
+            </div>
+
+            <button type="submit" class="btn-primary" id="changeBtn" style="width:auto; padding:10px 28px;">
+              Change Password
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- ═══ Appearance ═══ -->
+      <section class="pref-section" id="sec-appearance" style="display:none;">
+        <div class="settings-card" style="margin-bottom:16px;">
+          <div class="card-row">
+            <div>
+              <div class="card-title">Appearance</div>
+              <div class="card-sub">Choose between light and dark mode</div>
+            </div>
+            <div class="theme-toggle-wrap">
+              <button class="theme-btn" id="themeLight" onclick="applyTheme('light')">☀️ Light</button>
+              <button class="theme-btn" id="themeDark" onclick="applyTheme('dark')">🌙 Dark</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="card-title">Currency</div>
+          <div class="card-sub" style="margin-bottom:12px;">All values displayed in</div>
+          <div class="currency-box">
+            <span style="font-size:1.1rem;">₹</span>
+            <span>Indian Rupee (INR)</span>
+            <span class="badge-active">Active</span>
+          </div>
+          <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
+            Multi-currency support coming in a future phase
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Data & Privacy ═══ -->
+      <section class="pref-section" id="sec-privacy" style="display:none;">
+        <div class="settings-card">
+          <div class="card-title">Data &amp; Privacy</div>
+          <div class="card-sub" style="margin-bottom:16px;">
+            Your data is stored locally on this server only. Never shared or sold.
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <a href="/export/excel" class="btn-setting">📊 Export my data (Excel)</a>
+            <a href="/export/pdf" class="btn-setting">📄 Export my data (PDF)</a>
+          </div>
+          <div style="margin-top:12px;">
+            <button class="btn-danger"
+              onclick="if(confirm('Are you sure? This will permanently delete your account and all data.')) window.location='/account/delete'">
+              Delete my account
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Notifications ═══ -->
+      <section class="pref-section" id="sec-notifications" style="display:none;">
+        <div class="settings-card">
+          <div class="card-title">Notifications</div>
+          <div class="card-sub">Email reminders and alerts</div>
+          <div class="coming-soon-row">
+            <span>📧</span>
+            <div>
+              <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Monthly wealth summary email</div>
+              <div style="font-size:0.78rem; color:var(--muted);">Coming in a future phase</div>
+            </div>
+            <span class="badge-soon">Soon</span>
+          </div>
+          <div class="coming-soon-row" style="border-bottom:none;">
+            <span>⏰</span>
+            <div>
+              <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Renewal / SIP due date reminders</div>
+              <div style="font-size:0.78rem; color:var(--muted);">Coming in a future phase</div>
+            </div>
+            <span class="badge-soon">Soon</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ Backup & Restore ═══ -->
+      <section class="pref-section" id="sec-backup" style="display:none;">
+        <div class="settings-card">
+          <div class="card-title">Backup &amp; Restore</div>
+          <div class="card-sub" style="margin-bottom:16px;">Back up your portfolio and restore it on any device</div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+            <div class="stat-box">
+              <div class="stat-label">Last Backup</div>
+              <div class="stat-value">Not Available</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-label">Backup Location</div>
+              <div class="stat-value">Not Available</div>
+            </div>
+          </div>
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn-setting" disabled style="opacity:0.5; cursor:not-allowed;">💾 Create Backup</button>
+            <button class="btn-setting" disabled style="opacity:0.5; cursor:not-allowed;">♻️ Restore Backup</button>
+          </div>
+
+          <div class="coming-soon-row" style="border-bottom:none; margin-top:16px; padding-top:0;">
+            <span>🔁</span>
+            <div>
+              <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Automatic Backup</div>
+              <div style="font-size:0.78rem; color:var(--muted);">Coming in a future phase</div>
+            </div>
+            <span class="badge-soon">Soon</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ About ═══ -->
+      <section class="pref-section" id="sec-about" style="display:none;">
+        <div class="settings-card">
+          <div class="card-title">About MyWealthLens</div>
+          <div style="display:flex; flex-direction:column; gap:10px; margin-top:12px;">
+            <div class="about-row">
+              <span class="about-label">Version</span>
+              <span class="about-value">{{ system_health.version }}</span>
+            </div>
+            <div class="about-row">
+              <span class="about-label">Built with</span>
+              <span class="about-value">Flask · Python · SQLite</span>
+            </div>
+            <div class="about-row">
+              <span class="about-label">Data storage</span>
+              <span class="about-value">Local only — your device</span>
+            </div>
+            <div class="about-row" style="border-bottom:none;">
+              <span class="about-label">Privacy</span>
+              <span class="about-value" style="color:var(--up);">No data shared or sold ✓</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<style>
+  .settings-card {
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:24px; box-shadow:var(--shadow-sm);
+  }
+  .section-label {
+    font-size:0.72rem; font-weight:600; color:var(--muted);
+    letter-spacing:0.1em; text-transform:uppercase; margin-bottom:16px;
+  }
+
+  /* Health card */
+  .health-card { margin-bottom:20px; }
+  .health-grid { display:flex; flex-wrap:wrap; gap:14px 28px; }
+  .health-item { display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--text2); }
+  .health-icon { font-weight:700; }
+  .health-icon.ok  { color:var(--up); }
+  .health-icon.bad { color:var(--down); }
+  .health-label { color:var(--muted); }
+  .health-value { font-weight:600; color:var(--text); }
+
+  /* Two panel layout */
+  .pref-layout { display:flex; gap:20px; align-items:flex-start; }
+  .pref-nav {
+    width:200px; flex-shrink:0;
+    display:flex; flex-direction:column; gap:2px;
+    background:var(--surface); border:1px solid var(--border);
+    border-radius:12px; padding:8px; box-shadow:var(--shadow-sm);
+    position:sticky; top:20px;
+  }
+  .pref-nav-item {
+    display:block; text-align:left; background:none; border:none;
+    color:var(--muted); font-size:0.85rem; font-weight:500;
+    padding:10px 12px; border-radius:8px; cursor:pointer;
+    font-family:'Inter',sans-serif; transition:all 0.15s; width:100%;
+  }
+  .pref-nav-item:hover { background:var(--accent-bg); color:var(--accent); }
+  .pref-nav-item.active { background:var(--accent-bg); color:var(--accent); font-weight:700; }
+  .pref-content { flex:1; min-width:0; }
+
+  /* Profile */
+  .avatar {
+    width:64px; height:64px; border-radius:50%;
+    background:var(--accent-bg); border:2px solid var(--accent);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .avatar span { font-size:1.5rem; font-weight:700; color:var(--accent); }
+  .profile-field { padding:16px 0; border-bottom:1px solid var(--border); }
+  .field-label {
+    font-size:0.72rem; font-weight:600; color:var(--muted);
+    letter-spacing:0.08em; text-transform:uppercase; margin-bottom:5px;
+  }
+  .field-value { font-size:0.95rem; color:var(--text); font-weight:500; }
+  .stat-box { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:16px; }
+  .stat-label { font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .stat-value { font-size:1rem; font-weight:600; color:var(--text); }
+  .field-error { font-size:0.78rem; color:var(--down); margin-top:5px; min-height:16px; }
+
+  /* Card row / titles */
+  .card-row  { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; }
+  .card-title { font-weight:600; color:var(--text); margin-bottom:4px; }
+  .card-sub   { color:var(--muted); font-size:0.875rem; }
+
+  /* Theme toggle */
+  .theme-toggle-wrap { display:flex; gap:8px; }
+  .theme-btn {
+    padding:8px 16px; border-radius:8px; font-size:0.85rem;
+    font-weight:500; cursor:pointer; font-family:'Inter',sans-serif;
+    border:1px solid var(--border); background:var(--surface2);
+    color:var(--muted); transition:all 0.2s;
+  }
+  .theme-btn.active { background:var(--accent-bg); border-color:var(--accent); color:var(--accent); font-weight:700; }
+  .theme-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  /* Currency */
+  .currency-box {
+    display:inline-flex; align-items:center; gap:10px;
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:10px 16px; font-size:0.9rem; color:var(--text);
+  }
+  .badge-active {
+    background:var(--up-bg); color:var(--up); border:1px solid var(--up);
+    border-radius:12px; font-size:0.72rem; padding:2px 8px; font-weight:600;
+  }
+
+  /* Buttons */
+  .btn-setting {
+    display:inline-flex; align-items:center; gap:6px;
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:9px 16px; font-size:0.82rem;
+    font-weight:500; color:var(--text2); text-decoration:none;
+    transition:all 0.2s; cursor:pointer; font-family:'Inter',sans-serif;
+  }
+  .btn-setting:hover { border-color:var(--accent); color:var(--accent); }
+  .btn-danger {
+    background:none; border:1px solid var(--border);
+    border-radius:8px; padding:9px 16px; font-size:0.82rem;
+    color:var(--muted); cursor:pointer; font-family:'Inter',sans-serif;
+    transition:all 0.2s;
+  }
+  .btn-danger:hover { border-color:var(--down); color:var(--down); background:var(--down-bg); }
+
+  /* Notifications */
+  .coming-soon-row {
+    display:flex; align-items:center; gap:14px; padding:14px 0;
+    border-bottom:1px solid var(--border); flex-wrap:wrap;
+  }
+  .badge-soon {
+    margin-left:auto; background:var(--warning-bg); color:var(--warning);
+    border:1px solid var(--warning); border-radius:12px;
+    font-size:0.7rem; padding:2px 8px; font-weight:600; white-space:nowrap;
+  }
+
+  /* About */
+  .about-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 0; border-bottom:1px solid var(--border); flex-wrap:wrap; gap:8px;
+  }
+  .about-label { font-size:0.82rem; color:var(--muted); }
+  .about-value { font-size:0.82rem; color:var(--text2); font-weight:500; }
+
+  /* Form (reused from account.html) */
+  .input-wrapper { position:relative; display:flex; align-items:center; }
+  .input-wrapper input { padding-right:60px; }
+  .toggle-pw {
+    position:absolute; right:12px; background:none; border:none;
+    color:var(--accent); font-size:0.78rem; font-weight:600;
+    cursor:pointer; font-family:'Inter',sans-serif; padding:0;
+  }
+  .toggle-pw:hover { opacity:0.75; }
+
+  @media (max-width: 768px) {
+    .pref-layout { flex-direction:column; }
+    .pref-nav {
+      width:100%; flex-direction:row; overflow-x:auto;
+      position:static; gap:4px;
+    }
+    .pref-nav-item { white-space:nowrap; }
+    .health-grid { gap:10px 18px; }
+  }
+  @media (max-width:480px) {
+    .settings-card { padding:18px; }
+    .card-row { flex-direction:column; align-items:flex-start; }
+    .theme-toggle-wrap { width:100%; }
+    .theme-btn { flex:1; text-align:center; }
+  }
+</style>
+
+<script>
+  /* ── Section switching ── */
+  function showSection(id, btn) {
+    document.querySelectorAll('.pref-section').forEach(el => el.style.display = 'none');
+    document.getElementById('sec-' + id).style.display = 'block';
+    document.querySelectorAll('.pref-nav-item').forEach(el => el.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    history.replaceState(null, '', '#' + id);
+  }
+  window.addEventListener('DOMContentLoaded', function () {
+    const hash = window.location.hash.replace('#', '') || 'profile';
+    const btn = document.querySelector('.pref-nav-item[data-section="' + hash + '"]')
+             || document.querySelector('.pref-nav-item');
+    if (btn) showSection(btn.dataset.section, btn);
+
+    const saved = localStorage.getItem('mwl-theme') || 'light';
+    document.getElementById('themeLight').classList.toggle('active', saved === 'light');
+    document.getElementById('themeDark').classList.toggle('active', saved === 'dark');
+  });
+
+  /* ── Password visibility toggle ── */
+  function togglePw(id, btn) {
+    const inp = document.getElementById(id);
+    const hidden = inp.type === 'password';
+    inp.type = hidden ? 'text' : 'password';
+    btn.textContent = hidden ? 'Hide' : 'Show';
+  }
+
+  /* ── Password strength meter ── */
+  function checkStrength(val) {
+    const bar   = document.getElementById('strengthBar');
+    const label = document.getElementById('strengthLabel');
+    if (!val) { bar.style.width = '0%'; label.textContent = ''; return; }
+    let score = 0;
+    if (val.length >= 8)          score++;
+    if (val.length >= 12)         score++;
+    if (/[A-Z]/.test(val))        score++;
+    if (/[0-9]/.test(val))        score++;
+    if (/[^A-Za-z0-9]/.test(val)) score++;
+    const levels = [
+      { pct:'20%',  color:'#DC2626', text:'Very weak' },
+      { pct:'40%',  color:'#EA580C', text:'Weak' },
+      { pct:'60%',  color:'#D97706', text:'Fair' },
+      { pct:'80%',  color:'#65A30D', text:'Strong' },
+      { pct:'100%', color:'#16A34A', text:'Very strong' },
+    ];
+    const lvl = levels[Math.min(score - 1, 4)] || levels[0];
+    bar.style.width      = lvl.pct;
+    bar.style.background = lvl.color;
+    label.style.color    = lvl.color;
+    label.textContent    = lvl.text;
+  }
+
+  /* ── Password form validation ── */
+  document.getElementById('pwForm').addEventListener('submit', function (e) {
+    let valid = true;
+    const pw  = document.getElementById('new_password').value;
+    const cpw = document.getElementById('confirm_password').value;
+
+    document.getElementById('err-pw').textContent      = '';
+    document.getElementById('err-confirm').textContent = '';
+
+    if (pw.length < 8) {
+      document.getElementById('err-pw').textContent = 'Password must be at least 8 characters.';
+      valid = false;
+    }
+    if (pw !== cpw) {
+      document.getElementById('err-confirm').textContent = 'Passwords do not match.';
+      valid = false;
+    }
+    if (!valid) { e.preventDefault(); return; }
+
+    const btn = document.getElementById('changeBtn');
+    btn.textContent = 'Saving…';
+    btn.disabled = true;
+  });
+
+  /* ── Apply and persist theme ── */
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('mwl-theme', t);
+    document.getElementById('themeLight').classList.toggle('active', t === 'light');
+    document.getElementById('themeDark').classList.toggle('active', t === 'dark');
+  }
+</script>
+{% endblock %}
