@@ -4,11 +4,18 @@
 {% block content %}
 <div style="max-width:760px; margin:0 auto;">
 
+  <div class="ret-breadcrumb">
+    <a href="{{ url_for('retirement_centre.dashboard') }}">← Retirement Centre</a>
+    <span class="ret-breadcrumb-sep">›</span>
+    <span class="ret-breadcrumb-current">{{ 'Edit Scheme' if is_edit else 'Add Scheme' }}</span>
+  </div>
+
   <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">
     {{ 'Edit Retirement Scheme' if is_edit else 'Add Retirement Scheme' }}
   </h1>
   <p style="color:var(--muted); font-size:0.875rem; margin-bottom:28px;">
     {{ 'Update the details for this scheme.' if is_edit else 'Add a new EPF, VPF, PPF, NPS, SSY or other retirement scheme.' }}
+    Fields marked <span class="ret-required-mark">*</span> are required.
   </p>
 
   <form method="POST" action="{{ url_for('retirement_centre.edit_scheme', scheme_id=scheme.id) if is_edit else url_for('retirement_centre.add_scheme') }}" id="schemeForm">
@@ -16,35 +23,35 @@
 
     <!-- ── Scheme Information ── -->
     <div class="ret-card">
-      <div class="ret-card-label">Scheme Information</div>
+      <div class="ret-card-heading"><span class="ret-card-num">1</span><span class="ret-card-title">Scheme Information</span></div>
 
       <div class="form-group">
-        <label for="scheme_type">Scheme Type</label>
+        <label for="scheme_type">Scheme Type <span class="ret-required-mark">*</span></label>
         <select name="scheme_type" id="scheme_type" class="ret-select" required
                 {% if is_edit %}onfocus="this.dataset.prev = this.value" onchange="confirmTypeChange(this); applySchemeType()"
                 {% else %}onchange="applySchemeType()"{% endif %}>
           <option value="">— Select scheme type —</option>
-          {% for t in scheme_types %}
-            <option value="{{ t }}" data-groups="{{ field_groups.get(t, [])|join(',') }}"
-              {{ 'selected' if values.scheme_type == t }}>{{ t }}</option>
+          {% for label, val in scheme_types %}
+            <option value="{{ val }}" data-groups="{{ field_groups.get(val, [])|join(',') }}"
+              {{ 'selected' if values.scheme_type == val }}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
 
       <div class="form-group ret-group" id="grp-custom">
-        <label for="custom_type">Custom Scheme Name *</label>
+        <label for="custom_type">Custom Scheme Name <span class="ret-required-mark">*</span></label>
         <input type="text" name="custom_type" id="custom_type"
                value="{{ values.custom_type }}"
-               placeholder="e.g. Company Pension Trust" />
+               placeholder="e.g. Superannuation Fund, Company Pension Trust" />
       </div>
     </div>
 
     <!-- ── Account Information ── -->
     <div class="ret-card">
-      <div class="ret-card-label">Account Information</div>
+      <div class="ret-card-heading"><span class="ret-card-num">2</span><span class="ret-card-title">Account Information</span></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
-          <label for="institution">Institution</label>
+          <label for="institution">Institution <span class="ret-required-mark">*</span></label>
           <input type="text" name="institution" id="institution"
                  value="{{ values.institution }}"
                  placeholder="e.g. EPFO, SBI, Post Office" required />
@@ -57,20 +64,20 @@
         </div>
       </div>
       <div class="form-group">
-        <label for="opening_date">Opening Date</label>
+        <label for="opening_date">Opening Date <span class="ret-required-mark">*</span></label>
         <input type="date" name="opening_date" id="opening_date"
-               value="{{ values.opening_date }}" />
+               value="{{ values.opening_date }}" required />
       </div>
     </div>
 
     <!-- ── Balance & Growth ── -->
     <div class="ret-card">
-      <div class="ret-card-label">Balance &amp; Growth</div>
+      <div class="ret-card-heading"><span class="ret-card-num">3</span><span class="ret-card-title">Balance &amp; Growth</span></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
-          <label for="current_balance">Current Balance (₹)</label>
+          <label for="current_balance">Current Balance (₹) <span class="ret-required-mark">*</span></label>
           <input type="number" name="current_balance" id="current_balance"
-                 step="0.01" min="0" value="{{ values.current_balance }}" />
+                 step="0.01" min="0" value="{{ values.current_balance }}" required />
         </div>
         <div class="form-group">
           <label for="balance_updated_at">Balance Last Verified On</label>
@@ -103,8 +110,8 @@
     </div>
 
     <!-- ── Scheme-Specific: Employer ── -->
-    <div class="ret-card ret-group" id="grp-employer">
-      <div class="ret-card-label">Employer Information</div>
+    <div class="ret-card ret-group ret-card-conditional" id="grp-employer">
+      <div class="ret-card-heading-plain">Employer Information</div>
       <div class="form-group">
         <label for="employer_name">Employer Name</label>
         <input type="text" name="employer_name" id="employer_name"
@@ -113,8 +120,8 @@
     </div>
 
     <!-- ── Scheme-Specific: UAN + Salary (EPF/VPF) ── -->
-    <div class="ret-card ret-group" id="grp-uan_salary">
-      <div class="ret-card-label">EPF / VPF Details</div>
+    <div class="ret-card ret-group ret-card-conditional" id="grp-uan_salary">
+      <div class="ret-card-heading-plain">EPF / VPF Details</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
           <label for="uan_number">UAN</label>
@@ -130,8 +137,8 @@
     </div>
 
     <!-- ── Scheme-Specific: Contribution % (EPF/VPF/NPS) ── -->
-    <div class="ret-card ret-group" id="grp-contribution_pct">
-      <div class="ret-card-label">Contribution Percentages</div>
+    <div class="ret-card ret-group ret-card-conditional" id="grp-contribution_pct">
+      <div class="ret-card-heading-plain">Contribution Percentages</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
           <label for="employee_contribution_pct">Employee Contribution %</label>
@@ -147,8 +154,8 @@
     </div>
 
     <!-- ── Scheme-Specific: Target Retirement Year (EPF/VPF/NPS/Superannuation) ── -->
-    <div class="ret-card ret-group" id="grp-target_year">
-      <div class="ret-card-label">Target Retirement Year</div>
+    <div class="ret-card ret-group ret-card-conditional" id="grp-target_year">
+      <div class="ret-card-heading-plain">Target Retirement Year</div>
       <div class="form-group">
         <label for="target_retirement_year">Target Retirement Year</label>
         <input type="number" name="target_retirement_year" id="target_retirement_year"
@@ -158,8 +165,8 @@
     </div>
 
     <!-- ── Scheme-Specific: PPF ── -->
-    <div class="ret-card ret-group" id="grp-ppf">
-      <div class="ret-card-label">PPF Details</div>
+    <div class="ret-card ret-group ret-card-conditional" id="grp-ppf">
+      <div class="ret-card-heading-plain">PPF Details</div>
       <div class="form-group">
         <label for="extension_opted">Extension Opted (after the initial 15-year term)</label>
         <select name="extension_opted" id="extension_opted" class="ret-select">
@@ -170,8 +177,8 @@
     </div>
 
     <!-- ── Scheme-Specific: SSY ── -->
-    <div class="ret-card ret-group" id="grp-ssy">
-      <div class="ret-card-label">Sukanya Samriddhi Yojana Details</div>
+    <div class="ret-card ret-group ret-card-conditional" id="grp-ssy">
+      <div class="ret-card-heading-plain">Sukanya Samriddhi Yojana Details</div>
       <div class="form-group">
         <label for="girl_child_name">Girl Child Name</label>
         <input type="text" name="girl_child_name" id="girl_child_name"
@@ -189,8 +196,8 @@
     </div>
 
     <!-- ── Scheme-Specific: NPS ── -->
-    <div class="ret-card ret-group" id="grp-nps">
-      <div class="ret-card-label">NPS Details</div>
+    <div class="ret-card ret-group ret-card-conditional" id="grp-nps">
+      <div class="ret-card-heading-plain">NPS Details</div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
           <label for="pran_number">PRAN</label>
@@ -211,7 +218,7 @@
 
     <!-- ── Contribution Preference ── -->
     <div class="ret-card">
-      <div class="ret-card-label">Contribution Preference</div>
+      <div class="ret-card-heading"><span class="ret-card-num">4</span><span class="ret-card-title">Contribution Preference</span></div>
       <div class="form-group">
         <label for="contribution_preference">Planned Contribution Pattern — optional</label>
         <select name="contribution_preference" id="contribution_preference" class="ret-select">
@@ -228,7 +235,7 @@
 
     <!-- ── Status & Notes ── -->
     <div class="ret-card">
-      <div class="ret-card-label">Status &amp; Notes</div>
+      <div class="ret-card-heading"><span class="ret-card-num">5</span><span class="ret-card-title">Status &amp; Notes</span></div>
       <div class="form-group">
         <label for="status">Status</label>
         <select name="status" id="status" class="ret-select">
@@ -249,7 +256,7 @@
         {{ 'Save Changes' if is_edit else 'Add Scheme' }}
       </button>
       <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) if is_edit else url_for('retirement_centre.dashboard') }}"
-         style="display:inline-flex; align-items:center; padding:11px 20px; color:var(--muted); text-decoration:none; font-size:0.9rem;">
+         class="ret-btn-cancel">
         Cancel
       </a>
     </div>
@@ -258,15 +265,32 @@
 </div>
 
 <style>
+  .ret-breadcrumb { font-size: 0.95rem; margin-bottom: 18px; }
+  .ret-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .ret-breadcrumb a:hover { color: var(--accent); }
+  .ret-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .ret-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .ret-required-mark { color: var(--down); font-weight: 700; }
+
   .ret-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; padding: 22px; margin-bottom: 16px;
     box-shadow: var(--shadow-sm);
   }
-  .ret-card-label {
-    font-size: 0.72rem; font-weight: 600; color: var(--muted);
-    letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
+  .ret-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .ret-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
   }
+  .ret-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .ret-card-heading-plain {
+    font-size: 0.85rem; font-weight: 700; color: var(--accent2);
+    margin-bottom: 16px; padding-left: 12px; border-left: 3px solid var(--accent2);
+  }
+  .ret-card-conditional { border-color: var(--accent2); border-width: 1px; }
+
   .ret-select {
     width: 100%; background: var(--surface2); border: 1px solid var(--border);
     border-radius: 8px; padding: 11px 14px; color: var(--text);
@@ -274,6 +298,14 @@
   }
   .ret-select:focus { border-color: var(--accent); }
   .ret-group { display: none; }
+
+  .ret-btn-cancel {
+    display: inline-flex; align-items: center; padding: 10px 20px;
+    color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+    transition: border-color 0.2s;
+  }
+  .ret-btn-cancel:hover { border-color: var(--muted2); }
 
   @media (max-width: 640px) {
     .ret-card > div[style*="grid-template-columns:1fr 1fr"] {

@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}Document Vault — Retirement Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "retirement_centre/_confirm_modal.html" %}
+<div class="ret-wrap">
+
+  <div class="ret-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+    <div>
+      <h1>Document Vault</h1>
+      <p>Securely store and manage your retirement-related documents in one place.</p>
+    </div>
+    {% if upload_schemes %}
+    <button type="button" class="ret-btn-add" onclick="toggle('vaultUploadForm')">+ Upload Document</button>
+    {% endif %}
+  </div>
+
+  <div class="ret-tabs">
+    <a href="{{ url_for('retirement_centre.dashboard') }}" class="ret-tab">Overview</a>
+    <a href="{{ url_for('retirement_centre.manage_schemes') }}" class="ret-tab">Manage Schemes</a>
+    <span class="ret-tab ret-tab-active">Document Vault</span>
+  </div>
+
+  {% if not upload_schemes %}
+    <div class="ret-schemes-card">
+      <div class="ret-empty-state">
+        <div class="ret-empty-icon">📁</div>
+        <div class="ret-empty-title">Add a retirement scheme first</div>
+        <div class="ret-empty-sub">Documents belong to a specific scheme — add your first EPF, PPF, NPS, SSY or other retirement scheme before uploading documents.</div>
+        <a href="{{ url_for('retirement_centre.add_scheme') }}" class="ret-btn-add" style="margin-top:16px;">+ Add Scheme</a>
+      </div>
+    </div>
+  {% else %}
+
+  <!-- ── Upload Form ── -->
+  <div id="vaultUploadForm" class="ret-schemes-card" style="display:none;">
+    <div class="ret-section-label" style="margin-bottom:16px;">Upload Document</div>
+    <form method="POST" action="{{ url_for('retirement_centre.upload_document_vault') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="ret-inline-grid">
+        <div class="form-group">
+          <label>Retirement Scheme</label>
+          <select name="scheme_id" class="ret-select" required style="width:100%;">
+            <option value="">— Select scheme —</option>
+            {% for s in upload_schemes %}
+              <option value="{{ s.id }}" {{ 'selected' if preselect_scheme_id == s.id }}>{{ s.display_type }}{% if s.institution %} — {{ s.institution }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Document Type</label>
+          <select name="doc_type" class="ret-select" required style="width:100%;">
+            {% for dt in doc_types %}<option value="{{ dt }}">{{ dt }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="ret-inline-grid">
+        <div class="form-group"><label>Document Name / Title — optional</label><input type="text" name="doc_title" placeholder="e.g. FY 2025-26 Annual Statement" /></div>
+        <div class="form-group"><label>Choose File</label><input type="file" name="document" required /></div>
+      </div>
+      <div class="form-group"><label>Notes — optional</label><input type="text" name="doc_notes" /></div>
+      <div style="font-size:0.75rem; color:var(--muted); margin-bottom:10px;">Documents are stored locally on your computer — never uploaded anywhere.</div>
+      <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Upload</button>
+    </form>
+  </div>
+
+  <!-- ── Summary ── -->
+  <div class="ret-summary-grid" style="grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));">
+    <div class="ret-stat-card">
+      <div class="ret-stat-label">Total Documents</div>
+      <div class="ret-stat-value">{{ summary.total }}</div>
+    </div>
+    {% for c in summary.by_category %}
+      {% if c.count > 0 %}
+      <div class="ret-stat-card">
+        <div class="ret-stat-label">{{ c.category }}</div>
+        <div class="ret-stat-value">{{ c.count }}</div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <!-- ── Search & Filter ── -->
+  <form method="GET" action="{{ url_for('retirement_centre.document_vault') }}" class="ret-filter-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search by document name, scheme, institution, type..." class="ret-search-input" />
+    <select name="category" class="ret-select" onchange="this.form.submit()">
+      <option value="">All Schemes</option>
+      {% for c in categories %}<option value="{{ c }}" {{ 'selected' if category == c }}>{{ c }}</option>{% endfor %}
+    </select>
+    <select name="doc_type" class="ret-select" onchange="this.form.submit()">
+      <option value="">All Document Types</option>
+      {% for dt in doc_types %}<option value="{{ dt }}" {{ 'selected' if doc_type == dt }}>{{ dt }}</option>{% endfor %}
+    </select>
+    <input type="date" name="date_from" value="{{ date_from }}" class="ret-select" title="Uploaded from" />
+    <input type="date" name="date_to" value="{{ date_to }}" class="ret-select" title="Uploaded to" />
+    <button type="submit" class="btn-outline">Search</button>
+    {% if q or category or doc_type or date_from or date_to %}
+      <a href="{{ url_for('retirement_centre.document_vault') }}" class="ret-clear-link">Clear Filters</a>
+    {% endif %}
+  </form>
+
+  <!-- ── Document List ── -->
+  <div class="ret-schemes-card">
+    <div class="ret-section-label" style="margin-bottom:16px;">{{ documents|length }} Document{{ 's' if documents|length != 1 }}</div>
+
+    {% if documents %}
+      <div class="ret-list">
+        {% for d in documents %}
+        <div class="ret-list-row">
+          <div>
+            <span class="ret-list-primary">{{ d.display_name }}</span>
+            <span class="ret-list-secondary">
+              {{ d.doc_type }} · {{ d.scheme.display_type }}{% if d.scheme.institution %} ({{ d.scheme.institution }}){% endif %}
+              · {{ format_date(d.uploaded_at) }} · {{ d.file_size_display }}
+            </span>
+          </div>
+          <div class="ret-list-actions">
+            <a href="{{ url_for('retirement_centre.preview_document', doc_id=d.id) }}" target="_blank" class="ret-link-btn">View</a>
+            <a href="{{ url_for('retirement_centre.download_document', doc_id=d.id) }}" class="ret-link-btn">Download</a>
+            <form method="POST" action="{{ url_for('retirement_centre.delete_document', doc_id=d.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="next" value="vault" />
+              <button type="button" class="ret-link-btn ret-link-danger"
+                      onclick="confirmAction(this.form, 'Delete Document?', 'This document will be permanently removed from your local MyWealthLens storage.', 'Delete Document')">Delete</button>
+            </form>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="ret-empty-state">
+        <div class="ret-empty-icon">📁</div>
+        {% if q or category or doc_type or date_from or date_to %}
+          <div class="ret-empty-title">No documents match your filters</div>
+          <div class="ret-empty-sub">Try a different search term or clear your filters.</div>
+        {% else %}
+          <div class="ret-empty-title">No retirement documents stored yet</div>
+          <div class="ret-empty-sub">Keep your passbooks, statements, contribution records and other retirement documents securely in one place.</div>
+          <button type="button" class="ret-btn-add" style="margin-top:16px;" onclick="toggle('vaultUploadForm')">+ Upload Document</button>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+  {% endif %}
+</div>
+
+<style>
+  .ret-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .ret-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  .ret-header p { color: var(--muted); font-size: 0.875rem; }
+
+  .ret-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .ret-tab { padding: 10px 4px; font-size: 0.85rem; font-weight: 600; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-right: 20px; }
+  .ret-tab:hover { color: var(--text2); }
+  .ret-tab-active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .ret-summary-grid { display: grid; gap: 16px; }
+  .ret-stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow-sm); }
+  .ret-stat-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .ret-stat-value { font-family: 'Roboto Mono', monospace; font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+
+  .ret-schemes-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+  .ret-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .ret-btn-add {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 16px;
+    font-size: 0.82rem; font-weight: 700; color: #fff; font-family: 'Inter', sans-serif;
+    text-decoration: none; display: inline-block; cursor: pointer; transition: opacity 0.2s;
+  }
+  .ret-btn-add:hover { opacity: 0.88; }
+
+  .ret-inline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  .ret-filter-bar {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  }
+  .ret-search-input {
+    flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 14px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+  .ret-select { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem; }
+  .ret-clear-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+  .ret-clear-link:hover { color: var(--accent); }
+
+  .ret-list { display: flex; flex-direction: column; gap: 2px; }
+  .ret-list-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+  .ret-list-row:last-child { border-bottom: none; }
+  .ret-list-primary { font-weight: 600; color: var(--text); font-size: 0.9rem; }
+  .ret-list-secondary { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+  .ret-list-actions { display: flex; gap: 10px; align-items: center; }
+  .ret-link-btn { background: none; border: none; color: var(--accent); font-size: 0.78rem; cursor: pointer; font-family: 'Inter', sans-serif; padding: 0; text-decoration: none; }
+  .ret-link-btn.ret-link-danger { color: var(--muted); }
+  .ret-link-btn.ret-link-danger:hover { color: var(--down); }
+
+  .ret-empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .ret-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  .ret-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .ret-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  @media (max-width: 640px) {
+    .ret-inline-grid { grid-template-columns: 1fr; }
+    .ret-filter-bar { flex-direction: column; align-items: stretch; }
+  }
+</style>
+
+<script>
+  function toggle(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = (el.style.display === 'none' || !el.style.display) ? 'block' : 'none';
+  }
+</script>
+{% endblock %}

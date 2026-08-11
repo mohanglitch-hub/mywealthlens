@@ -25,7 +25,7 @@ from .models import (
     ContributionPreference, NPSTier, NomineeRelation, RetirementDocumentType,
 )
 from .utils import (
-    format_inr, format_date, financial_year_bounds,
+    format_inr, format_date, financial_year_bounds, mask_account_number,
     save_document_file, delete_document_file, secure_file_path,
     is_previewable, get_preview_mimetype,
 )
@@ -131,10 +131,35 @@ def dashboard():
 
     Shows real totals (possibly zero), a scheme-type breakdown, and
     upcoming maturity/target-retirement milestones — never fabricated
-    data (Section 20 of the Phase A spec, still true in Phase D).
+    data (Section 20 of the Phase A spec, still true here).
     """
     stats = services.RetirementStatisticsService(current_user.id)
     data  = stats.summary_dict()
+
+    # Attach each scheme's maturity info for the row display, mirroring
+    # the existing app-wide pattern of attaching display-only computed
+    # attributes before rendering (see insurance_centre's renewal_badge
+    # usage in its own dashboard route).
+    for s in data["schemes"]:
+        s._maturity = services.compute_maturity_info(s)
+
+    # Compact "Next: X maturity — YYYY" label for the Upcoming
+    # Milestones card, built from the already-sorted milestone list.
+    next_milestone_label = None
+    if data["upcoming_milestones"]:
+        m = data["upcoming_milestones"][0]
+        kind = m["info"]["kind"]
+        year = m["sort_date"].year
+        verb = "target retirement" if kind == "target_year" else "maturity"
+        next_milestone_label = f"{m['scheme'].display_type} {verb} — {year}"
+    data["next_milestone_label"] = next_milestone_label
+
+    # Document Vault stat card (5th card) — real count, no fabrication.
+    vault = services.vault_summary(current_user.id)
+    data["documents_count"] = vault["total"]
+
+    # Recent Activity feed — last 7 events across all schemes.
+    data["recent_activity"] = services.recent_activity(current_user.id, limit=7)
 
     return render_template(
         "retirement_centre/dashboard.html",
@@ -142,6 +167,8 @@ def dashboard():
         scheme_types=SchemeType.ALL,
         format_inr=format_inr,
         format_date=format_date,
+        mask_account_number=mask_account_number,
+        now_date=date.today(),
     )
 
 
@@ -153,7 +180,7 @@ def _form_template_context(is_edit, scheme, values):
         is_edit=is_edit,
         scheme=scheme,
         values=values,
-        scheme_types=SchemeType.ALL,
+        scheme_types=SchemeType.DISPLAY_OPTIONS,
         growth_methods=GrowthMethod.ALL,
         growth_method_labels=GrowthMethod.LABELS,
         statuses=SchemeStatus.ALL,
@@ -166,7 +193,9 @@ def _form_template_context(is_edit, scheme, values):
 @retirement_bp.route("/add", methods=["GET", "POST"])
 @login_required
 def add_scheme():
-    """Add a new retirement scheme."""
+    """Add a new retirement scheme. Supports ?type=PPF to pre-select
+    a scheme type when arriving from a category card (Phase F,
+    Section 2)."""
     if request.method == "POST":
         form = request.form.to_dict()
         errors = validators.validate_scheme(form)
@@ -187,9 +216,12 @@ def add_scheme():
         return redirect(url_for("retirement_centre.scheme_detail",
                                 scheme_id=scheme.id))
 
+    preset_type = request.args.get("type", "")
+    initial_values = {"scheme_type": preset_type} if preset_type in SchemeType.ALL else {}
+
     return render_template(
         "retirement_centre/scheme_form.html",
-        **_form_template_context(False, None, {})
+        **_form_template_context(False, None, initial_values)
     )
 
 
@@ -391,6 +423,7 @@ def upload_document(scheme_id):
     scheme   = _get_scheme_or_404(scheme_id)
     file     = request.files.get("document")
     doc_type = request.form.get("doc_type", "").strip()
+    title    = request.form.get("doc_title", "").strip() or None
     notes    = request.form.get("doc_notes", "").strip() or None
 
     errors = validators.validate_document(file, doc_type)
@@ -411,7 +444,7 @@ def upload_document(scheme_id):
         _db(), scheme, current_user.id,
         doc_type=doc_type, original_name=file.filename,
         stored_name=stored_name, file_path=file_path,
-        file_size=file_size, notes=notes,
+        file_size=file_size, notes=notes, title=title,
     )
     flash("Document uploaded successfully!", "success")
     return redirect(url_for("retirement_centre.scheme_detail",
@@ -421,20 +454,24 @@ def upload_document(scheme_id):
 @retirement_bp.route("/documents/<int:doc_id>/delete", methods=["POST"])
 @login_required
 def delete_document(doc_id):
-    """Delete document — removes file and metadata. Validates ownership."""
+    """Delete document — removes file and metadata. Validates ownership.
+    Redirects back to wherever the delete was triggered from (scheme
+    detail page or the Document Vault) via a 'next' form field."""
     doc = _get_document_or_404(doc_id)
     scheme_id = doc.scheme_id
+    next_target = request.form.get("next", "scheme_detail")
+    redirect_url = (url_for("retirement_centre.document_vault")
+                    if next_target == "vault"
+                    else url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
 
     if doc.file_path and not secure_file_path(doc.file_path, scheme_id):
         flash("Invalid file path — operation denied.", "error")
-        return redirect(url_for("retirement_centre.scheme_detail",
-                                scheme_id=scheme_id))
+        return redirect(redirect_url)
 
     delete_document_file(doc.file_path)
     services.delete_document(_db(), doc, current_user.id)
     flash("Document deleted.", "success")
-    return redirect(url_for("retirement_centre.scheme_detail",
-                            scheme_id=scheme_id))
+    return redirect(redirect_url)
 
 
 @retirement_bp.route("/documents/<int:doc_id>/download")
@@ -481,6 +518,104 @@ def preview_document(doc_id):
                      as_attachment=False, download_name=doc.original_name)
 
 
+# ── Document Vault ─────────────────────────────────────────────────────────────
+
+@retirement_bp.route("/documents")
+@login_required
+def document_vault():
+    """
+    Document Vault — first-class page listing every document across
+    all of the user's retirement schemes, with search and filters.
+    """
+    from datetime import datetime as _dt
+    from .models import RETIREMENT_CATEGORY_ORDER, RetirementDocumentType
+
+    q          = request.args.get("q", "").strip()
+    category   = request.args.get("category", "")
+    doc_type   = request.args.get("doc_type", "")
+    date_from_raw = request.args.get("date_from", "")
+    date_to_raw   = request.args.get("date_to", "")
+
+    def _parse(d):
+        try:
+            return _dt.strptime(d, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return None
+
+    documents = services.get_vault_documents(
+        current_user.id, q=q or None, category=category or None,
+        doc_type=doc_type or None,
+        date_from=_parse(date_from_raw), date_to=_parse(date_to_raw),
+    )
+    summary = services.vault_summary(current_user.id)
+
+    # Schemes for the upload form's scheme dropdown (active schemes only)
+    upload_schemes = (RetirementScheme.query
+                      .filter_by(user_id=current_user.id, is_archived=False)
+                      .order_by(RetirementScheme.scheme_type).all())
+    preselect_scheme_id = request.args.get("scheme_id", type=int)
+
+    return render_template(
+        "retirement_centre/document_vault.html",
+        documents=documents,
+        summary=summary,
+        categories=RETIREMENT_CATEGORY_ORDER,
+        doc_types=RetirementDocumentType.ALL,
+        upload_schemes=upload_schemes,
+        preselect_scheme_id=preselect_scheme_id,
+        q=q, category=category, doc_type=doc_type,
+        date_from=date_from_raw, date_to=date_to_raw,
+        format_inr=format_inr, format_date=format_date,
+    )
+
+
+@retirement_bp.route("/documents/upload", methods=["POST"])
+@login_required
+def upload_document_vault():
+    """
+    Upload a document from the Vault directly — the scheme is chosen
+    via a form dropdown rather than implied by the URL (Phase: Document
+    Vault, Part 4). Reuses the exact same storage/validation logic as
+    the scheme-scoped upload route — no parallel storage system.
+    """
+    scheme_id = request.form.get("scheme_id", type=int)
+    if not scheme_id:
+        flash("Please select a retirement scheme for this document.", "error")
+        return redirect(url_for("retirement_centre.document_vault"))
+
+    scheme = RetirementScheme.query.filter_by(
+        id=scheme_id, user_id=current_user.id).first()
+    if not scheme:
+        flash("Invalid scheme selected.", "error")
+        return redirect(url_for("retirement_centre.document_vault"))
+
+    file     = request.files.get("document")
+    doc_type = request.form.get("doc_type", "").strip()
+    title    = request.form.get("doc_title", "").strip() or None
+    notes    = request.form.get("doc_notes", "").strip() or None
+
+    errors = validators.validate_document(file, doc_type)
+    if errors:
+        for e in errors:
+            flash(e, "error")
+        return redirect(url_for("retirement_centre.document_vault"))
+
+    try:
+        stored_name, file_path, file_size = save_document_file(file, scheme_id)
+    except OSError as e:
+        flash(f"File could not be saved: {e}", "error")
+        return redirect(url_for("retirement_centre.document_vault"))
+
+    services.save_document_metadata(
+        _db(), scheme, current_user.id,
+        doc_type=doc_type, original_name=file.filename,
+        stored_name=stored_name, file_path=file_path,
+        file_size=file_size, notes=notes, title=title,
+    )
+    flash("Document uploaded successfully!", "success")
+    return redirect(url_for("retirement_centre.document_vault"))
+
+
 # ── PDF Export (Phase D) ──────────────────────────────────────────────────────
 
 @retirement_bp.route("/export/pdf")
@@ -519,3 +654,148 @@ def restore_scheme(scheme_id):
         flash("Scheme restored successfully.", "success")
     return redirect(url_for("retirement_centre.scheme_detail",
                             scheme_id=scheme_id))
+
+
+@retirement_bp.route("/scheme/<int:scheme_id>/delete", methods=["POST"])
+@login_required
+def delete_scheme_permanent(scheme_id):
+    """
+    Permanently delete an ARCHIVED scheme only (Phase F, Section 9).
+    Removes associated document files from disk first, then deletes
+    the scheme row — cascades to contributions, balance snapshots,
+    nominees, documents, and timeline (all set to CASCADE in models.py).
+    """
+    scheme = _get_scheme_or_404(scheme_id)
+    if not scheme.is_archived:
+        flash("Only archived schemes can be permanently deleted.", "error")
+        return redirect(url_for("retirement_centre.scheme_detail",
+                                scheme_id=scheme_id))
+
+    for doc in scheme.documents.all():
+        delete_document_file(doc.file_path)
+
+    _db().session.delete(scheme)
+    _db().session.commit()
+    flash("Scheme permanently deleted.", "success")
+    return redirect(url_for("retirement_centre.manage_schemes", status="archived"))
+
+
+# ── Category View ──────────────────────────────────────────────────────────────
+
+@retirement_bp.route("/category/<slug>")
+@login_required
+def category_view(slug):
+    """
+    Dedicated category page — shows only schemes for one of the 5
+    display categories, mirroring insurance_centre's category_view
+    route/page exactly. Distinct from Manage Schemes: this is a
+    focused single-category view, not a general filterable listing.
+    """
+    from .models import (RETIREMENT_CATEGORY_GROUPS, slug_to_category,
+                         RETIREMENT_CATEGORY_FULL_NAMES)
+
+    category = slug_to_category(slug)
+    if category not in RETIREMENT_CATEGORY_GROUPS:
+        abort(404)
+
+    allowed_types = RETIREMENT_CATEGORY_GROUPS[category]
+    schemes = (RetirementScheme.query
+               .filter_by(user_id=current_user.id, is_archived=False)
+               .filter(RetirementScheme.scheme_type.in_(allowed_types))
+               .order_by(RetirementScheme.created_at.desc())
+               .all())
+
+    for s in schemes:
+        s._maturity = services.compute_maturity_info(s)
+        s._fy_contrib = services.contribution_summary(s.id)["current_fy_total"]
+
+    total_balance = sum(s.current_balance or 0 for s in schemes)
+
+    # Preselect scheme_type for the "+ Add Scheme" button on this page.
+    # "Other Retirement Schemes" maps to the CUSTOM type — that's the
+    # only value the simplified 5-option Add form dropdown now offers
+    # for this category, so preselecting it (not leaving it blank)
+    # is correct.
+    if category == "EPF / VPF":
+        preset_type = "EPF"
+    elif category == "Other Retirement Schemes":
+        preset_type = "Other (Custom)"
+    else:
+        preset_type = category
+
+    icon_map = {"EPF / VPF": "🏢", "PPF": "🏦", "NPS": "📈",
+               "SSY": "👧", "Other Retirement Schemes": "📋"}
+
+    return render_template(
+        "retirement_centre/category_view.html",
+        category=category,
+        full_name=RETIREMENT_CATEGORY_FULL_NAMES.get(category, category),
+        icon=icon_map.get(category, "📋"),
+        schemes=schemes,
+        total_balance=total_balance,
+        preset_type=preset_type,
+        format_inr=format_inr,
+        format_date=format_date,
+        mask_account_number=mask_account_number,
+    )
+
+
+# ── Manage Schemes Listing (Phase F) ──────────────────────────────────────────
+
+@retirement_bp.route("/schemes")
+@login_required
+def manage_schemes():
+    """
+    Full scheme listing with search, category filter, status
+    (Active/Archived) tabs, and sorting. Also serves as the
+    category-filtered view when arriving from a dashboard category
+    card click (Phase F, Sections 14 & 15) — one implementation for
+    both, per the "reuse existing architecture" instruction.
+    """
+    from .models import RETIREMENT_CATEGORY_GROUPS, RETIREMENT_CATEGORY_ORDER
+
+    q             = request.args.get("q", "").strip()
+    category      = request.args.get("category", "")
+    status_filter = request.args.get("status", "active")
+    sort_by       = request.args.get("sort", "recent")
+
+    query = RetirementScheme.query.filter_by(user_id=current_user.id)
+    query = query.filter_by(is_archived=(status_filter == "archived"))
+    schemes = query.all()
+
+    if category and category in RETIREMENT_CATEGORY_GROUPS:
+        allowed_types = RETIREMENT_CATEGORY_GROUPS[category]
+        schemes = [s for s in schemes if s.scheme_type in allowed_types]
+
+    if q:
+        ql = q.lower()
+        schemes = [s for s in schemes
+                  if ql in (s.display_type or "").lower()
+                  or ql in (s.institution or "").lower()
+                  or ql in (s.account_number or "").lower()]
+
+    if sort_by == "balance_high":
+        schemes.sort(key=lambda s: s.current_balance or 0, reverse=True)
+    elif sort_by == "balance_low":
+        schemes.sort(key=lambda s: s.current_balance or 0)
+    elif sort_by == "name":
+        schemes.sort(key=lambda s: s.display_type.lower())
+    else:
+        schemes.sort(key=lambda s: s.created_at, reverse=True)
+
+    for s in schemes:
+        s._maturity = services.compute_maturity_info(s)
+        s._fy_contrib = services.contribution_summary(s.id)["current_fy_total"]
+
+    return render_template(
+        "retirement_centre/manage_schemes.html",
+        schemes=schemes,
+        categories=RETIREMENT_CATEGORY_ORDER,
+        category=category,
+        status_filter=status_filter,
+        q=q,
+        sort_by=sort_by,
+        format_inr=format_inr,
+        format_date=format_date,
+        mask_account_number=mask_account_number,
+    )

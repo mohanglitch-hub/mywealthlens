@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}{{ category }} — Retirement Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "retirement_centre/_confirm_modal.html" %}
+<div class="ret-wrap">
+
+  <div class="ret-breadcrumb">
+    <a href="{{ url_for('retirement_centre.dashboard') }}">Retirement Centre</a>
+    <span class="ret-breadcrumb-sep">›</span>
+    <span class="ret-breadcrumb-current">{{ category }}</span>
+  </div>
+
+  <div class="ret-cat-header">
+    <div class="ret-cat-header-icon">{{ icon }}</div>
+    <div class="ret-cat-header-text">
+      <h1>{{ full_name }}</h1>
+      <p>{{ schemes|length }} scheme{{ 's' if schemes|length != 1 }} · Total balance {{ format_inr(total_balance) }}</p>
+    </div>
+    <a href="{{ url_for('retirement_centre.add_scheme', type=preset_type) }}" class="ret-btn-primary">
+      + Add {{ category }} Scheme
+    </a>
+  </div>
+
+  {% if schemes %}
+    <div class="ret-cat-card-grid">
+      {% for scheme in schemes %}
+      <div class="ret-cat-card">
+        <div class="ret-cat-card-top">
+          <div class="ret-cat-card-icon">{{ icon }}</div>
+          <span class="ret-badge ret-badge-{{ 'up' if scheme.status == 'Active' else 'muted' }}">{{ scheme.status }}</span>
+        </div>
+        <div class="ret-cat-card-title">{{ scheme.display_type }}</div>
+        {% if scheme.institution %}<div class="ret-cat-card-sub">{{ scheme.institution }}</div>{% endif %}
+
+        <div class="ret-cat-card-divider"></div>
+
+        <div class="ret-cat-card-row">
+          <span>Current Balance</span>
+          <span class="ret-cat-card-value">{{ format_inr(scheme.current_balance) }}</span>
+        </div>
+        <div class="ret-cat-card-row">
+          <span>FY Contributions</span>
+          <span class="ret-cat-card-value-sm">{{ format_inr(scheme._fy_contrib) }}</span>
+        </div>
+        {% if scheme._maturity.available %}
+        <div class="ret-cat-card-row">
+          <span>{{ 'Target Retirement' if scheme._maturity.kind == 'target_year' else 'Maturity' }}</span>
+          <span class="ret-cat-card-value-sm">
+            {% if scheme._maturity.kind == 'maturity' %}{{ format_date(scheme._maturity.date) }}
+            {% elif scheme._maturity.kind == 'ssy' %}{{ format_date(scheme._maturity.maturity_date) }}
+            {% elif scheme._maturity.kind == 'target_year' %}{{ scheme._maturity.year }}
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+
+        <div class="ret-cat-card-divider"></div>
+
+        <div class="ret-cat-card-actions">
+          <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) }}" class="ret-cat-btn ret-cat-btn-view">View →</a>
+          <a href="{{ url_for('retirement_centre.edit_scheme', scheme_id=scheme.id) }}" class="ret-cat-btn ret-cat-btn-edit">Edit</a>
+          <form method="POST" action="{{ url_for('retirement_centre.archive_scheme', scheme_id=scheme.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="button" class="ret-cat-btn ret-cat-btn-archive"
+                    onclick="confirmAction(this.form, 'Archive this scheme?', 'You can restore it any time from the Archived tab in Manage Schemes.', 'Archive')">Archive</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="ret-schemes-card">
+      <div class="ret-empty-state">
+        <div class="ret-empty-icon">{{ icon }}</div>
+        <div class="ret-empty-title">No {{ category }} schemes yet</div>
+        <div class="ret-empty-sub">Add your first {{ category }} scheme to start tracking it here.</div>
+        <a href="{{ url_for('retirement_centre.add_scheme', type=preset_type) }}" class="ret-btn-add" style="margin-top:16px;">+ Add Scheme</a>
+      </div>
+    </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .ret-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+  .ret-breadcrumb { font-size: 0.95rem; margin-bottom: 4px; }
+  .ret-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .ret-breadcrumb a:hover { color: var(--accent); }
+  .ret-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .ret-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .ret-cat-header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .ret-cat-header-icon { font-size: 2.2rem; }
+  .ret-cat-header-text { flex: 1; min-width: 200px; }
+  .ret-cat-header-text h1 { font-size: 1.3rem; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+  .ret-cat-header-text p { font-size: 0.85rem; color: var(--muted); }
+  .ret-btn-primary {
+    background: var(--accent); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 10px 20px; font-size: 0.85rem;
+    font-weight: 700; color: #fff; font-family: 'Inter', sans-serif;
+    text-decoration: none; display: inline-block; transition: opacity 0.2s;
+  }
+  .ret-btn-primary:hover { opacity: 0.88; }
+
+  .ret-cat-card-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
+  }
+  .ret-cat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px; box-shadow: var(--shadow-sm);
+  }
+  .ret-cat-card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .ret-cat-card-icon {
+    width: 40px; height: 40px; border-radius: 10px; background: var(--accent-bg);
+    display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+  }
+  .ret-cat-card-title { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+  .ret-cat-card-sub { font-size: 0.85rem; color: var(--accent); font-weight: 600; margin-top: 2px; }
+  .ret-cat-card-divider { border-top: 1px solid var(--border); margin: 14px 0; }
+  .ret-cat-card-row { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: var(--muted); margin-bottom: 8px; }
+  .ret-cat-card-row:last-child { margin-bottom: 0; }
+  .ret-cat-card-value { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); font-size: 1rem; }
+  .ret-cat-card-value-sm { font-family: 'Roboto Mono', monospace; font-weight: 600; color: var(--text2); font-size: 0.85rem; }
+
+  .ret-badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.72rem; font-weight: 600; border: 1px solid; }
+  .ret-badge-up { background: var(--up-bg); color: var(--up); border-color: var(--up); }
+  .ret-badge-muted { background: var(--surface2); color: var(--muted); border-color: var(--border); }
+
+  .ret-cat-card-actions { display: flex; gap: 8px; }
+  .ret-cat-btn {
+    flex: 1; text-align: center; padding: 8px 10px; border-radius: 8px;
+    font-size: 0.82rem; font-weight: 600; text-decoration: none; cursor: pointer;
+    font-family: 'Inter', sans-serif; border: 1px solid;
+  }
+  .ret-cat-btn-view { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .ret-cat-btn-view:hover { background: var(--accent); color: #fff; }
+  .ret-cat-btn-edit { background: var(--surface2); color: var(--text2); border-color: var(--border); }
+  .ret-cat-btn-edit:hover { border-color: var(--muted2); }
+  .ret-cat-btn-archive { background: var(--surface); color: var(--muted); border-color: var(--border); width: 100%; }
+  .ret-cat-btn-archive:hover { border-color: var(--down); color: var(--down); }
+
+  .ret-schemes-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+  .ret-empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .ret-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  .ret-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .ret-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+  .ret-btn-add {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 8px 16px; font-size: 0.82rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block;
+  }
+
+  @media (max-width: 640px) {
+    .ret-cat-header { flex-direction: column; align-items: flex-start; }
+    .ret-cat-card-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

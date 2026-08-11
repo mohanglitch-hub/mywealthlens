@@ -1,0 +1,86 @@
+{# ── Reusable confirmation modal (Phase F, Section 9) ──────────────────
+   Replaces browser-native confirm() dialogs across Retirement Centre.
+   Include this once per page, then trigger it from a destructive
+   action's button like:
+
+   <button type="button"
+           onclick="confirmAction(this.form, 'Delete Contribution?',
+                    'This contribution will be permanently removed from your contribution history.',
+                    'Delete Contribution')">
+     Delete
+   </button>
+
+   The button's enclosing <form> is submitted only if the user clicks
+   the modal's Confirm button — Cancel or clicking outside does nothing. #}
+
+<div id="confirmModalOverlay" class="ret-modal-overlay" style="display:none;">
+  <div class="ret-modal">
+    <div class="ret-modal-title" id="confirmModalTitle"></div>
+    <div class="ret-modal-message" id="confirmModalMessage"></div>
+    <div class="ret-modal-actions">
+      <button type="button" class="ret-modal-cancel" onclick="closeConfirmModal()">Cancel</button>
+      <button type="button" class="ret-modal-confirm" id="confirmModalConfirmBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .ret-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 500;
+    padding: 20px;
+  }
+  .ret-modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; max-width: 380px; width: 100%;
+    box-shadow: var(--shadow-lg);
+  }
+  .ret-modal-title { font-weight: 700; font-size: 1rem; color: var(--text); margin-bottom: 8px; }
+  .ret-modal-message { font-size: 0.88rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; white-space: pre-line; }
+  .ret-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .ret-modal-cancel {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: var(--text2); cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .ret-modal-cancel:hover { border-color: var(--muted2); }
+  .ret-modal-confirm {
+    background: var(--down); border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: #fff; font-weight: 600;
+    cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .ret-modal-confirm:hover { opacity: 0.9; }
+</style>
+
+<script>
+  let _retPendingConfirmForm = null;
+
+  function confirmAction(formEl, title, message, confirmLabel) {
+    _retPendingConfirmForm = formEl;
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+    document.getElementById('confirmModalConfirmBtn').textContent = confirmLabel || 'Confirm';
+    document.getElementById('confirmModalOverlay').style.display = 'flex';
+    return false;
+  }
+
+  function closeConfirmModal() {
+    document.getElementById('confirmModalOverlay').style.display = 'none';
+    _retPendingConfirmForm = null;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const confirmBtn = document.getElementById('confirmModalConfirmBtn');
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', function () {
+        if (_retPendingConfirmForm) _retPendingConfirmForm.submit();
+        closeConfirmModal();
+      });
+    }
+    const overlay = document.getElementById('confirmModalOverlay');
+    if (overlay) {
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeConfirmModal();
+      });
+    }
+  });
+</script>

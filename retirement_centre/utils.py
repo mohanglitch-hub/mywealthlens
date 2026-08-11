@@ -175,3 +175,20 @@ def get_preview_mimetype(filename):
         ".png":  "image/png",
     }
     return mimetypes.get(ext, "application/octet-stream")
+
+
+# ── Display Masking ───────────────────────────────────────────────────────────
+
+def mask_account_number(value):
+    """
+    Masks an account/PRAN/UAN number for dashboard display —
+    shows only the last 4 characters. Returns None unchanged for
+    empty input so templates can cleanly check truthiness.
+    e.g. '1234567890' -> '••••7890'
+    """
+    if not value:
+        return None
+    s = str(value)
+    if len(s) <= 4:
+        return s
+    return f"••••{s[-4:]}"

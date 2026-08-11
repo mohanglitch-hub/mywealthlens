@@ -230,26 +230,100 @@ class RetirementStatisticsService:
         )
         return total or 0
 
-    def recent_schemes(self, limit=10):
+    def recent_schemes(self, limit=3):
+        """Most recently TOUCHED schemes (updated_at, not created_at) —
+        editing, adding a contribution, or updating balance on an older
+        scheme brings it back to the top, matching how 'recent' should
+        actually behave."""
         return (self._active_schemes_query()
-                .order_by(RetirementScheme.created_at.desc())
+                .order_by(RetirementScheme.updated_at.desc())
                 .limit(limit)
                 .all())
 
-    def upcoming_dates_count(self):
+    def total_milestones_count(self):
         """
-        Count of active schemes whose maturity/target date is 'due' or
-        'due_soon' (per compute_maturity_info below). Never fabricated —
-        schemes with insufficient data to calculate a date are excluded,
-        not guessed at (Section 29 of the Phase C spec).
+        Count of active schemes with an available maturity/target
+        date that has NOT yet been reached — kept consistent with
+        upcoming_milestones() above, so the number on the dashboard
+        card always matches what the list actually shows.
         """
         count = 0
         for s in self._active_schemes_query().all():
             info = compute_maturity_info(s)
-            if not info.get("available"):
-                continue
-            status = info.get("status")
-            if status in ("due", "due_soon"):
+            if info.get("available") and info.get("status") != "reached":
+                count += 1
+        return count
+
+    def contributing_schemes_count(self):
+        """Distinct count of active schemes with at least one
+        contribution recorded in the current Financial Year."""
+        start, end = financial_year_bounds(current_financial_year())
+        scheme_ids = [s.id for s in self._active_schemes_query().all()]
+        if not scheme_ids:
+            return 0
+        return (RetirementContribution.query
+                .filter(RetirementContribution.scheme_id.in_(scheme_ids),
+                       RetirementContribution.contribution_date >= start,
+                       RetirementContribution.contribution_date <= end)
+                .with_entities(RetirementContribution.scheme_id)
+                .distinct()
+                .count())
+
+    def five_category_breakdown(self):
+        """
+        Groups active schemes into the five Phase F display categories
+        (RETIREMENT_CATEGORY_GROUPS), not raw scheme types. Always
+        returns all five, even with 0 schemes, so the dashboard shows
+        '0 Schemes' rather than silently omitting a category card.
+        """
+        from .models import RETIREMENT_CATEGORY_GROUPS, RETIREMENT_CATEGORY_ORDER
+        start, end = financial_year_bounds(current_financial_year())
+        schemes = self._active_schemes_query().all()
+
+        result = []
+        for cat_name in RETIREMENT_CATEGORY_ORDER:
+            allowed = RETIREMENT_CATEGORY_GROUPS[cat_name]
+            group = [s for s in schemes if s.scheme_type in allowed]
+            scheme_ids = [s.id for s in group]
+            total_balance = sum(s.current_balance or 0 for s in group)
+            fy_total = 0
+            if scheme_ids:
+                fy_total = (RetirementContribution.query
+                            .filter(RetirementContribution.scheme_id.in_(scheme_ids),
+                                   RetirementContribution.contribution_date >= start,
+                                   RetirementContribution.contribution_date <= end)
+                            .with_entities(func.sum(RetirementContribution.amount))
+                            .scalar()) or 0
+            result.append({
+                "category": cat_name,
+                "count": len(group),
+                "total_balance": total_balance,
+                "current_fy_contributions": fy_total,
+            })
+        return result
+
+    def active_categories_count(self):
+        """Number of the five display categories that have at least
+        one active scheme — used for the 'Across N categories' stat
+        card subtext."""
+        from .models import RETIREMENT_CATEGORY_GROUPS
+        schemes = self._active_schemes_query().all()
+        types_present = {s.scheme_type for s in schemes}
+        return sum(1 for types in RETIREMENT_CATEGORY_GROUPS.values()
+                  if types_present & set(types))
+
+    def due_soon_milestones_count(self):
+        """
+        Count of active schemes with a maturity/target date within 30
+        days. Purely informational — unlike an Insurance policy
+        renewal, nothing 'lapses' if a retirement milestone passes
+        unattended, so this drives an informational banner, not an
+        urgent/danger one.
+        """
+        count = 0
+        for s in self._active_schemes_query().all():
+            info = compute_maturity_info(s)
+            if info.get("available") and info.get("status") == "due":
                 count += 1
         return count
 
@@ -290,18 +364,21 @@ class RetirementStatisticsService:
         breakdown.sort(key=lambda b: b["scheme_type"])
         return breakdown
 
-    def upcoming_milestones(self, limit=5):
+    def upcoming_milestones(self, limit=3):
         """
         The nearest maturity/target-retirement milestones across all
-        active schemes, soonest first. Only includes schemes with
-        enough data to actually calculate a date (Section 35 of spec).
+        active schemes, soonest first — EXCLUDING milestones that have
+        already been reached. Without this exclusion, a matured
+        scheme would permanently block the list, since it always
+        sorts first by date; excluding it lets the genuinely next
+        milestone take its place once one passes.
         """
         from datetime import date as _date
 
         items = []
         for s in self._active_schemes_query().all():
             info = compute_maturity_info(s)
-            if not info.get("available"):
+            if not info.get("available") or info.get("status") == "reached":
                 continue
 
             if info["kind"] == "maturity":
@@ -323,10 +400,14 @@ class RetirementStatisticsService:
         return {
             "total_corpus":             self.total_corpus(),
             "current_fy_contributions": self.current_fy_contributions(),
+            "contributing_schemes":     self.contributing_schemes_count(),
             "active_schemes":           self.active_count(),
-            "upcoming_dates":           self.upcoming_dates_count(),
+            "active_categories":        self.active_categories_count(),
+            "upcoming_dates":           self.total_milestones_count(),
+            "due_soon_count":           self.due_soon_milestones_count(),
             "schemes":                  self.recent_schemes(),
             "category_breakdown":       self.category_breakdown(),
+            "five_category_breakdown":  self.five_category_breakdown(),
             "upcoming_milestones":      self.upcoming_milestones(),
         }
 
@@ -377,9 +458,12 @@ def _add_years(d, years):
 # ── Contribution History (Phase C, Part 1) ───────────────────────────────────
 
 def add_contribution(db, scheme, user_id, form):
-    """Record a new contribution. Does NOT touch current_balance — a
-    contribution is a historical transaction, current_balance is the
-    user's latest known account value (Section 15 of Phase C spec)."""
+    """
+    Record a new contribution AND auto-add it to current_balance
+    (Phase F, Section 4). The next manual "Update Balance" fully
+    overrides current_balance (see update_balance below), so this
+    running total never double-counts against a later verified figure.
+    """
     if scheme.user_id != user_id:
         return None, "You do not have permission to modify this scheme."
 
@@ -395,10 +479,14 @@ def add_contribution(db, scheme, user_id, form):
     )
     db.session.add(contribution)
 
+    scheme.current_balance = max(0, (scheme.current_balance or 0) + amount)
+    scheme.updated_at = datetime.utcnow()
+
     timeline = RetirementTimeline(
         scheme_id=scheme.id, user_id=user_id,
         event_type=RetirementTimelineEvent.CONTRIBUTION_ADDED,
-        description=f"Contribution of ₹{amount:,.0f} recorded",
+        description=(f"Contribution of ₹{amount:,.0f} recorded "
+                     f"(balance updated to ₹{scheme.current_balance:,.0f})"),
     )
     db.session.add(timeline)
     db.session.commit()
@@ -406,8 +494,11 @@ def add_contribution(db, scheme, user_id, form):
 
 
 def update_contribution(db, contribution, user_id, form):
-    """Edit an existing contribution. Ownership checked via user_id
-    stored directly on the contribution row."""
+    """
+    Edit an existing contribution. Applies the DELTA between the old
+    and new amount to current_balance, so editing never drifts the
+    balance out of sync with the actual recorded contributions.
+    """
     if contribution.user_id != user_id:
         return None, "You do not have permission to modify this contribution."
 
@@ -415,6 +506,11 @@ def update_contribution(db, contribution, user_id, form):
     amount = _parse_float_c(form.get("amount"))
     if not c_date or amount is None or amount <= 0:
         return None, "Invalid contribution data."
+
+    scheme = contribution.scheme
+    delta = amount - contribution.amount
+    scheme.current_balance = max(0, (scheme.current_balance or 0) + delta)
+    scheme.updated_at = datetime.utcnow()
 
     contribution.contribution_date = c_date
     contribution.amount = amount
@@ -424,8 +520,15 @@ def update_contribution(db, contribution, user_id, form):
 
 
 def delete_contribution(db, contribution, user_id):
+    """Delete a contribution AND reverse its effect on current_balance,
+    so deletion doesn't leave a phantom balance inflation behind."""
     if contribution.user_id != user_id:
         return False, "You do not have permission to delete this contribution."
+
+    scheme = contribution.scheme
+    scheme.current_balance = max(0, (scheme.current_balance or 0) - contribution.amount)
+    scheme.updated_at = datetime.utcnow()
+
     db.session.delete(contribution)
     db.session.commit()
     return True, None
@@ -690,13 +793,15 @@ def get_documents_for_scheme(scheme_id):
 
 
 def save_document_metadata(db, scheme, user_id, doc_type, original_name,
-                            stored_name, file_path, file_size, notes=None):
+                            stored_name, file_path, file_size, notes=None,
+                            title=None):
     """Persist a document's metadata after the file itself has already
     been saved to local disk by utils.save_document_file()."""
     doc = RetirementDocument(
         scheme_id=scheme.id, user_id=user_id, doc_type=doc_type,
-        original_name=original_name, stored_name=stored_name,
-        file_path=file_path, file_size=file_size, notes=notes,
+        title=title, original_name=original_name,
+        stored_name=stored_name, file_path=file_path,
+        file_size=file_size, notes=notes,
     )
     db.session.add(doc)
 
@@ -723,3 +828,79 @@ def delete_document(db, doc, user_id):
     db.session.delete(doc)
     db.session.commit()
     return True, None
+
+
+# ── Document Vault (Document Vault phase) ───────────────────────────────────
+
+def get_vault_documents(user_id, q=None, category=None, doc_type=None,
+                        date_from=None, date_to=None):
+    """
+    All documents across every one of the user's retirement schemes,
+    joined with scheme info for display and filtering. Never queries
+    another user's data — always scoped by user_id (Section 17).
+    """
+    from .models import RETIREMENT_CATEGORY_GROUPS
+
+    query = (RetirementDocument.query
+             .join(RetirementScheme,
+                   RetirementDocument.scheme_id == RetirementScheme.id)
+             .filter(RetirementDocument.user_id == user_id))
+
+    if doc_type:
+        query = query.filter(RetirementDocument.doc_type == doc_type)
+    if date_from:
+        query = query.filter(RetirementDocument.uploaded_at >= date_from)
+    if date_to:
+        query = query.filter(RetirementDocument.uploaded_at <= date_to)
+
+    docs = query.order_by(RetirementDocument.uploaded_at.desc()).all()
+
+    if category and category in RETIREMENT_CATEGORY_GROUPS:
+        allowed = RETIREMENT_CATEGORY_GROUPS[category]
+        docs = [d for d in docs if d.scheme.scheme_type in allowed]
+
+    if q:
+        ql = q.lower()
+        docs = [d for d in docs
+               if ql in (d.display_name or "").lower()
+               or ql in (d.scheme.display_type or "").lower()
+               or ql in (d.scheme.institution or "").lower()
+               or ql in (d.doc_type or "").lower()]
+
+    return docs
+
+
+def vault_summary(user_id):
+    """Total document count + per-category counts for the Vault's
+    summary cards. Never fabricated — counts real rows only."""
+    from .models import RETIREMENT_CATEGORY_GROUPS, RETIREMENT_CATEGORY_ORDER
+
+    all_docs = get_vault_documents(user_id)
+    by_category = []
+    for cat_name in RETIREMENT_CATEGORY_ORDER:
+        allowed = RETIREMENT_CATEGORY_GROUPS[cat_name]
+        count = sum(1 for d in all_docs if d.scheme.scheme_type in allowed)
+        by_category.append({"category": cat_name, "count": count})
+
+    return {
+        "total": len(all_docs),
+        "by_category": by_category,
+    }
+
+
+# ── Recent Activity (Dashboard refinement) ────────────────────────────────────
+
+def recent_activity(user_id, limit=7):
+    """
+    Last N timeline events across ALL of the user's retirement
+    schemes, newest first — mirrors Insurance Centre's Recent
+    Activity feed. Joins RetirementTimeline -> RetirementScheme so
+    each entry can show which scheme it belongs to.
+    """
+    return (RetirementTimeline.query
+            .join(RetirementScheme,
+                  RetirementTimeline.scheme_id == RetirementScheme.id)
+            .filter(RetirementScheme.user_id == user_id)
+            .order_by(RetirementTimeline.created_at.desc())
+            .limit(limit)
+            .all())
