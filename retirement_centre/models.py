@@ -54,6 +54,22 @@ class SchemeType:
     ])
     ALL = _ALPHABETICAL + [CUSTOM]
 
+    # Simplified 5-option display list for the Add/Edit Scheme dropdown
+    # (label, stored_value) — the underlying model still supports the
+    # full ALL list above for backend safety/history, this is purely
+    # what the form offers going forward. EPF/VPF share identical
+    # FIELD_GROUPS already, so merging them loses no functional
+    # behavior — just the EPF-vs-VPF display label distinction.
+    # "Other Retirement Schemes" reuses the existing CUSTOM type and
+    # its Custom Scheme Name field, rather than a new mechanism.
+    DISPLAY_OPTIONS = [
+        ("EPF / VPF", EPF),
+        ("PPF", PPF),
+        ("NPS", NPS),
+        ("SSY", SSY),
+        ("Other Retirement Schemes", CUSTOM),
+    ]
+
     # Centralized map of which category-specific field GROUPS apply to
     # each scheme type. Single source of truth for both the form's
     # JS show/hide logic and backend validation — never duplicate this
@@ -80,6 +96,59 @@ class SchemeType:
         OTHER_PENSION:  [],
         CUSTOM:         ["custom"],
     }
+
+
+# Phase F, Section 1 — the five DISPLAY categories shown on the
+# dashboard, distinct from the more granular SchemeType values above.
+# EPF and VPF are shown as one combined category; every other "Other
+# ..." scheme type folds into a single catch-all category. This is
+# purely a presentation grouping — the underlying scheme_type on each
+# RetirementScheme row is unaffected. Single source of truth: never
+# duplicate this mapping in a template or route.
+RETIREMENT_CATEGORY_GROUPS = {
+    "EPF / VPF": [SchemeType.EPF, SchemeType.VPF],
+    "PPF":       [SchemeType.PPF],
+    "NPS":       [SchemeType.NPS],
+    "SSY":       [SchemeType.SSY],
+    "Other Retirement Schemes": [
+        SchemeType.SUPERANNUATION, SchemeType.OTHER_EMPLOYER,
+        SchemeType.OTHER_GOVT, SchemeType.OTHER_PENSION, SchemeType.CUSTOM,
+    ],
+}
+RETIREMENT_CATEGORY_ORDER = list(RETIREMENT_CATEGORY_GROUPS.keys())
+
+# Slugs for category-specific pages (/retirement/category/<slug>),
+# mirroring insurance_centre's category_to_slug/slug_to_category
+# pattern for consistency across the app.
+RETIREMENT_CATEGORY_SLUGS = {
+    "epf-vpf": "EPF / VPF",
+    "ppf": "PPF",
+    "nps": "NPS",
+    "ssy": "SSY",
+    "other": "Other Retirement Schemes",
+}
+RETIREMENT_SLUG_FROM_CATEGORY = {v: k for k, v in RETIREMENT_CATEGORY_SLUGS.items()}
+
+
+def category_to_slug(category):
+    return RETIREMENT_SLUG_FROM_CATEGORY.get(
+        category, category.lower().replace(" ", "-").replace("/", ""))
+
+
+def slug_to_category(slug):
+    return RETIREMENT_CATEGORY_SLUGS.get(slug, slug)
+
+
+# Full/expanded names for category page headers — abbreviations
+# spelled out, matching Insurance Centre's "Life Insurance" (not
+# "LI") convention on its own category pages.
+RETIREMENT_CATEGORY_FULL_NAMES = {
+    "EPF / VPF": "Employees' Provident Fund / Voluntary Provident Fund",
+    "PPF": "Public Provident Fund (PPF)",
+    "NPS": "National Pension System (NPS)",
+    "SSY": "Sukanya Samriddhi Yojana (SSY)",
+    "Other Retirement Schemes": "Other Retirement Schemes",
+}
 
 
 class GrowthMethod:
@@ -145,19 +214,23 @@ class NomineeRelation:
 
 
 class RetirementDocumentType:
-    """Centralized document type list — 'Other Document' forced last,
-    same discipline as SchemeType (Section 5 of Phase D spec)."""
-    SCHEME_STATEMENT      = "Scheme Statement"
-    CONTRIBUTION_RECEIPT  = "Contribution Receipt"
+    """
+    Centralized document type list — 'Other' forced last, same
+    discipline as SchemeType. Replaced entirely per the Document
+    Vault phase (superseding the original Phase D list).
+    """
+    PASSBOOK              = "Passbook"
+    ACCOUNT_STATEMENT     = "Account Statement"
+    CONTRIBUTION_STATEMENT = "Contribution Statement"
     ANNUAL_STATEMENT      = "Annual Statement"
-    ACCOUNT_OPENING       = "Account Opening Document"
-    NOMINATION_DOCUMENT   = "Nomination Document"
-    MATURITY_EXTENSION    = "Maturity / Extension Document"
-    OTHER                 = "Other Document"
+    NOMINEE_DOCUMENT      = "Nominee Document"
+    MATURITY_DOCUMENT     = "Maturity Document"
+    INTEREST_CERTIFICATE  = "Interest Certificate"
+    OTHER                 = "Other"
 
-    ALL = [SCHEME_STATEMENT, CONTRIBUTION_RECEIPT, ANNUAL_STATEMENT,
-           ACCOUNT_OPENING, NOMINATION_DOCUMENT, MATURITY_EXTENSION,
-           OTHER]
+    ALL = [PASSBOOK, ACCOUNT_STATEMENT, CONTRIBUTION_STATEMENT,
+           ANNUAL_STATEMENT, NOMINEE_DOCUMENT, MATURITY_DOCUMENT,
+           INTEREST_CERTIFICATE, OTHER]
 
 
 class RetirementTimelineEvent:
@@ -438,6 +511,9 @@ class RetirementDocument(db.Model):
                           nullable=False)
 
     doc_type      = db.Column(db.String(50), nullable=False)
+    title         = db.Column(db.String(255), nullable=True)
+    # ^ user-facing display name, distinct from the uploaded file's own
+    #   filename — falls back to original_name when not provided
     original_name = db.Column(db.String(255), nullable=False)
     stored_name   = db.Column(db.String(255), nullable=False)
     file_path     = db.Column(db.String(500), nullable=False)
@@ -448,6 +524,10 @@ class RetirementDocument(db.Model):
 
     def __repr__(self):
         return f"<RetirementDocument {self.doc_type} {self.original_name}>"
+
+    @property
+    def display_name(self):
+        return self.title or self.original_name
 
     @property
     def file_size_display(self):

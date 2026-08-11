@@ -67,7 +67,9 @@ def validate_scheme(form):
 
     # ── Opening date ─────────────────────────────────────────────
     opening_date_raw = form.get("opening_date")
-    if opening_date_raw:
+    if not opening_date_raw:
+        errors.append("Opening date is required.")
+    else:
         opening_date = _parse_date(opening_date_raw)
         if not opening_date:
             errors.append("Opening date is invalid.")
@@ -75,9 +77,15 @@ def validate_scheme(form):
             errors.append("Opening date cannot be in the future.")
 
     # ── Current balance ──────────────────────────────────────────
-    balance = _parse_float(form.get("current_balance"))
-    if balance is not None and balance < 0:
-        errors.append("Current balance cannot be negative.")
+    balance_raw = form.get("current_balance")
+    if balance_raw is None or str(balance_raw).strip() == "":
+        errors.append("Current balance is required — enter 0 if the scheme has no balance yet.")
+    else:
+        balance = _parse_float(balance_raw)
+        if balance is None:
+            errors.append("Current balance is invalid.")
+        elif balance < 0:
+            errors.append("Current balance cannot be negative.")
 
     # ── Growth method / rate ─────────────────────────────────────
     growth_method = form.get("growth_method") or GrowthMethod.GOVERNMENT_DECLARED

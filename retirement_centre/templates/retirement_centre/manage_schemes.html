@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}Manage Retirement Schemes — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "retirement_centre/_confirm_modal.html" %}
+<div class="ret-wrap">
+
+  <div class="ret-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+    <div>
+      <h1>Manage Retirement Schemes</h1>
+      <p>Search, filter, and manage all your retirement schemes in one place.</p>
+    </div>
+    <a href="{{ url_for('retirement_centre.export_pdf') }}" class="ret-btn-outline">Download Retirement Summary PDF</a>
+  </div>
+
+  <div class="ret-tabs">
+    <a href="{{ url_for('retirement_centre.dashboard') }}" class="ret-tab">Overview</a>
+    <span class="ret-tab ret-tab-active">Manage Schemes</span>
+    <a href="{{ url_for('retirement_centre.document_vault') }}" class="ret-tab">Document Vault</a>
+  </div>
+
+  <!-- ── Status Tabs ── -->
+  <div class="ret-status-tabs">
+    <a href="{{ url_for('retirement_centre.manage_schemes', status='active', category=category, q=q, sort=sort_by) }}"
+       class="ret-status-tab {{ 'ret-status-tab-active' if status_filter == 'active' }}">Active</a>
+    <a href="{{ url_for('retirement_centre.manage_schemes', status='archived', category=category, q=q, sort=sort_by) }}"
+       class="ret-status-tab {{ 'ret-status-tab-active' if status_filter == 'archived' }}">Archived</a>
+  </div>
+
+  <!-- ── Filters ── -->
+  <form method="GET" action="{{ url_for('retirement_centre.manage_schemes') }}" class="ret-filter-bar">
+    <input type="hidden" name="status" value="{{ status_filter }}" />
+    <input type="text" name="q" value="{{ q }}" placeholder="Search by scheme, institution, account..." class="ret-search-input" />
+    <select name="category" class="ret-select" onchange="this.form.submit()">
+      <option value="">All Categories</option>
+      {% for c in categories %}
+        <option value="{{ c }}" {{ 'selected' if category == c }}>{{ c }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort" class="ret-select" onchange="this.form.submit()">
+      <option value="recent" {{ 'selected' if sort_by == 'recent' }}>Recently Added</option>
+      <option value="balance_high" {{ 'selected' if sort_by == 'balance_high' }}>Balance — High to Low</option>
+      <option value="balance_low" {{ 'selected' if sort_by == 'balance_low' }}>Balance — Low to High</option>
+      <option value="name" {{ 'selected' if sort_by == 'name' }}>Name A–Z</option>
+    </select>
+    <button type="submit" class="btn-outline">Search</button>
+    {% if q or category %}
+      <a href="{{ url_for('retirement_centre.manage_schemes', status=status_filter) }}" class="ret-clear-link">Clear</a>
+    {% endif %}
+  </form>
+
+  <!-- ── Scheme List ── -->
+  <div class="ret-schemes-card">
+    <div class="ret-schemes-header">
+      <div class="ret-section-label">{{ schemes|length }} Scheme{{ 's' if schemes|length != 1 }}</div>
+      <a href="{{ url_for('retirement_centre.add_scheme') }}" class="ret-btn-add">+ Add Scheme</a>
+    </div>
+
+    {% if schemes %}
+      <div class="ret-scheme-list">
+        {% for scheme in schemes %}
+        <div class="ret-scheme-row">
+          <div class="ret-scheme-main">
+            <div class="ret-scheme-type">{{ scheme.display_type }}</div>
+            <div class="ret-scheme-meta">
+              {% if scheme.institution %}<span>Institution: {{ scheme.institution }}</span>{% endif %}
+              {% if scheme.scheme_type == 'NPS' %}
+                {% if scheme.pran_number %}<span>PRAN: {{ mask_account_number(scheme.pran_number) }}</span>{% endif %}
+              {% elif scheme.scheme_type in ['EPF', 'VPF'] %}
+                {% if scheme.account_number %}<span>Account: {{ mask_account_number(scheme.account_number) }}</span>
+                {% elif scheme.uan_number %}<span>UAN: {{ mask_account_number(scheme.uan_number) }}</span>{% endif %}
+              {% elif scheme.account_number %}
+                <span>Account: {{ mask_account_number(scheme.account_number) }}</span>
+              {% endif %}
+              <span>Status: {{ scheme.status }}</span>
+            </div>
+          </div>
+          <div class="ret-scheme-stats">
+            <div class="ret-scheme-balance">{{ format_inr(scheme.current_balance) }}</div>
+            <div class="ret-scheme-maturity">FY Contributions: {{ format_inr(scheme._fy_contrib) }}</div>
+          </div>
+          <div class="ret-scheme-actions">
+            <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) }}" class="ret-scheme-edit">View</a>
+            <a href="{{ url_for('retirement_centre.edit_scheme', scheme_id=scheme.id) }}" class="ret-scheme-edit">Edit</a>
+            {% if status_filter == 'archived' %}
+              <form method="POST" action="{{ url_for('retirement_centre.restore_scheme', scheme_id=scheme.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button type="submit" class="ret-scheme-view" style="background:none; border:none; cursor:pointer;">Restore</button>
+              </form>
+              <form method="POST" action="{{ url_for('retirement_centre.delete_scheme_permanent', scheme_id=scheme.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button type="button" class="ret-scheme-edit" style="color:var(--down); background:none; border:none; cursor:pointer;"
+                        onclick="confirmAction(this.form, 'Delete Scheme Permanently?', 'This will permanently delete this scheme along with all its contributions, balance history, nominees, and documents. This cannot be undone.', 'Delete Permanently')">Delete</button>
+              </form>
+            {% else %}
+              <form method="POST" action="{{ url_for('retirement_centre.archive_scheme', scheme_id=scheme.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button type="button" class="ret-scheme-edit" style="background:none; border:none; cursor:pointer;"
+                        onclick="confirmAction(this.form, 'Archive this scheme?', 'You can restore it any time from the Archived tab.', 'Archive')">Archive</button>
+              </form>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="ret-empty-state">
+        <div class="ret-empty-icon">🏦</div>
+        {% if status_filter == 'archived' %}
+          <div class="ret-empty-title">No archived schemes</div>
+          <div class="ret-empty-sub">Schemes you archive will show up here, and you can restore them any time.</div>
+        {% elif q or category %}
+          <div class="ret-empty-title">No schemes match your filters</div>
+          <div class="ret-empty-sub">Try a different search term or clear your filters.</div>
+        {% else %}
+          <div class="ret-empty-title">No retirement schemes yet</div>
+          <div class="ret-empty-sub">Start tracking your long-term retirement savings by adding your first scheme.</div>
+          <a href="{{ url_for('retirement_centre.add_scheme') }}" class="ret-btn-add" style="margin-top:16px;">+ Add Scheme</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+  .ret-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .ret-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  .ret-header p { color: var(--muted); font-size: 0.875rem; }
+  .ret-btn-outline {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 16px; font-size: 0.82rem;
+    font-weight: 600; color: var(--accent); font-family: 'Inter', sans-serif;
+    text-decoration: none; display: inline-block; transition: border-color 0.2s;
+  }
+  .ret-btn-outline:hover { border-color: var(--accent); }
+
+  .ret-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+  .ret-tab {
+    padding: 10px 4px; font-size: 0.85rem; font-weight: 600; color: var(--muted);
+    text-decoration: none; border-bottom: 2px solid transparent; margin-right: 20px;
+  }
+  .ret-tab:hover { color: var(--text2); }
+  .ret-tab-active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .ret-status-tabs { display: flex; gap: 8px; }
+  .ret-status-tab {
+    padding: 6px 16px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+    color: var(--muted); background: var(--surface2); border: 1px solid var(--border);
+    text-decoration: none;
+  }
+  .ret-status-tab-active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+
+  .ret-filter-bar {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  }
+  .ret-search-input {
+    flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 14px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+  .ret-select {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+  .ret-clear-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+  .ret-clear-link:hover { color: var(--accent); }
+
+  .ret-schemes-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm);
+  }
+  .ret-schemes-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
+  }
+  .ret-section-label {
+    font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .ret-btn-add {
+    background: var(--accent); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 8px 16px; font-size: 0.82rem;
+    font-weight: 700; color: #fff; font-family: 'Inter', sans-serif;
+    text-decoration: none; display: inline-block; transition: opacity 0.2s;
+  }
+  .ret-btn-add:hover { opacity: 0.88; }
+
+  .ret-scheme-list { display: flex; flex-direction: column; gap: 8px; }
+  .ret-scheme-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; gap: 16px; flex-wrap: wrap; transition: border-color 0.2s;
+  }
+  .ret-scheme-row:hover { border-color: var(--accent); }
+  .ret-scheme-main { flex: 1; min-width: 180px; }
+  .ret-scheme-type { font-weight: 600; font-size: 0.9rem; color: var(--text); margin-bottom: 4px; }
+  .ret-scheme-meta { display: flex; flex-direction: column; gap: 2px; }
+  .ret-scheme-meta span { font-size: 0.76rem; color: var(--muted); }
+  .ret-scheme-stats { text-align: right; flex-shrink: 0; }
+  .ret-scheme-balance {
+    font-family: 'Roboto Mono', monospace; font-weight: 700;
+    color: var(--accent); font-size: 1rem; white-space: nowrap;
+  }
+  .ret-scheme-maturity { font-size: 0.72rem; color: var(--muted); margin-top: 3px; white-space: nowrap; }
+  .ret-scheme-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; flex-wrap: wrap; }
+  .ret-scheme-edit { font-size: 0.78rem; color: var(--muted); text-decoration: none; font-family: 'Inter', sans-serif; }
+  .ret-scheme-edit:hover { color: var(--accent); }
+  .ret-scheme-view { font-size: 0.8rem; font-weight: 600; color: var(--accent); text-decoration: none; white-space: nowrap; font-family: 'Inter', sans-serif; }
+
+  .ret-empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .ret-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  .ret-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .ret-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  @media (max-width: 640px) {
+    .ret-scheme-row { flex-direction: column; align-items: stretch; }
+    .ret-scheme-stats { text-align: left; }
+    .ret-scheme-actions { justify-content: flex-end; }
+    .ret-filter-bar { flex-direction: column; align-items: stretch; }
+  }
+</style>
+{% endblock %}

@@ -80,10 +80,26 @@ def run_migration():
                     conn.commit()
                     print(f"  ✓ {col_name} (added)")
 
+        print("\nStep 3: Checking Document Vault column on retirement_document...")
+        with db.engine.connect() as conn:
+            doc_cols = {
+                row[1] for row in
+                conn.execute(db.text("PRAGMA table_info(retirement_document)"))
+            }
+            if "title" in doc_cols:
+                print("  ✓ title (already present)")
+            else:
+                conn.execute(db.text(
+                    "ALTER TABLE retirement_document ADD COLUMN title VARCHAR(255)"
+                ))
+                conn.commit()
+                print("  ✓ title (added)")
+
         print(f"\n{'=' * 60}")
         print("Migration complete:")
-        print("  ✓ 4 tables verified")
+        print("  ✓ 5 tables verified")
         print("  ✓ 3 Phase B columns verified/added")
+        print("  ✓ 1 Document Vault column verified/added")
         print("  ℹ No existing data touched or lost")
         print(f"\nNext steps:")
         print(f"  1. Restart your Flask server")
