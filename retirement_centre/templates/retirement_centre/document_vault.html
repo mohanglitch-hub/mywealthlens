@@ -5,6 +5,10 @@
 {% include "retirement_centre/_confirm_modal.html" %}
 <div class="ret-wrap">
 
+  <div class="ret-breadcrumb">
+    <a href="{{ url_for('retirement_centre.dashboard') }}">← Retirement Centre</a>
+  </div>
+
   <div class="ret-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1>Document Vault</h1>
@@ -16,7 +20,6 @@
   </div>
 
   <div class="ret-tabs">
-    <a href="{{ url_for('retirement_centre.dashboard') }}" class="ret-tab">Overview</a>
     <a href="{{ url_for('retirement_centre.manage_schemes') }}" class="ret-tab">Manage Schemes</a>
     <span class="ret-tab ret-tab-active">Document Vault</span>
   </div>
@@ -91,46 +94,60 @@
       <option value="">All Document Types</option>
       {% for dt in doc_types %}<option value="{{ dt }}" {{ 'selected' if doc_type == dt }}>{{ dt }}</option>{% endfor %}
     </select>
-    <input type="date" name="date_from" value="{{ date_from }}" class="ret-select" title="Uploaded from" />
-    <input type="date" name="date_to" value="{{ date_to }}" class="ret-select" title="Uploaded to" />
-    <button type="submit" class="btn-outline">Search</button>
-    {% if q or category or doc_type or date_from or date_to %}
+    <button type="submit" class="ret-search-btn">🔍 Search</button>
+    {% if q or category or doc_type %}
       <a href="{{ url_for('retirement_centre.document_vault') }}" class="ret-clear-link">Clear Filters</a>
     {% endif %}
   </form>
 
-  <!-- ── Document List ── -->
-  <div class="ret-schemes-card">
-    <div class="ret-section-label" style="margin-bottom:16px;">{{ documents|length }} Document{{ 's' if documents|length != 1 }}</div>
-
-    {% if documents %}
-      <div class="ret-list">
-        {% for d in documents %}
-        <div class="ret-list-row">
-          <div>
-            <span class="ret-list-primary">{{ d.display_name }}</span>
-            <span class="ret-list-secondary">
-              {{ d.doc_type }} · {{ d.scheme.display_type }}{% if d.scheme.institution %} ({{ d.scheme.institution }}){% endif %}
-              · {{ format_date(d.uploaded_at) }} · {{ d.file_size_display }}
-            </span>
-          </div>
-          <div class="ret-list-actions">
-            <a href="{{ url_for('retirement_centre.preview_document', doc_id=d.id) }}" target="_blank" class="ret-link-btn">View</a>
-            <a href="{{ url_for('retirement_centre.download_document', doc_id=d.id) }}" class="ret-link-btn">Download</a>
-            <form method="POST" action="{{ url_for('retirement_centre.delete_document', doc_id=d.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" name="next" value="vault" />
-              <button type="button" class="ret-link-btn ret-link-danger"
-                      onclick="confirmAction(this.form, 'Delete Document?', 'This document will be permanently removed from your local MyWealthLens storage.', 'Delete Document')">Delete</button>
-            </form>
-          </div>
-        </div>
-        {% endfor %}
+  <!-- ── Documents, grouped by Category then Scheme ── -->
+  {% if grouped_documents %}
+    {% for group in grouped_documents %}
+    {% set cat_theme = {
+      'EPF / VPF': ('🏢', 'blue'),
+      'PPF': ('🏦', 'teal'),
+      'NPS': ('📈', 'purple'),
+      'SSY': ('👧', 'pink'),
+      'Other Retirement Schemes': ('📋', 'amber'),
+    }.get(group.category, ('📋', 'teal')) %}
+    <div class="ret-doc-category-block ret-cat-{{ cat_theme[1] }}">
+      <div class="ret-doc-category-heading">
+        <span class="ret-doc-category-icon">{{ cat_theme[0] }}</span>
+        <span>{{ group.category }}</span>
       </div>
-    {% else %}
+
+      {% for sg in group.scheme_groups %}
+      <div class="ret-doc-scheme-block">
+        <div class="ret-doc-scheme-heading">{{ sg.scheme.display_type }}{% if sg.scheme.institution %} <span class="ret-doc-scheme-sub">— {{ sg.scheme.institution }}</span>{% endif %}</div>
+        <div class="ret-list">
+          {% for d in sg.documents %}
+          <div class="ret-list-row">
+            <div>
+              <span class="ret-list-primary">{{ d.display_name }}</span>
+              <span class="ret-list-secondary">{{ d.doc_type }} · {{ format_date(d.uploaded_at) }} · {{ d.file_size_display }}</span>
+            </div>
+            <div class="ret-list-actions">
+              <a href="{{ url_for('retirement_centre.preview_document', doc_id=d.id) }}" target="_blank" class="ret-link-btn">View</a>
+              <a href="{{ url_for('retirement_centre.download_document', doc_id=d.id) }}" class="ret-link-btn">Download</a>
+              <form method="POST" action="{{ url_for('retirement_centre.delete_document', doc_id=d.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="next" value="vault" />
+                <button type="button" class="ret-link-btn ret-link-danger"
+                        onclick="confirmAction(this.form, 'Delete Document?', 'This document will be permanently removed from your local MyWealthLens storage.', 'Delete Document')">Delete</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="ret-schemes-card">
       <div class="ret-empty-state">
         <div class="ret-empty-icon">📁</div>
-        {% if q or category or doc_type or date_from or date_to %}
+        {% if q or category or doc_type %}
           <div class="ret-empty-title">No documents match your filters</div>
           <div class="ret-empty-sub">Try a different search term or clear your filters.</div>
         {% else %}
@@ -139,8 +156,8 @@
           <button type="button" class="ret-btn-add" style="margin-top:16px;" onclick="toggle('vaultUploadForm')">+ Upload Document</button>
         {% endif %}
       </div>
-    {% endif %}
-  </div>
+    </div>
+  {% endif %}
 
   {% endif %}
 </div>
@@ -149,6 +166,10 @@
   .ret-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
   .ret-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
   .ret-header p { color: var(--muted); font-size: 0.875rem; }
+
+  .ret-breadcrumb { font-size: 0.95rem; margin-bottom: 4px; }
+  .ret-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .ret-breadcrumb a:hover { color: var(--accent); }
 
   .ret-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
   .ret-tab { padding: 10px 4px; font-size: 0.85rem; font-weight: 600; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-right: 20px; }
@@ -180,18 +201,46 @@
     border-radius: 8px; padding: 9px 14px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
   }
   .ret-select { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem; }
+  .ret-search-btn {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 22px; font-size: 0.88rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; cursor: pointer; transition: opacity 0.2s;
+  }
+  .ret-search-btn:hover { opacity: 0.88; }
   .ret-clear-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
   .ret-clear-link:hover { color: var(--accent); }
 
+  /* ── Category / Scheme grouped document blocks ── */
+  .ret-doc-category-block {
+    border-radius: 14px; padding: 20px; margin-bottom: 16px; border: 1px solid;
+  }
+  .ret-cat-blue   { background: #EFF6FF; border-color: #BFDBFE; }
+  .ret-cat-teal   { background: var(--accent-bg); border-color: #99F6E4; }
+  .ret-cat-purple { background: #F5F3FF; border-color: #DDD6FE; }
+  .ret-cat-pink   { background: #FDF2F8; border-color: #FBCFE8; }
+  .ret-cat-amber  { background: #FFFBEB; border-color: #FDE68A; }
+  .ret-doc-category-heading {
+    display: flex; align-items: center; gap: 10px; font-size: 1.05rem; font-weight: 700;
+    color: var(--text); margin-bottom: 16px;
+  }
+  .ret-doc-category-icon { font-size: 1.3rem; }
+  .ret-doc-scheme-block {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; margin-bottom: 12px;
+  }
+  .ret-doc-scheme-block:last-child { margin-bottom: 0; }
+  .ret-doc-scheme-heading { font-size: 0.9rem; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+  .ret-doc-scheme-sub { font-size: 0.8rem; font-weight: 500; color: var(--muted); }
+
   .ret-list { display: flex; flex-direction: column; gap: 2px; }
-  .ret-list-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+  .ret-list-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
   .ret-list-row:last-child { border-bottom: none; }
   .ret-list-primary { font-weight: 600; color: var(--text); font-size: 0.9rem; }
   .ret-list-secondary { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
-  .ret-list-actions { display: flex; gap: 10px; align-items: center; }
-  .ret-link-btn { background: none; border: none; color: var(--accent); font-size: 0.78rem; cursor: pointer; font-family: 'Inter', sans-serif; padding: 0; text-decoration: none; }
-  .ret-link-btn.ret-link-danger { color: var(--muted); }
-  .ret-link-btn.ret-link-danger:hover { color: var(--down); }
+  .ret-list-actions { display: flex; gap: 12px; align-items: center; }
+  .ret-link-btn { background: none; border: none; color: var(--accent); font-size: 0.8rem; font-weight: 700; cursor: pointer; font-family: 'Inter', sans-serif; padding: 0; text-decoration: none; }
+  .ret-link-btn:hover { text-decoration: underline; }
+  .ret-link-btn.ret-link-danger { color: var(--down); }
 
   .ret-empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
   .ret-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }

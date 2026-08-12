@@ -511,9 +511,11 @@ def upload_document(policy_id):
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=policy_id))
 
+    doc_title = request.form.get("doc_title", "").strip() or None
     services.save_document_metadata(
         _db(), policy, current_user.id,
         doc_type      = doc_type,
+        title         = doc_title,
         original_name = file.filename,
         stored_name   = stored_name,
         file_path     = file_path,

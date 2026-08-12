@@ -449,6 +449,9 @@ class InsuranceDocument(db.Model):
     doc_type      = db.Column(db.String(50), nullable=False)
     # From DocumentType.ALL
 
+    title         = db.Column(db.String(255), nullable=True)
+    # User-facing display name, distinct from the uploaded file's own
+    # filename — falls back to original_name when not provided
     original_name = db.Column(db.String(255), nullable=False)
     # Original filename from user's computer
 
@@ -464,8 +467,9 @@ class InsuranceDocument(db.Model):
     notes         = db.Column(db.String(500), nullable=True)
     uploaded_at   = db.Column(db.DateTime, default=datetime.utcnow)
 
-    def __repr__(self):
-        return f"<InsuranceDocument {self.doc_type} {self.original_name}>"
+    @property
+    def display_name(self):
+        return self.title or self.original_name
 
     @property
     def file_size_display(self):

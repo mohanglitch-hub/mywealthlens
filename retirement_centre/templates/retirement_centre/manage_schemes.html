@@ -5,16 +5,19 @@
 {% include "retirement_centre/_confirm_modal.html" %}
 <div class="ret-wrap">
 
+  <div class="ret-breadcrumb">
+    <a href="{{ url_for('retirement_centre.dashboard') }}">← Retirement Centre</a>
+  </div>
+
   <div class="ret-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
     <div>
       <h1>Manage Retirement Schemes</h1>
       <p>Search, filter, and manage all your retirement schemes in one place.</p>
     </div>
-    <a href="{{ url_for('retirement_centre.export_pdf') }}" class="ret-btn-outline">Download Retirement Summary PDF</a>
+    <a href="{{ url_for('retirement_centre.export_pdf') }}" class="ret-btn-outline">📄 Download PDF</a>
   </div>
 
   <div class="ret-tabs">
-    <a href="{{ url_for('retirement_centre.dashboard') }}" class="ret-tab">Overview</a>
     <span class="ret-tab ret-tab-active">Manage Schemes</span>
     <a href="{{ url_for('retirement_centre.document_vault') }}" class="ret-tab">Document Vault</a>
   </div>
@@ -22,9 +25,9 @@
   <!-- ── Status Tabs ── -->
   <div class="ret-status-tabs">
     <a href="{{ url_for('retirement_centre.manage_schemes', status='active', category=category, q=q, sort=sort_by) }}"
-       class="ret-status-tab {{ 'ret-status-tab-active' if status_filter == 'active' }}">Active</a>
+       class="ret-status-tab ret-status-tab-active-color {{ 'ret-status-tab-selected' if status_filter == 'active' }}">Active</a>
     <a href="{{ url_for('retirement_centre.manage_schemes', status='archived', category=category, q=q, sort=sort_by) }}"
-       class="ret-status-tab {{ 'ret-status-tab-active' if status_filter == 'archived' }}">Archived</a>
+       class="ret-status-tab ret-status-tab-archived-color {{ 'ret-status-tab-selected' if status_filter == 'archived' }}">Archived</a>
   </div>
 
   <!-- ── Filters ── -->
@@ -43,7 +46,7 @@
       <option value="balance_low" {{ 'selected' if sort_by == 'balance_low' }}>Balance — Low to High</option>
       <option value="name" {{ 'selected' if sort_by == 'name' }}>Name A–Z</option>
     </select>
-    <button type="submit" class="btn-outline">Search</button>
+    <button type="submit" class="ret-search-btn">🔍 Search</button>
     {% if q or category %}
       <a href="{{ url_for('retirement_centre.manage_schemes', status=status_filter) }}" class="ret-clear-link">Clear</a>
     {% endif %}
@@ -135,6 +138,10 @@
   }
   .ret-btn-outline:hover { border-color: var(--accent); }
 
+  .ret-breadcrumb { font-size: 0.95rem; margin-bottom: 4px; }
+  .ret-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .ret-breadcrumb a:hover { color: var(--accent); }
+
   .ret-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
   .ret-tab {
     padding: 10px 4px; font-size: 0.85rem; font-weight: 600; color: var(--muted);
@@ -143,13 +150,16 @@
   .ret-tab:hover { color: var(--text2); }
   .ret-tab-active { color: var(--accent); border-bottom-color: var(--accent); }
 
-  .ret-status-tabs { display: flex; gap: 8px; }
+  .ret-status-tabs { display: flex; gap: 10px; }
   .ret-status-tab {
-    padding: 6px 16px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
-    color: var(--muted); background: var(--surface2); border: 1px solid var(--border);
-    text-decoration: none;
+    padding: 8px 20px; border-radius: 20px; font-size: 1.1rem; font-weight: 700;
+    background: var(--surface2); border: 1px solid var(--border);
+    text-decoration: none; transition: all 0.2s;
   }
-  .ret-status-tab-active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .ret-status-tab-active-color { color: var(--up); }
+  .ret-status-tab-archived-color { color: #D97706; }
+  .ret-status-tab-selected.ret-status-tab-active-color { background: var(--up-bg); border-color: var(--up); }
+  .ret-status-tab-selected.ret-status-tab-archived-color { background: #FFFBEB; border-color: #D97706; }
 
   .ret-filter-bar {
     display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
@@ -163,6 +173,12 @@
     background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
     padding: 9px 12px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
   }
+  .ret-search-btn {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 22px; font-size: 0.88rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; cursor: pointer; transition: opacity 0.2s;
+  }
+  .ret-search-btn:hover { opacity: 0.88; }
   .ret-clear-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
   .ret-clear-link:hover { color: var(--accent); }
 
