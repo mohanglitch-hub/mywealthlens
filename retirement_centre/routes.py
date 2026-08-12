@@ -549,28 +549,39 @@ def document_vault():
     """
     Document Vault — first-class page listing every document across
     all of the user's retirement schemes, with search and filters.
+    Documents are grouped by category then by scheme, so users can
+    navigate straight to "my EPF documents" or "this specific PPF
+    account's documents" rather than scanning one long flat list.
     """
-    from datetime import datetime as _dt
-    from .models import RETIREMENT_CATEGORY_ORDER, RetirementDocumentType
+    from .models import RETIREMENT_CATEGORY_ORDER, RetirementDocumentType, scheme_type_to_category
 
-    q          = request.args.get("q", "").strip()
-    category   = request.args.get("category", "")
-    doc_type   = request.args.get("doc_type", "")
-    date_from_raw = request.args.get("date_from", "")
-    date_to_raw   = request.args.get("date_to", "")
-
-    def _parse(d):
-        try:
-            return _dt.strptime(d, "%Y-%m-%d")
-        except (ValueError, TypeError):
-            return None
+    q        = request.args.get("q", "").strip()
+    category = request.args.get("category", "")
+    doc_type = request.args.get("doc_type", "")
 
     documents = services.get_vault_documents(
         current_user.id, q=q or None, category=category or None,
         doc_type=doc_type or None,
-        date_from=_parse(date_from_raw), date_to=_parse(date_to_raw),
     )
     summary = services.vault_summary(current_user.id)
+
+    # Group: category -> scheme -> documents, preserving first-seen order.
+    grouped = {}
+    order = []
+    for d in documents:
+        cat = scheme_type_to_category(d.scheme.scheme_type) or "Other Retirement Schemes"
+        if cat not in grouped:
+            grouped[cat] = {}
+            order.append(cat)
+        scheme_id = d.scheme.id
+        if scheme_id not in grouped[cat]:
+            grouped[cat][scheme_id] = {"scheme": d.scheme, "documents": []}
+        grouped[cat][scheme_id]["documents"].append(d)
+
+    grouped_documents = [
+        {"category": cat, "scheme_groups": list(grouped[cat].values())}
+        for cat in order
+    ]
 
     # Schemes for the upload form's scheme dropdown (active schemes only)
     upload_schemes = (RetirementScheme.query
@@ -581,13 +592,13 @@ def document_vault():
     return render_template(
         "retirement_centre/document_vault.html",
         documents=documents,
+        grouped_documents=grouped_documents,
         summary=summary,
         categories=RETIREMENT_CATEGORY_ORDER,
         doc_types=RetirementDocumentType.ALL,
         upload_schemes=upload_schemes,
         preselect_scheme_id=preselect_scheme_id,
         q=q, category=category, doc_type=doc_type,
-        date_from=date_from_raw, date_to=date_to_raw,
         format_inr=format_inr, format_date=format_date,
     )
 

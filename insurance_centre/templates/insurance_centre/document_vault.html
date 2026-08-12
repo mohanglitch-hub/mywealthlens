@@ -55,7 +55,7 @@
           <td><span class="dv-type-badge">{{ doc.doc_type }}</span></td>
           <td class="dv-filename">
             <span>{{ '🖼️' if doc.original_name.lower().endswith(('.jpg','.jpeg','.png')) else '📄' }}</span>
-            {{ doc.original_name }}
+            {{ doc.display_name }}
             {% if doc.notes %}<div class="dv-notes">{{ doc.notes }}</div>{% endif %}
           </td>
           <td class="dv-date">{{ format_date(doc.uploaded_at) }}</td>
@@ -65,13 +65,13 @@
               {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
               {% if ext in ['pdf','jpg','jpeg','png'] %}
               <a href="/insurance-centre/documents/{{ doc.id }}/preview"
-                 target="_blank" class="dv-btn dv-btn-preview">👁 View</a>
+                 target="_blank" class="dv-btn dv-btn-preview">View</a>
               {% endif %}
               <a href="/insurance-centre/documents/{{ doc.id }}/download"
-                 class="dv-btn dv-btn-download">⬇ Download</a>
+                 class="dv-btn dv-btn-download">Download</a>
               <button class="dv-btn dv-btn-delete"
-                onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.original_name }}')">
-                🗑
+                onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.display_name }}')">
+                Delete
               </button>
               <form method="POST"
                     action="/insurance-centre/documents/{{ doc.id }}/delete"
@@ -95,7 +95,7 @@
         <span class="dv-type-badge">{{ doc.doc_type }}</span>
         <span class="dv-size">{{ doc.file_size_display }}</span>
       </div>
-      <div class="dv-filename" style="margin:8px 0;">{{ doc.original_name }}</div>
+      <div class="dv-filename" style="margin:8px 0;">{{ doc.display_name }}</div>
       {% if policy %}
       <div class="dv-policy-insurer" style="margin-bottom:4px;">
         {{ category_icons.get(policy.category, '📋') }}
@@ -109,13 +109,13 @@
         {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
         {% if ext in ['pdf','jpg','jpeg','png'] %}
         <a href="/insurance-centre/documents/{{ doc.id }}/preview"
-           target="_blank" class="dv-btn dv-btn-preview">👁 View</a>
+           target="_blank" class="dv-btn dv-btn-preview">View</a>
         {% endif %}
         <a href="/insurance-centre/documents/{{ doc.id }}/download"
-           class="dv-btn dv-btn-download">⬇ Download</a>
+           class="dv-btn dv-btn-download">Download</a>
         <button class="dv-btn dv-btn-delete"
-          onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.original_name }}')">
-          🗑 Delete
+          onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.display_name }}')">
+          Delete
         </button>
       </div>
     </div>
@@ -185,14 +185,12 @@
   .dv-notes         { font-size:0.72rem; color:var(--muted); margin-top:2px; font-weight:400; flex-basis:100%; }
   .dv-date          { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
   .dv-size          { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
-  .dv-actions       { display:flex; gap:6px; flex-wrap:wrap; }
-  .dv-btn           { display:inline-flex; align-items:center; gap:4px; padding:5px 10px; border-radius:6px; font-size:0.75rem; font-weight:500; font-family:var(--font-ui); cursor:pointer; text-decoration:none; border:1px solid; transition:all 0.2s; white-space:nowrap; }
-  .dv-btn-preview   { background:var(--surface2); color:var(--text2); border-color:var(--text2); font-weight:600; }
-  .dv-btn-preview:hover { border-color:var(--accent); color:var(--accent); }
-  .dv-btn-download  { background:var(--accent-bg); color:var(--accent); border-color:var(--accent); }
-  .dv-btn-download:hover { background:var(--accent); color:#fff; }
-  .dv-btn-delete    { background:none; color:var(--muted); border-color:var(--text2); font-weight:600; }
-  .dv-btn-delete:hover { border-color:var(--down); color:var(--down); }
+  .dv-actions       { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  .dv-btn           { background:none; border:none; padding:0; font-size:0.8rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; text-decoration:none; }
+  .dv-btn:hover     { text-decoration:underline; }
+  .dv-btn-preview   { color:var(--accent); }
+  .dv-btn-download  { color:var(--accent); }
+  .dv-btn-delete    { color:var(--down); }
 
   /* Mobile */
   .dv-cards-mobile  { display:none; }
