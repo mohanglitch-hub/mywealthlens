@@ -192,3 +192,31 @@ def mask_account_number(value):
     if len(s) <= 4:
         return s
     return f"••••{s[-4:]}"
+
+
+# ── Grouping Labels (Contribution History view toggle) ───────────────────────
+# Indian FY-aware bucket labels for the Monthly/Quarterly/Half-Yearly/
+# Yearly grouping view. FY quarters: Q1=Apr-Jun, Q2=Jul-Sep,
+# Q3=Oct-Dec, Q4=Jan-Mar (not calendar quarters).
+
+def fy_quarter_label(d):
+    fy_start = d.year if d.month >= 4 else d.year - 1
+    if d.month in (4, 5, 6):
+        q = 1
+    elif d.month in (7, 8, 9):
+        q = 2
+    elif d.month in (10, 11, 12):
+        q = 3
+    else:
+        q = 4
+    return f"Q{q} FY{fy_start}-{str(fy_start + 1)[-2:]}"
+
+
+def fy_half_label(d):
+    fy_start = d.year if d.month >= 4 else d.year - 1
+    half = 1 if d.month in (4, 5, 6, 7, 8, 9) else 2
+    return f"H{half} FY{fy_start}-{str(fy_start + 1)[-2:]}"
+
+
+def month_label(d):
+    return d.strftime("%b %Y")

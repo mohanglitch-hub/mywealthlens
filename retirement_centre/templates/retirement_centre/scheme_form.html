@@ -2,10 +2,14 @@
 {% block title %}{{ 'Edit' if is_edit else 'Add' }} Retirement Scheme — MyWealthLens{% endblock %}
 
 {% block content %}
-<div style="max-width:760px; margin:0 auto;">
+<div style="max-width:960px; margin:0 auto;">
 
   <div class="ret-breadcrumb">
-    <a href="{{ url_for('retirement_centre.dashboard') }}">← Retirement Centre</a>
+    {% if back_category %}
+      <a href="{{ url_for('retirement_centre.category_view', slug=back_slug) }}">← {{ back_category }}</a>
+    {% else %}
+      <a href="{{ url_for('retirement_centre.dashboard') }}">← Retirement Centre</a>
+    {% endif %}
     <span class="ret-breadcrumb-sep">›</span>
     <span class="ret-breadcrumb-current">{{ 'Edit Scheme' if is_edit else 'Add Scheme' }}</span>
   </div>
@@ -255,7 +259,7 @@
       <button type="submit" class="btn-primary" style="width:auto; padding:11px 28px;">
         {{ 'Save Changes' if is_edit else 'Add Scheme' }}
       </button>
-      <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) if is_edit else url_for('retirement_centre.dashboard') }}"
+      <a href="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) if is_edit else (url_for('retirement_centre.category_view', slug=back_slug) if back_category else url_for('retirement_centre.dashboard')) }}"
          class="ret-btn-cancel">
         Cancel
       </a>

@@ -139,6 +139,30 @@ def slug_to_category(slug):
     return RETIREMENT_CATEGORY_SLUGS.get(slug, slug)
 
 
+def scheme_type_to_category(scheme_type):
+    """
+    Reverse lookup: given a stored scheme_type value, return which of
+    the 5 display categories it belongs to. Used so Add/Edit/View
+    scheme pages can always know their category context without
+    needing a fragile query-string round-trip for View/Edit (a
+    scheme's type is always known server-side).
+    """
+    for category, types in RETIREMENT_CATEGORY_GROUPS.items():
+        if scheme_type in types:
+            return category
+    return None
+
+
+def category_for_scheme_type(scheme_type):
+    """Reverse lookup: given a scheme_type value, return which of the
+    5 display categories it belongs to. Used to build 'back to
+    category' navigation on the scheme detail page."""
+    for cat, types in RETIREMENT_CATEGORY_GROUPS.items():
+        if scheme_type in types:
+            return cat
+    return None
+
+
 # Full/expanded names for category page headers — abbreviations
 # spelled out, matching Insurance Centre's "Life Insurance" (not
 # "LI") convention on its own category pages.
@@ -357,6 +381,21 @@ class RetirementScheme(db.Model):
         return f"<RetirementScheme id={self.id} {self.scheme_type}>"
 
 
+class ContributionEntryType:
+    """
+    Distinguishes actual deposits from interest credits within
+    Contribution History. Both add to current_balance the same way,
+    but only DEPOSIT counts toward 'contribution' totals — interest
+    is growth, not money the user put in, and conflating the two
+    would misrepresent how much was actually contributed (a rule
+    this app has held since Phase C).
+    """
+    DEPOSIT  = "Deposit"
+    INTEREST = "Interest Credited"
+
+    ALL = [DEPOSIT, INTEREST]
+
+
 class RetirementContribution(db.Model):
     """
     Actual contribution/deposit history. One row per deposit —
@@ -380,6 +419,8 @@ class RetirementContribution(db.Model):
 
     contribution_date = db.Column(db.Date, nullable=False)
     amount             = db.Column(db.Float, nullable=False)
+    entry_type         = db.Column(db.String(20), nullable=False,
+                                   default=ContributionEntryType.DEPOSIT)
     note               = db.Column(db.String(300), nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
