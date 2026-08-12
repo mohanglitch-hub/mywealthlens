@@ -161,6 +161,11 @@ def validate_contribution(form):
     elif amount <= 0:
         errors.append("Amount must be greater than zero.")
 
+    from .models import ContributionEntryType
+    entry_type = form.get("entry_type")
+    if entry_type and entry_type not in ContributionEntryType.ALL:
+        errors.append("Invalid entry type selected.")
+
     return errors
 
 

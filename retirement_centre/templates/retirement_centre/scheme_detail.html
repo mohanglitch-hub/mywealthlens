@@ -3,7 +3,17 @@
 
 {% block content %}
 {% include "retirement_centre/_confirm_modal.html" %}
-<div style="max-width:820px; margin:0 auto;">
+<div style="max-width:960px; margin:0 auto;">
+
+  <div class="ret-breadcrumb">
+    <a href="{{ url_for('retirement_centre.dashboard') }}">Retirement Centre</a>
+    {% if category %}
+      <span class="ret-breadcrumb-sep">›</span>
+      <a href="{{ url_for('retirement_centre.category_view', slug=category_slug) }}">{{ category }}</a>
+    {% endif %}
+    <span class="ret-breadcrumb-sep">›</span>
+    <span class="ret-breadcrumb-current">{{ scheme.display_type }}</span>
+  </div>
 
   <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
     <div>
@@ -11,19 +21,19 @@
         {{ scheme.scheme_type }}
         {% if scheme.is_archived %}<span class="ret-badge ret-badge-muted">Archived</span>{% endif %}
       </div>
-      <h1 style="font-size:1.4rem; font-weight:700; color:var(--text);">{{ scheme.display_type }}</h1>
+      <h1 style="font-size:1.5rem; font-weight:700; color:var(--text);">{{ scheme.display_type }}</h1>
       <div style="font-size:0.85rem; color:var(--muted); margin-top:2px;">{{ scheme.institution or 'Institution not set' }} · Status: {{ scheme.status }}</div>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
-      <a href="{{ url_for('retirement_centre.edit_scheme', scheme_id=scheme.id) }}" class="btn-outline">Edit Scheme</a>
+      <a href="{{ url_for('retirement_centre.edit_scheme', scheme_id=scheme.id) }}" class="ret-btn-primary-outline">Edit Scheme</a>
       {% if scheme.is_archived %}
         <form method="POST" action="{{ url_for('retirement_centre.restore_scheme', scheme_id=scheme.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <button type="submit" class="btn-outline">Restore</button>
+          <button type="submit" class="ret-btn-primary-outline">Restore</button>
         </form>
         <form method="POST" action="{{ url_for('retirement_centre.delete_scheme_permanent', scheme_id=scheme.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <button type="button" class="btn-outline ret-btn-danger-outline"
+          <button type="button" class="ret-btn-danger-outline"
                   onclick="confirmAction(this.form, 'Delete Scheme Permanently?', 'This will permanently delete this scheme along with all its contributions, balance history, nominees, and documents. This cannot be undone.', 'Delete Permanently')">
             Delete Permanently
           </button>
@@ -31,7 +41,7 @@
       {% else %}
         <form method="POST" action="{{ url_for('retirement_centre.archive_scheme', scheme_id=scheme.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <button type="button" class="btn-outline"
+          <button type="button" class="ret-btn-neutral-outline"
                   onclick="confirmAction(this.form, 'Archive this scheme?', 'You can restore it any time from the Archived tab.', 'Archive')">
             Archive
           </button>
@@ -42,9 +52,8 @@
 
   <!-- ── Scheme Summary ── -->
   <div class="ret-card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
-      <div class="ret-card-label" style="margin-bottom:0;">Scheme Summary</div>
-      <button type="button" class="ret-btn-small" onclick="toggle('balanceForm')">Update Balance</button>
+    <div class="ret-card-heading">
+      <span class="ret-card-num">1</span><span class="ret-card-title">Scheme Summary</span>
     </div>
     <div class="ret-detail-grid">
       <div class="ret-field"><span class="ret-field-label">Current Balance</span><span class="ret-field-value ret-accent">{{ format_inr(scheme.current_balance) }}</span></div>
@@ -62,33 +71,20 @@
       </div>
       <div class="ret-field"><span class="ret-field-label">Account Number</span><span class="ret-field-value">{{ scheme.account_number or '—' }}</span></div>
       <div class="ret-field"><span class="ret-field-label">Growth Method</span><span class="ret-field-value">{{ scheme.growth_method.replace('_',' ').title() }}</span></div>
-      <div class="ret-field"><span class="ret-field-label">Last Verified</span><span class="ret-field-value">{{ format_date(scheme.balance_updated_at) }}</span></div>
       <div class="ret-field"><span class="ret-field-label">Status</span><span class="ret-field-value">{{ scheme.status }}</span></div>
     </div>
     {% if not maturity.available and maturity.message %}
       <div style="font-size:0.76rem; color:var(--muted); margin-top:10px;">{{ maturity.message }}</div>
     {% endif %}
-
-    <div id="balanceForm" class="ret-inline-form" style="display:none; margin-top:16px;">
-      <form method="POST" action="{{ url_for('retirement_centre.update_balance', scheme_id=scheme.id) }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <div class="ret-inline-grid">
-          <div class="form-group"><label>New Balance (₹)</label><input type="number" name="new_balance" step="0.01" min="0" required /></div>
-          <div class="form-group"><label>Balance Date</label><input type="date" name="balance_date" required /></div>
-        </div>
-        <div class="form-group"><label>Note — optional</label><input type="text" name="balance_note" placeholder="e.g. Monthly statement update" /></div>
-        <div style="font-size:0.75rem; color:var(--muted); margin-bottom:10px;">
-          This fully replaces the current balance (not added to it) — use it whenever you verify your real account balance.
-        </div>
-        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Balance</button>
-      </form>
+    <div style="font-size:0.76rem; color:var(--muted); margin-top:12px;">
+      Balance updates automatically from Contribution History below — log every deposit and interest credit to keep this accurate.
     </div>
   </div>
 
-  <!-- ── SSY milestone detail (kept separate — 3 distinct dates don't fit one summary line) ── -->
+  <!-- ── SSY milestone detail ── -->
   {% if maturity.available and maturity.kind == 'ssy' %}
   <div class="ret-card">
-    <div class="ret-card-label">SSY Milestones</div>
+    <div class="ret-card-heading-plain">SSY Milestones</div>
     <div class="ret-detail-grid">
       <div class="ret-field"><span class="ret-field-label">Contribution Period Ends</span><span class="ret-field-value">{{ format_date(maturity.contribution_period_end) }}</span></div>
       <div class="ret-field"><span class="ret-field-label">Partial Withdrawal Eligible</span><span class="ret-field-value">{{ format_date(maturity.partial_withdrawal_date) }}</span></div>
@@ -96,33 +92,23 @@
   </div>
   {% endif %}
 
-  <!-- ── Balance History ── -->
-  <div class="ret-card">
-    <div class="ret-card-label">Balance History</div>
-    {% if balance_history %}
-      <div class="ret-list">
-        {% for b in balance_history %}
-        <div class="ret-list-row">
-          <div><span class="ret-list-primary">{{ format_inr(b.balance) }}</span><span class="ret-list-secondary">{{ format_date(b.balance_date) }}{% if b.note %} · {{ b.note }}{% endif %}</span></div>
-        </div>
-        {% endfor %}
-      </div>
-    {% else %}
-      <div class="ret-empty">No balance history available.<br>Update your balance to begin tracking its history.</div>
-    {% endif %}
-  </div>
-
   <!-- ── Contribution History ── -->
   <div class="ret-card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
-      <div class="ret-card-label" style="margin-bottom:0;">Contribution History</div>
-      <button type="button" class="ret-btn-small" onclick="toggle('contribForm')">+ Add Contribution</button>
+    <div class="ret-card-heading">
+      <span class="ret-card-num">2</span><span class="ret-card-title">Contribution History</span>
+      <button type="button" class="ret-btn-small" style="margin-left:auto;" onclick="toggle('contribForm')">+ Add Contribution</button>
     </div>
 
     <div class="ret-summary-row">
-      <div class="ret-summary-item"><span class="ret-summary-label">Current FY</span><span class="ret-summary-value">{{ format_inr(summary.current_fy_total) }}</span></div>
-      <div class="ret-summary-item"><span class="ret-summary-label">Total Recorded</span><span class="ret-summary-value">{{ format_inr(summary.total_recorded) }}</span></div>
+      <div class="ret-summary-item"><span class="ret-summary-label">Current FY Contributions</span><span class="ret-summary-value">{{ format_inr(summary.current_fy_total) }}</span></div>
+      <div class="ret-summary-item"><span class="ret-summary-label">Total Contributions</span><span class="ret-summary-value">{{ format_inr(summary.total_recorded) }}</span></div>
       <div class="ret-summary-item"><span class="ret-summary-label">Number of Contributions</span><span class="ret-summary-value">{{ summary.count }}</span></div>
+      {% if summary.total_interest > 0 %}
+      <div class="ret-summary-item"><span class="ret-summary-label">Total Interest Credited</span><span class="ret-summary-value" style="color:#D97706;">{{ format_inr(summary.total_interest) }}</span></div>
+      {% endif %}
+    </div>
+    <div style="font-size:0.74rem; color:var(--muted); margin-bottom:14px;">
+      Interest credits count toward your balance but not toward "Contributions" above — they're growth, not money you deposited.
     </div>
 
     <div id="contribForm" class="ret-inline-form" style="display:none;">
@@ -132,52 +118,98 @@
           <div class="form-group"><label>Contribution Date</label><input type="date" name="contribution_date" required /></div>
           <div class="form-group"><label>Amount (₹)</label><input type="number" name="amount" step="0.01" min="0.01" required /></div>
         </div>
+        <div class="form-group">
+          <label>Entry Type</label>
+          <select name="entry_type" class="ret-select">
+            <option value="Deposit">Deposit</option>
+            <option value="Interest Credited">Interest Credited</option>
+          </select>
+        </div>
         <div class="form-group"><label>Note — optional</label><input type="text" name="note" placeholder="e.g. Monthly EPF contribution" /></div>
-        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Contribution</button>
+        <div style="font-size:0.75rem; color:var(--muted); margin-bottom:10px;">
+          Both entry types add directly to your Current Balance above.
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Entry</button>
       </form>
     </div>
 
-    {% if fy_options %}
-    <form method="GET" action="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) }}" style="margin-bottom:14px;">
-      <label style="font-size:0.78rem; color:var(--muted); margin-right:8px;">Financial Year</label>
-      <select name="fy" class="ret-select" style="width:auto; display:inline-block;" onchange="this.form.submit()">
-        <option value="">All Years</option>
-        {% for opt in fy_options %}
-          <option value="{{ opt.year }}" {{ 'selected' if fy_filter == opt.year }}>{{ opt.label }}</option>
-        {% endfor %}
-      </select>
-    </form>
-    {% endif %}
+    <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:14px; align-items:center;">
+      {% if fy_options %}
+      <form method="GET" action="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) }}" style="display:flex; align-items:center; gap:8px;">
+        <input type="hidden" name="group_by" value="{{ group_by }}" />
+        <label style="font-size:0.95rem; font-weight:700; color:var(--text);">Financial Year</label>
+        <select name="fy" class="ret-select" onchange="this.form.submit()">
+          <option value="all" {{ 'selected' if fy_arg == 'all' }}>All Years</option>
+          {% for opt in fy_options %}
+            <option value="{{ opt.year }}" {{ 'selected' if fy_filter == opt.year }}>{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </form>
+      {% endif %}
+      <form method="GET" action="{{ url_for('retirement_centre.scheme_detail', scheme_id=scheme.id) }}" style="display:flex; align-items:center; gap:8px;">
+        <input type="hidden" name="fy" value="{{ fy_arg }}" />
+        <label style="font-size:0.95rem; font-weight:700; color:var(--text);">View</label>
+        <select name="group_by" class="ret-select" onchange="this.form.submit()">
+          <option value="" {{ 'selected' if not group_by }}>Flat List</option>
+          <option value="month" {{ 'selected' if group_by == 'month' }}>Group by Month</option>
+          <option value="quarter" {{ 'selected' if group_by == 'quarter' }}>Group by Quarter</option>
+          <option value="half" {{ 'selected' if group_by == 'half' }}>Group by Half-Year</option>
+          <option value="year" {{ 'selected' if group_by == 'year' }}>Group by Year</option>
+        </select>
+      </form>
+    </div>
 
-    {% if contributions %}
+    {% macro contrib_row(c) %}
+    <div class="ret-list-row" id="contrib-row-{{ c.id }}">
+      <div>
+        <span class="ret-list-primary">{{ format_inr(c.amount) }}</span>
+        {% if c.entry_type == 'Interest Credited' %}<span class="ret-badge ret-badge-interest">Interest</span>{% endif %}
+        <span class="ret-list-secondary">{{ format_date(c.contribution_date) }}{% if c.note %} · {{ c.note }}{% endif %}</span>
+      </div>
+      <div class="ret-list-actions">
+        <button type="button" class="ret-link-btn" onclick="toggle('contrib-edit-{{ c.id }}')">Edit</button>
+        <form method="POST" action="{{ url_for('retirement_centre.delete_contribution', contribution_id=c.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="button" class="ret-link-btn ret-link-danger"
+                  onclick="confirmAction(this.form, 'Delete Entry?', 'This entry will be permanently removed and its amount will be subtracted from your Current Balance.', 'Delete Entry')">Delete</button>
+        </form>
+      </div>
+    </div>
+    <div id="contrib-edit-{{ c.id }}" class="ret-inline-form" style="display:none;">
+      <form method="POST" action="{{ url_for('retirement_centre.edit_contribution', contribution_id=c.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="ret-inline-grid">
+          <div class="form-group"><label>Contribution Date</label><input type="date" name="contribution_date" value="{{ c.contribution_date.isoformat() }}" required /></div>
+          <div class="form-group"><label>Amount (₹)</label><input type="number" name="amount" step="0.01" min="0.01" value="{{ c.amount }}" required /></div>
+        </div>
+        <div class="form-group">
+          <label>Entry Type</label>
+          <select name="entry_type" class="ret-select">
+            <option value="Deposit" {{ 'selected' if c.entry_type == 'Deposit' }}>Deposit</option>
+            <option value="Interest Credited" {{ 'selected' if c.entry_type == 'Interest Credited' }}>Interest Credited</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Note</label><input type="text" name="note" value="{{ c.note or '' }}" /></div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Changes</button>
+      </form>
+    </div>
+    {% endmacro %}
+
+    {% if group_by and grouped_contributions %}
+      {% for g in grouped_contributions %}
+      <div class="ret-group-block">
+        <div class="ret-group-header">
+          <span>{{ g.label }}</span>
+          <span class="ret-group-total">{{ format_inr(g.total) }}</span>
+        </div>
+        <div class="ret-list">
+          {% for c in g.entries %}{{ contrib_row(c) }}{% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    {% elif contributions %}
       <div class="ret-list">
-        {% for c in contributions %}
-        <div class="ret-list-row" id="contrib-row-{{ c.id }}">
-          <div>
-            <span class="ret-list-primary">{{ format_inr(c.amount) }}</span>
-            <span class="ret-list-secondary">{{ format_date(c.contribution_date) }}{% if c.note %} · {{ c.note }}{% endif %}</span>
-          </div>
-          <div class="ret-list-actions">
-            <button type="button" class="ret-link-btn" onclick="toggle('contrib-edit-{{ c.id }}')">Edit</button>
-            <form method="POST" action="{{ url_for('retirement_centre.delete_contribution', contribution_id=c.id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="button" class="ret-link-btn ret-link-danger"
-                      onclick="confirmAction(this.form, 'Delete Contribution?', 'This contribution will be permanently removed from your contribution history.', 'Delete Contribution')">Delete</button>
-            </form>
-          </div>
-        </div>
-        <div id="contrib-edit-{{ c.id }}" class="ret-inline-form" style="display:none;">
-          <form method="POST" action="{{ url_for('retirement_centre.edit_contribution', contribution_id=c.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-            <div class="ret-inline-grid">
-              <div class="form-group"><label>Contribution Date</label><input type="date" name="contribution_date" value="{{ c.contribution_date.isoformat() }}" required /></div>
-              <div class="form-group"><label>Amount (₹)</label><input type="number" name="amount" step="0.01" min="0.01" value="{{ c.amount }}" required /></div>
-            </div>
-            <div class="form-group"><label>Note</label><input type="text" name="note" value="{{ c.note or '' }}" /></div>
-            <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Save Changes</button>
-          </form>
-        </div>
-        {% endfor %}
+        {% for c in contributions %}{{ contrib_row(c) }}{% endfor %}
       </div>
     {% else %}
       <div class="ret-empty">No contributions recorded yet.<br>Start adding your deposits to build your contribution history.</div>
@@ -186,9 +218,9 @@
 
   <!-- ── Nominee Information ── -->
   <div class="ret-card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
-      <div class="ret-card-label" style="margin-bottom:0;">Nominee Information</div>
-      <button type="button" class="ret-btn-small" onclick="toggle('nomineeForm')">+ Add Nominee</button>
+    <div class="ret-card-heading">
+      <span class="ret-card-num">3</span><span class="ret-card-title">Nominee Information</span>
+      <button type="button" class="ret-btn-small" style="margin-left:auto;" onclick="toggle('nomineeForm')">+ Add Nominee</button>
     </div>
 
     <div id="nomineeForm" class="ret-inline-form" style="display:none;">
@@ -262,9 +294,9 @@
 
   <!-- ── Documents ── -->
   <div class="ret-card">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
-      <div class="ret-card-label" style="margin-bottom:0;">Documents</div>
-      <button type="button" class="ret-btn-small" onclick="toggle('docForm')">+ Upload Document</button>
+    <div class="ret-card-heading">
+      <span class="ret-card-num">4</span><span class="ret-card-title">Documents</span>
+      <button type="button" class="ret-btn-small" style="margin-left:auto;" onclick="toggle('docForm')">+ Upload Document</button>
     </div>
     <div style="font-size:0.78rem; color:var(--muted); margin-bottom:14px;">
       Documents are stored locally on your computer — never uploaded anywhere.
@@ -293,7 +325,7 @@
         {% for d in documents %}
         <div class="ret-list-row">
           <div>
-            <span class="ret-list-primary">{{ d.original_name }}</span>
+            <span class="ret-list-primary">{{ d.display_name }}</span>
             <span class="ret-list-secondary">{{ d.doc_type }} · {{ format_date(d.uploaded_at) }} · {{ d.file_size_display }}</span>
           </div>
           <div class="ret-list-actions">
@@ -301,6 +333,7 @@
             <a href="{{ url_for('retirement_centre.download_document', doc_id=d.id) }}" class="ret-link-btn">Download</a>
             <form method="POST" action="{{ url_for('retirement_centre.delete_document', doc_id=d.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="next" value="scheme" />
               <button type="button" class="ret-link-btn ret-link-danger"
                       onclick="confirmAction(this.form, 'Delete Document?', 'This document will be permanently removed from your local MyWealthLens storage.', 'Delete Document')">Delete</button>
             </form>
@@ -315,7 +348,7 @@
 
   {% if scheme.notes %}
   <div class="ret-card">
-    <div class="ret-card-label">Notes</div>
+    <div class="ret-card-heading-plain">Notes</div>
     <div style="font-size:0.9rem; color:var(--text2); white-space:pre-wrap;">{{ scheme.notes }}</div>
   </div>
   {% endif %}
@@ -323,15 +356,25 @@
   <!-- ── Activity ── -->
   {% if timeline %}
   <div class="ret-card">
-    <div class="ret-card-label">Activity</div>
-    <div style="display:flex; flex-direction:column; gap:10px;">
-      {% for t in timeline %}
-      <div style="display:flex; justify-content:space-between; gap:12px; font-size:0.82rem; padding-bottom:10px; border-bottom:1px solid var(--border);">
-        <div>
-          <div style="color:var(--text2); font-weight:500;">{{ t.event_type }}</div>
-          <div style="color:var(--muted); margin-top:2px;">{{ t.description }}</div>
+    <div class="ret-card-heading-plain">Activity <span style="font-weight:400; color:var(--muted); font-size:0.78rem;">— last 5</span></div>
+    <div class="ret-activity-list">
+      {% for t in timeline[:5] %}
+      {% set badge_class = {
+        'Scheme Created': 'badge-created',
+        'Scheme Updated': 'badge-updated',
+        'Contribution Added': 'badge-created',
+        'Balance Updated': 'badge-updated',
+        'Document Uploaded': 'badge-document',
+        'Archived': 'badge-archived',
+        'Restored': 'badge-restored',
+      }.get(t.event_type, 'badge-default') %}
+      <div class="ret-activity-row">
+        <div class="ret-activity-dot {{ badge_class }}"></div>
+        <div class="ret-activity-content">
+          <div class="ret-activity-event {{ badge_class }}">{{ t.event_type|upper }}</div>
+          <div class="ret-activity-desc">{{ t.description }}</div>
+          <div class="ret-activity-time">{{ format_date(t.created_at) }}</div>
         </div>
-        <div style="color:var(--muted); white-space:nowrap;">{{ format_date(t.created_at) }}</div>
       </div>
       {% endfor %}
     </div>
@@ -341,70 +384,120 @@
 </div>
 
 <style>
-  .ret-btn-danger-outline { color: var(--down) !important; border-color: var(--down) !important; }
-  .ret-btn-danger-outline:hover { background: var(--down-bg); }
+  .ret-breadcrumb { font-size: 0.95rem; margin-bottom: 14px; }
+  .ret-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .ret-breadcrumb a:hover { color: var(--accent); }
+  .ret-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .ret-breadcrumb-current { color: var(--text); font-weight: 700; }
+
   .ret-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; padding: 22px; margin-bottom: 16px;
     box-shadow: var(--shadow-sm);
   }
-  .ret-card-label {
-    font-size: 0.72rem; font-weight: 600; color: var(--muted);
-    letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px;
+  .ret-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+  .ret-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
   }
+  .ret-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .ret-card-heading-plain {
+    font-size: 0.85rem; font-weight: 700; color: var(--accent2);
+    margin-bottom: 16px; padding-left: 12px; border-left: 3px solid var(--accent2);
+  }
+
+  .ret-btn-primary-outline {
+    background: var(--accent-bg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--accent); font-family: 'Inter', sans-serif;
+    text-decoration: none; cursor: pointer; transition: all 0.2s;
+  }
+  .ret-btn-primary-outline:hover { background: var(--accent); color: #fff; }
+  .ret-btn-neutral-outline {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--text2); font-family: 'Inter', sans-serif;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .ret-btn-neutral-outline:hover { border-color: var(--muted2); }
+  .ret-btn-danger-outline {
+    background: var(--surface); border: 1px solid var(--down);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--down); font-family: 'Inter', sans-serif;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .ret-btn-danger-outline:hover { background: var(--down-bg); }
+  .ret-btn-small {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 14px; font-size: 0.8rem;
+    font-weight: 600; color: var(--accent2); cursor: pointer;
+    font-family: 'Inter', sans-serif; transition: border-color 0.2s;
+  }
+  .ret-btn-small:hover { border-color: var(--accent2); }
+
   .ret-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   .ret-field { display: flex; flex-direction: column; gap: 4px; }
   .ret-field-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .ret-field-value { font-size: 0.92rem; color: var(--text); font-weight: 500; }
-  .ret-field-value.ret-accent { color: var(--accent); font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 1.1rem; }
-  .ret-badge {
-    display: inline-block; margin-left: 8px; font-size: 0.68rem;
-    padding: 2px 8px; border-radius: 10px; font-weight: 600;
-  }
-  .ret-badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .ret-field-value.ret-accent { color: var(--accent); font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 1.2rem; }
 
-  .ret-btn-small {
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 7px 14px; font-size: 0.8rem;
-    font-weight: 600; color: var(--accent); cursor: pointer;
-    font-family: 'Inter', sans-serif; transition: border-color 0.2s;
+  .ret-badge { display: inline-block; margin-left: 8px; font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .ret-badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .ret-badge-interest { background: #FFFBEB; color: #D97706; border: 1px solid #FDE68A; }
+
+  .ret-group-block { margin-bottom: 18px; }
+  .ret-group-block:last-child { margin-bottom: 0; }
+  .ret-group-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 12px; background: var(--accent-bg); border-radius: 8px;
+    font-size: 0.8rem; font-weight: 700; color: var(--accent); margin-bottom: 8px;
   }
-  .ret-btn-small:hover { border-color: var(--accent); }
+  .ret-group-total { font-family: 'Roboto Mono', monospace; }
 
   .ret-summary-row { display: flex; gap: 24px; margin-bottom: 18px; flex-wrap: wrap; }
   .ret-summary-item { display: flex; flex-direction: column; gap: 4px; }
   .ret-summary-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
   .ret-summary-value { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--text); font-size: 1rem; }
 
-  .ret-inline-form {
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 10px; padding: 16px; margin-bottom: 16px;
-  }
+  .ret-inline-form { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
   .ret-inline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
   .ret-list { display: flex; flex-direction: column; gap: 2px; }
-  .ret-list-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 10px 0; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap;
-  }
+  .ret-list-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
   .ret-list-row:last-child { border-bottom: none; }
   .ret-list-primary { font-weight: 600; color: var(--text); font-size: 0.9rem; }
   .ret-list-secondary { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
   .ret-list-actions { display: flex; gap: 10px; align-items: center; }
-  .ret-link-btn {
-    background: none; border: none; color: var(--accent); font-size: 0.78rem;
-    cursor: pointer; font-family: 'Inter', sans-serif; padding: 0;
-  }
-  .ret-link-btn.ret-link-danger { color: var(--muted); }
-  .ret-link-btn.ret-link-danger:hover { color: var(--down); }
+  .ret-link-btn { background: none; border: none; color: var(--accent); font-size: 0.8rem; font-weight: 700; cursor: pointer; font-family: 'Inter', sans-serif; padding: 0; text-decoration: none; }
+  .ret-link-btn:hover { text-decoration: underline; }
+  .ret-link-btn.ret-link-danger { color: var(--down); }
+  .ret-link-btn.ret-link-danger:hover { color: var(--down); text-decoration: underline; }
 
   .ret-empty { color: var(--muted); font-size: 0.85rem; line-height: 1.6; padding: 8px 0; }
+  .ret-select { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem; }
 
-  .ret-select {
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 8px 12px; color: var(--text);
-    font-family: 'Inter', sans-serif; font-size: 0.85rem;
-  }
+  /* ── Activity feed — matches dashboard's colour-coded badges ── */
+  .ret-activity-list { display: flex; flex-direction: column; }
+  .ret-activity-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .ret-activity-row:last-child { border-bottom: none; }
+  .ret-activity-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .ret-activity-content { flex: 1; }
+  .ret-activity-desc { font-size: 0.875rem; color: var(--text); line-height: 1.4; }
+  .ret-activity-time { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+  .ret-activity-event { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
+  .badge-created  .ret-activity-event { color: var(--up); }
+  .badge-updated  .ret-activity-event { color: var(--accent); }
+  .badge-document .ret-activity-event { color: #3B82F6; }
+  .badge-archived .ret-activity-event { color: #D97706; }
+  .badge-restored .ret-activity-event { color: var(--up); }
+  .badge-default  .ret-activity-event { color: var(--muted); }
+  .ret-activity-dot.badge-created  { background: var(--up); }
+  .ret-activity-dot.badge-updated  { background: var(--accent); }
+  .ret-activity-dot.badge-document { background: #3B82F6; }
+  .ret-activity-dot.badge-archived { background: #D97706; }
+  .ret-activity-dot.badge-restored { background: var(--up); }
+  .ret-activity-dot.badge-default  { background: var(--muted); }
 
   @media (max-width: 600px) {
     .ret-detail-grid, .ret-inline-grid { grid-template-columns: 1fr; }

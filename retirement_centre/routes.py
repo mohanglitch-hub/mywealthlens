@@ -23,11 +23,12 @@ from .models import (
     RetirementScheme, RetirementContribution, RetirementSchemeNominee,
     RetirementDocument, SchemeType, SchemeStatus, GrowthMethod,
     ContributionPreference, NPSTier, NomineeRelation, RetirementDocumentType,
+    scheme_type_to_category, category_to_slug,
 )
 from .utils import (
     format_inr, format_date, financial_year_bounds, mask_account_number,
     save_document_file, delete_document_file, secure_file_path,
-    is_previewable, get_preview_mimetype,
+    is_previewable, get_preview_mimetype, current_financial_year,
 )
 
 
@@ -159,7 +160,7 @@ def dashboard():
     data["documents_count"] = vault["total"]
 
     # Recent Activity feed — last 7 events across all schemes.
-    data["recent_activity"] = services.recent_activity(current_user.id, limit=7)
+    data["recent_activity"] = services.recent_activity(current_user.id, limit=5)
 
     return render_template(
         "retirement_centre/dashboard.html",
@@ -174,8 +175,16 @@ def dashboard():
 
 # ── Add / Edit Scheme (shared form) ───────────────────────────────────────────
 
-def _form_template_context(is_edit, scheme, values):
-    """Shared kwargs for rendering scheme_form.html in either mode."""
+def _form_template_context(is_edit, scheme, values, back_category=None):
+    """
+    Shared kwargs for rendering scheme_form.html in either mode.
+    back_category (a display category name, or None) drives the
+    breadcrumb and Cancel button destination — so arriving from a
+    category page keeps you in that category's context instead of
+    always dropping you back at the main dashboard.
+    """
+    from .models import category_to_slug
+
     return dict(
         is_edit=is_edit,
         scheme=scheme,
@@ -187,6 +196,8 @@ def _form_template_context(is_edit, scheme, values):
         contribution_preferences=ContributionPreference.ALL,
         nps_tiers=NPSTier.ALL,
         field_groups=SchemeType.FIELD_GROUPS,
+        back_category=back_category,
+        back_slug=category_to_slug(back_category) if back_category else None,
     )
 
 
@@ -194,8 +205,13 @@ def _form_template_context(is_edit, scheme, values):
 @login_required
 def add_scheme():
     """Add a new retirement scheme. Supports ?type=PPF to pre-select
-    a scheme type when arriving from a category card (Phase F,
-    Section 2)."""
+    a scheme type when arriving from a category card — the same
+    query param also drives the breadcrumb/Cancel back-context, so
+    Cancel returns to that category page instead of the dashboard."""
+    preset_type = request.args.get("type", "")
+    back_category = (scheme_type_to_category(preset_type)
+                     if preset_type in SchemeType.ALL else None)
+
     if request.method == "POST":
         form = request.form.to_dict()
         errors = validators.validate_scheme(form)
@@ -204,7 +220,7 @@ def add_scheme():
                 flash(e, "error")
             return render_template(
                 "retirement_centre/scheme_form.html",
-                **_form_template_context(False, None, form)
+                **_form_template_context(False, None, form, back_category)
             )
 
         scheme, error = services.create_scheme(_db(), current_user.id, form)
@@ -216,20 +232,22 @@ def add_scheme():
         return redirect(url_for("retirement_centre.scheme_detail",
                                 scheme_id=scheme.id))
 
-    preset_type = request.args.get("type", "")
     initial_values = {"scheme_type": preset_type} if preset_type in SchemeType.ALL else {}
 
     return render_template(
         "retirement_centre/scheme_form.html",
-        **_form_template_context(False, None, initial_values)
+        **_form_template_context(False, None, initial_values, back_category)
     )
 
 
 @retirement_bp.route("/scheme/<int:scheme_id>/edit", methods=["GET", "POST"])
 @login_required
 def edit_scheme(scheme_id):
-    """Edit an existing scheme (active or archived) — reuses the add form."""
+    """Edit an existing scheme (active or archived) — reuses the add
+    form. Category context is always derivable from the scheme's own
+    type, so this never needs a query param to know where "back" is."""
     scheme = _get_scheme_or_404(scheme_id)
+    back_category = scheme_type_to_category(scheme.scheme_type)
 
     if request.method == "POST":
         form = request.form.to_dict()
@@ -239,7 +257,7 @@ def edit_scheme(scheme_id):
                 flash(e, "error")
             return render_template(
                 "retirement_centre/scheme_form.html",
-                **_form_template_context(True, scheme, form)
+                **_form_template_context(True, scheme, form, back_category)
             )
 
         updated, error = services.update_scheme(
@@ -255,7 +273,7 @@ def edit_scheme(scheme_id):
 
     return render_template(
         "retirement_centre/scheme_form.html",
-        **_form_template_context(True, scheme, _scheme_to_values(scheme))
+        **_form_template_context(True, scheme, _scheme_to_values(scheme), back_category)
     )
 
 
@@ -266,39 +284,61 @@ def edit_scheme(scheme_id):
 def scheme_detail(scheme_id):
     """
     Full detail view for a single scheme: overview, balance & growth,
-    contribution history (with Financial Year filter), balance history,
-    nominees, and maturity/target-retirement information.
+    contribution history (Financial Year filter, defaulting to the
+    current FY, plus an optional grouping view), nominees, and
+    maturity/target-retirement information.
     """
     data = services.get_scheme_with_related(scheme_id, current_user.id)
     if not data:
         abort(404)
     scheme = data["scheme"]
 
+    # FY filter: defaults to the CURRENT financial year unless the
+    # user explicitly picks "All Years" (fy=all) or a specific past
+    # year (fy=<year>).
     fy_arg = request.args.get("fy", "")
-    fy_filter = int(fy_arg) if fy_arg.isdigit() else None
+    if fy_arg == "all":
+        fy_filter = None
+    elif fy_arg.isdigit():
+        fy_filter = int(fy_arg)
+    else:
+        fy_filter = current_financial_year()
+
+    group_by = request.args.get("group_by", "")
 
     contributions   = services.get_contributions_for_scheme(scheme_id, fy_filter)
+    grouped_contributions = services.group_contributions(contributions, group_by)
     available_years = services.available_financial_years(scheme_id)
     fy_options = [
         {"year": y, "label": f"FY {y}-{str(y + 1)[-2:]}"}
         for y in available_years
     ]
+    # Ensure the current FY is always selectable, even with 0
+    # contributions yet — it's the default view, so it must appear.
+    if current_financial_year() not in available_years:
+        cy = current_financial_year()
+        fy_options.insert(0, {"year": cy, "label": f"FY {cy}-{str(cy + 1)[-2:]}"})
     summary        = services.contribution_summary(scheme_id)
-    balance_history = services.get_balance_history(scheme_id)
     nominees        = scheme.nominees.order_by(
         RetirementSchemeNominee.created_at.asc()).all()
     documents       = services.get_documents_for_scheme(scheme_id)
     maturity        = services.compute_maturity_info(scheme)
+    category        = scheme_type_to_category(scheme.scheme_type)
+    category_slug   = category_to_slug(category) if category else None
 
     return render_template(
         "retirement_centre/scheme_detail.html",
         scheme=scheme,
+        category=category,
+        category_slug=category_slug,
         timeline=data["timeline"],
         contributions=contributions,
+        grouped_contributions=grouped_contributions,
+        group_by=group_by,
         fy_options=fy_options,
         fy_filter=fy_filter,
+        fy_arg=fy_arg,
         summary=summary,
-        balance_history=balance_history,
         nominees=nominees,
         nominee_relations=NomineeRelation.ALL,
         documents=documents,
@@ -351,23 +391,6 @@ def delete_contribution(contribution_id):
     success, error = services.delete_contribution(
         _db(), contribution, current_user.id)
     flash(error, "error") if error else flash("Contribution deleted.", "success")
-    return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
-
-
-# ── Balance Snapshots (Phase C) ───────────────────────────────────────────────
-
-@retirement_bp.route("/scheme/<int:scheme_id>/balance/update", methods=["POST"])
-@login_required
-def update_balance(scheme_id):
-    scheme = _get_scheme_or_404(scheme_id)
-    form = request.form.to_dict()
-    errors = validators.validate_balance_update(form)
-    if errors:
-        for e in errors:
-            flash(e, "error")
-    else:
-        _, error = services.update_balance(_db(), scheme, current_user.id, form)
-        flash(error, "error") if error else flash("Balance updated.", "success")
     return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
 
 

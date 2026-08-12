@@ -80,6 +80,22 @@ def run_migration():
                     conn.commit()
                     print(f"  ✓ {col_name} (added)")
 
+        print("\nStep 2b: Checking entry_type column on retirement_contribution...")
+        with db.engine.connect() as conn:
+            contrib_cols = {
+                row[1] for row in
+                conn.execute(db.text("PRAGMA table_info(retirement_contribution)"))
+            }
+            if "entry_type" in contrib_cols:
+                print("  ✓ entry_type (already present)")
+            else:
+                conn.execute(db.text(
+                    "ALTER TABLE retirement_contribution ADD COLUMN "
+                    "entry_type VARCHAR(20) NOT NULL DEFAULT 'Deposit'"
+                ))
+                conn.commit()
+                print("  ✓ entry_type (added, existing rows default to 'Deposit')")
+
         print("\nStep 3: Checking Document Vault column on retirement_document...")
         with db.engine.connect() as conn:
             doc_cols = {

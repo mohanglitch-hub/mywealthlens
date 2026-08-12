@@ -18,8 +18,11 @@ from .models import (
     RetirementScheme, RetirementContribution, RetirementBalanceSnapshot,
     RetirementSchemeNominee, RetirementDocument, RetirementTimeline,
     RetirementTimelineEvent, SchemeType, SchemeStatus, GrowthMethod,
+    ContributionEntryType,
 )
-from .utils import current_financial_year, financial_year_bounds
+from .utils import (current_financial_year, financial_year_bounds,
+                    fy_quarter_label, fy_half_label, month_label,
+                    financial_year_for_date)
 
 
 # ── Form Parsing Helpers ──────────────────────────────────────────────────────
@@ -459,10 +462,11 @@ def _add_years(d, years):
 
 def add_contribution(db, scheme, user_id, form):
     """
-    Record a new contribution AND auto-add it to current_balance
-    (Phase F, Section 4). The next manual "Update Balance" fully
-    overrides current_balance (see update_balance below), so this
-    running total never double-counts against a later verified figure.
+    Record a new contribution (Deposit or Interest Credited) AND
+    auto-add it to current_balance. Both entry types credit the
+    balance the same way — the distinction only matters for keeping
+    'contribution' totals honest (see contribution_summary below),
+    since interest is growth, not money the user put in.
     """
     if scheme.user_id != user_id:
         return None, "You do not have permission to modify this scheme."
@@ -472,9 +476,13 @@ def add_contribution(db, scheme, user_id, form):
     if not c_date or amount is None or amount <= 0:
         return None, "Invalid contribution data."
 
+    entry_type = form.get("entry_type") or ContributionEntryType.DEPOSIT
+    if entry_type not in ContributionEntryType.ALL:
+        entry_type = ContributionEntryType.DEPOSIT
+
     contribution = RetirementContribution(
         scheme_id=scheme.id, user_id=user_id,
-        contribution_date=c_date, amount=amount,
+        contribution_date=c_date, amount=amount, entry_type=entry_type,
         note=(form.get("note") or "").strip() or None,
     )
     db.session.add(contribution)
@@ -482,10 +490,11 @@ def add_contribution(db, scheme, user_id, form):
     scheme.current_balance = max(0, (scheme.current_balance or 0) + amount)
     scheme.updated_at = datetime.utcnow()
 
+    verb = "Interest credited" if entry_type == ContributionEntryType.INTEREST else "Contribution"
     timeline = RetirementTimeline(
         scheme_id=scheme.id, user_id=user_id,
         event_type=RetirementTimelineEvent.CONTRIBUTION_ADDED,
-        description=(f"Contribution of ₹{amount:,.0f} recorded "
+        description=(f"{verb} of ₹{amount:,.0f} recorded "
                      f"(balance updated to ₹{scheme.current_balance:,.0f})"),
     )
     db.session.add(timeline)
@@ -507,6 +516,10 @@ def update_contribution(db, contribution, user_id, form):
     if not c_date or amount is None or amount <= 0:
         return None, "Invalid contribution data."
 
+    entry_type = form.get("entry_type") or ContributionEntryType.DEPOSIT
+    if entry_type not in ContributionEntryType.ALL:
+        entry_type = ContributionEntryType.DEPOSIT
+
     scheme = contribution.scheme
     delta = amount - contribution.amount
     scheme.current_balance = max(0, (scheme.current_balance or 0) + delta)
@@ -514,6 +527,7 @@ def update_contribution(db, contribution, user_id, form):
 
     contribution.contribution_date = c_date
     contribution.amount = amount
+    contribution.entry_type = entry_type
     contribution.note = (form.get("note") or "").strip() or None
     db.session.commit()
     return contribution, None
@@ -558,72 +572,93 @@ def available_financial_years(scheme_id):
 
 
 def contribution_summary(scheme_id):
-    """Current-FY total, all-time total, and count — computed directly
-    from RetirementContribution rows, never from current_balance,
-    interest, or projections (Section 11/12 of spec)."""
+    """
+    Current-FY total, all-time total, and count — computed directly
+    from RetirementContribution rows, filtered to entry_type='Deposit'
+    only. Interest-credit entries still add to current_balance, but
+    are excluded here so 'contributions' never gets inflated by
+    growth the user didn't actually deposit.
+    """
     start, end = financial_year_bounds(current_financial_year())
 
     total_recorded = (RetirementContribution.query
-                       .filter_by(scheme_id=scheme_id)
+                       .filter_by(scheme_id=scheme_id,
+                                 entry_type=ContributionEntryType.DEPOSIT)
                        .with_entities(func.sum(RetirementContribution.amount))
                        .scalar()) or 0
 
     current_fy_total = (RetirementContribution.query
-                        .filter_by(scheme_id=scheme_id)
+                        .filter_by(scheme_id=scheme_id,
+                                  entry_type=ContributionEntryType.DEPOSIT)
                         .filter(RetirementContribution.contribution_date >= start,
                                RetirementContribution.contribution_date <= end)
                         .with_entities(func.sum(RetirementContribution.amount))
                         .scalar()) or 0
 
-    count = RetirementContribution.query.filter_by(scheme_id=scheme_id).count()
+    count = (RetirementContribution.query
+             .filter_by(scheme_id=scheme_id,
+                       entry_type=ContributionEntryType.DEPOSIT)
+             .count())
+
+    total_interest = (RetirementContribution.query
+                      .filter_by(scheme_id=scheme_id,
+                                entry_type=ContributionEntryType.INTEREST)
+                      .with_entities(func.sum(RetirementContribution.amount))
+                      .scalar()) or 0
 
     return {
         "current_fy_total": current_fy_total,
         "total_recorded":   total_recorded,
         "count":             count,
+        "total_interest":    total_interest,
     }
+
+
+def group_contributions(contributions, group_by):
+    """
+    Groups a list of RetirementContribution rows for the Contribution
+    History view toggle. Returns a list of {label, total, items}
+    dicts, or None if group_by isn't a recognized bucket (caller
+    should render the flat list instead). Groups appear in the same
+    order contributions arrive in (newest first, since that's how
+    get_contributions_for_scheme already sorts them).
+    """
+    label_fn = {
+        "month":   month_label,
+        "quarter": fy_quarter_label,
+        "half":    fy_half_label,
+        "year":    financial_year_for_date,
+    }.get(group_by)
+    if not label_fn:
+        return None
+
+    groups = {}
+    order = []
+    for c in contributions:
+        label = label_fn(c.contribution_date)
+        if label not in groups:
+            # NOTE: key is "entries", not "items" — "items" collides
+            # with dict.items(), the built-in method. Jinja resolves
+            # g.items to that real method before it ever checks dict
+            # keys, so a "items" key would silently be unreachable
+            # from templates and break iteration.
+            groups[label] = {"label": label, "total": 0, "entries": []}
+            order.append(label)
+        groups[label]["total"] += c.amount
+        groups[label]["entries"].append(c)
+
+    return [groups[l] for l in order]
 
 
 # ── Balance Snapshots (Phase C, Part 3) ───────────────────────────────────────
 
-def update_balance(db, scheme, user_id, form):
-    """
-    Record a new balance: creates a RetirementBalanceSnapshot (preserving
-    history) AND updates the scheme's current_balance/balance_updated_at.
-    The previous balance is never destroyed — it lives on in the
-    snapshot history (Section 17 of spec).
-    """
-    if scheme.user_id != user_id:
-        return None, "You do not have permission to modify this scheme."
-
-    new_balance  = _parse_float_c(form.get("new_balance"))
-    balance_date = _parse_date_c(form.get("balance_date"))
-    note = (form.get("balance_note") or "").strip() or None
-
-    if new_balance is None or new_balance < 0:
-        return None, "Please enter a valid, non-negative balance."
-    if not balance_date:
-        return None, "Please enter a valid balance date."
-
-    snapshot = RetirementBalanceSnapshot(
-        scheme_id=scheme.id, balance=new_balance,
-        balance_date=balance_date, note=note,
-    )
-    db.session.add(snapshot)
-
-    scheme.current_balance    = new_balance
-    scheme.balance_updated_at = balance_date
-    scheme.updated_at         = datetime.utcnow()
-
-    timeline = RetirementTimeline(
-        scheme_id=scheme.id, user_id=user_id,
-        event_type=RetirementTimelineEvent.BALANCE_UPDATED,
-        description=f"Balance updated to ₹{new_balance:,.0f}",
-    )
-    db.session.add(timeline)
-    db.session.commit()
-    return snapshot, None
-
+# ── Balance Snapshots (legacy — Update Balance removed) ──────────────────────
+# update_balance() was removed at the user's request: with Interest
+# Credited entries now available in Contribution History, interest
+# gets logged as its own entry rather than via a separate balance
+# override. get_balance_history() is kept for any historical snapshot
+# rows that already exist from before this change — nothing new
+# creates snapshots going forward.
 
 def get_balance_history(scheme_id):
     return (RetirementBalanceSnapshot.query
