@@ -457,12 +457,13 @@ def set_addons(db, policy, user_id, addon_names):
 def save_document_metadata(db, policy, user_id,
                            doc_type, original_name,
                            stored_name, file_path,
-                           file_size=None, notes=None):
+                           file_size=None, notes=None, title=None):
     """Record document metadata after file has been saved locally."""
     doc = InsuranceDocument(
         policy_id     = policy.id,
         user_id       = user_id,
         doc_type      = doc_type,
+        title         = title,
         original_name = original_name,
         stored_name   = stored_name,
         file_path     = file_path,
@@ -928,3 +929,57 @@ class InsuranceStatisticsService:
             "recent_policies": get_recent_policies(self.user_id, limit=5),
             "has_policies":    self.active_count() > 0,
         }
+# ── Document Vault Services ──────────────────────────────────────────────────
+# Add these two functions to services.py, right after delete_document().
+
+def get_vault_documents(user_id, q=None, category=None, doc_type=None):
+    """
+    All documents across every one of the user's insurance policies,
+    joined with policy info for filtering/display. Attaches ._policy
+    to each document (mirrors the existing pattern already used in
+    routes.py's document_vault route).
+    """
+    query = InsuranceDocument.query.filter_by(user_id=user_id)
+    if doc_type:
+        query = query.filter(InsuranceDocument.doc_type == doc_type)
+    docs = query.order_by(InsuranceDocument.uploaded_at.desc()).all()
+
+    result = []
+    for d in docs:
+        policy = InsurancePolicy.query.filter_by(
+            id=d.policy_id, user_id=user_id).first()
+        d._policy = policy
+
+        if category and (not policy or policy.category != category):
+            continue
+
+        if q:
+            ql = q.lower()
+            name = (d.title or d.original_name or "").lower()
+            hay = " ".join(filter(None, [
+                name,
+                (d.doc_type or "").lower(),
+                (policy.insurer if policy else "").lower(),
+                (policy.display_type if policy else "").lower(),
+            ]))
+            if ql not in hay:
+                continue
+
+        result.append(d)
+    return result
+
+
+def vault_summary(user_id):
+    """Total document count + per-category counts for the Vault's
+    summary cards. Never fabricated — counts real rows only."""
+    docs = InsuranceDocument.query.filter_by(user_id=user_id).all()
+    by_category = {cat: 0 for cat in InsuranceCategory.ALL}
+    for d in docs:
+        policy = InsurancePolicy.query.filter_by(
+            id=d.policy_id, user_id=user_id).first()
+        if policy and policy.category in by_category:
+            by_category[policy.category] += 1
+    return {
+        "total": len(docs),
+        "by_category": [{"category": c, "count": n} for c, n in by_category.items()],
+    }
