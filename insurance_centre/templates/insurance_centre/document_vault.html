@@ -13,129 +13,174 @@
   <div class="ic-header">
     <div>
       <h1 class="ic-title">📁 Document Vault</h1>
-      <p class="ic-subtitle">All insurance documents stored locally on your device.</p>
+      <p class="ic-subtitle">Securely store and manage your insurance-related documents in one place.</p>
     </div>
+    {% if upload_policies %}
+    <button type="button" class="ic-btn-primary" onclick="toggleVaultUpload()">+ Upload Document</button>
+    {% endif %}
   </div>
 
-  {% if documents %}
-  <div style="font-size:0.82rem; color:var(--muted);">
-    {{ documents|length }} document{{ 's' if documents|length != 1 else '' }} stored
-  </div>
+  {% if not upload_policies %}
+    <div class="ic-empty-state">
+      <div class="ic-empty-icon">📁</div>
+      <h2 class="ic-empty-title">Add an insurance policy first</h2>
+      <p class="ic-empty-desc">Documents belong to a specific policy — add your first policy before uploading documents.</p>
+      <a href="/insurance-centre/add" class="ic-btn-primary ic-btn-lg">+ Add Policy</a>
+    </div>
+  {% else %}
 
-  <!-- Desktop table -->
-  <div class="dv-table-wrap">
-    <table class="dv-table">
-      <thead>
-        <tr>
-          <th>Policy</th>
-          <th>Document Type</th>
-          <th>File Name</th>
-          <th>Upload Date</th>
-          <th>Size</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for doc in documents %}
-        {% set policy = doc._policy %}
-        <tr>
-          <td>
-            {% if policy %}
-            <div class="dv-policy-name">
-              {{ category_icons.get(policy.category, '📋') }}
-              <a href="/insurance-centre/policy/{{ policy.id }}" class="dv-link">
-                {{ policy.display_type }}
-              </a>
-            </div>
-            <div class="dv-policy-insurer">{{ policy.insurer }}</div>
-            {% else %}
-            <span style="color:var(--muted);">—</span>
-            {% endif %}
-          </td>
-          <td><span class="dv-type-badge">{{ doc.doc_type }}</span></td>
-          <td class="dv-filename">
-            <span>{{ '🖼️' if doc.original_name.lower().endswith(('.jpg','.jpeg','.png')) else '📄' }}</span>
-            {{ doc.display_name }}
-            {% if doc.notes %}<div class="dv-notes">{{ doc.notes }}</div>{% endif %}
-          </td>
-          <td class="dv-date">{{ format_date(doc.uploaded_at) }}</td>
-          <td class="dv-size">{{ doc.file_size_display }}</td>
-          <td>
-            <div class="dv-actions">
-              {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
-              {% if ext in ['pdf','jpg','jpeg','png'] %}
-              <a href="/insurance-centre/documents/{{ doc.id }}/preview"
-                 target="_blank" class="dv-btn dv-btn-preview">View</a>
-              {% endif %}
-              <a href="/insurance-centre/documents/{{ doc.id }}/download"
-                 class="dv-btn dv-btn-download">Download</a>
-              <button class="dv-btn dv-btn-delete"
-                onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.display_name }}')">
-                Delete
-              </button>
-              <form method="POST"
-                    action="/insurance-centre/documents/{{ doc.id }}/delete"
-                    id="delDocForm{{ doc.id }}" style="display:none;">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              </form>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-
-  <!-- Mobile cards -->
-  <div class="dv-cards-mobile">
-    {% for doc in documents %}
-    {% set policy = doc._policy %}
-    <div class="dv-card">
-      <div class="dv-card-top">
-        <span class="dv-type-badge">{{ doc.doc_type }}</span>
-        <span class="dv-size">{{ doc.file_size_display }}</span>
+  <!-- ── Upload Form ── -->
+  <div id="vaultUploadForm" class="ic-card" style="display:none;">
+    <div class="ic-card-title">Upload Document</div>
+    <form method="POST" action="/insurance-centre/documents/upload" enctype="multipart/form-data" id="vaultUploadFormEl">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="ic-form-grid-2">
+        <div class="ic-field">
+          <label class="ic-label">Insurance Policy <span class="ic-required">*</span></label>
+          <select name="policy_id" class="ic-select" required>
+            <option value="">— Select policy —</option>
+            {% for p in upload_policies %}
+              <option value="{{ p.id }}" {{ 'selected' if preselect_policy_id == p.id }}>{{ p.display_type }} — {{ p.insurer }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Document Type <span class="ic-required">*</span></label>
+          <select name="doc_type" class="ic-select" required>
+            <option value="">— Select Type —</option>
+            {% for dt in doc_types %}
+              <option value="{{ dt }}">{{ dt }}</option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
-      <div class="dv-filename" style="margin:8px 0;">{{ doc.display_name }}</div>
-      {% if policy %}
-      <div class="dv-policy-insurer" style="margin-bottom:4px;">
-        {{ category_icons.get(policy.category, '📋') }}
-        <a href="/insurance-centre/policy/{{ policy.id }}" class="dv-link">
-          {{ policy.insurer }} — {{ policy.display_type }}
-        </a>
+      <div class="ic-form-grid-2">
+        <div class="ic-field">
+          <label class="ic-label">Document Name / Title (optional)</label>
+          <input type="text" name="doc_title" class="ic-input" placeholder="e.g. LIC Term Policy Document" />
+        </div>
+        <div class="ic-field">
+          <label class="ic-label">Choose File <span class="ic-required">*</span></label>
+          <input type="file" name="document" class="ic-input" required
+                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+                 onchange="showVaultFileInfo(this)" />
+          <div id="vaultFileInfo" style="font-size:0.75rem; color:var(--muted); margin-top:4px;"></div>
+        </div>
+      </div>
+      <div class="ic-field">
+        <label class="ic-label">Description (optional)</label>
+        <input type="text" name="doc_notes" class="ic-input" placeholder="e.g. Original policy document from LIC" />
+      </div>
+      <div class="doc-upload-hint">
+        Allowed: PDF, JPG, PNG, DOC, DOCX, XLS, XLSX · Max size: 25 MB · Documents are stored locally on your computer, never uploaded anywhere.
+      </div>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button type="submit" class="ic-btn-primary" style="width:auto; padding:10px 24px;" id="vaultUploadSubmitBtn">Upload</button>
+        <button type="button" class="ic-btn-secondary" onclick="toggleVaultUpload()">Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- ── Summary Cards ── -->
+  <div class="ic-summary-grid">
+    <div class="ic-stat-card">
+      <div class="ic-stat-label">Total Documents</div>
+      <div class="ic-stat-value">{{ summary.total }}</div>
+    </div>
+    {% for c in summary.by_category %}
+      {% if c.count > 0 %}
+      <div class="ic-stat-card">
+        <div class="ic-stat-label">{{ category_icons.get(c.category, '📋') }} {{ c.category }}</div>
+        <div class="ic-stat-value">{{ c.count }}</div>
       </div>
       {% endif %}
-      <div class="dv-date" style="margin-bottom:10px;">{{ format_date(doc.uploaded_at) }}</div>
-      <div class="dv-actions">
-        {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
-        {% if ext in ['pdf','jpg','jpeg','png'] %}
-        <a href="/insurance-centre/documents/{{ doc.id }}/preview"
-           target="_blank" class="dv-btn dv-btn-preview">View</a>
-        {% endif %}
-        <a href="/insurance-centre/documents/{{ doc.id }}/download"
-           class="dv-btn dv-btn-download">Download</a>
-        <button class="dv-btn dv-btn-delete"
-          onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.display_name }}')">
-          Delete
-        </button>
-      </div>
-    </div>
     {% endfor %}
   </div>
 
+  <!-- ── Search & Filter ── -->
+  <form method="GET" action="/insurance-centre/documents" class="ic-filter-bar">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search by document name, policy, insurer, type..." class="ic-search-input" />
+    <select name="category" class="ic-select" onchange="this.form.submit()">
+      <option value="">All Categories</option>
+      {% for c in categories %}<option value="{{ c }}" {{ 'selected' if category == c }}>{{ c }}</option>{% endfor %}
+    </select>
+    <select name="doc_type" class="ic-select" onchange="this.form.submit()">
+      <option value="">All Document Types</option>
+      {% for dt in doc_types %}<option value="{{ dt }}" {{ 'selected' if doc_type == dt }}>{{ dt }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="ic-search-btn">🔍 Search</button>
+    {% if q or category or doc_type %}
+      <a href="/insurance-centre/documents" class="ic-clear-link">Clear Filters</a>
+    {% endif %}
+  </form>
+
+  <!-- ── Documents, grouped by Category then Policy ── -->
+  {% if grouped_documents %}
+    {% for group in grouped_documents %}
+    {% set cat_theme = {
+      'Life Insurance': 'blue',
+      'Health Insurance': 'pink',
+      'Motor Insurance': 'teal',
+      'Property Insurance': 'amber',
+      'General Insurance': 'purple',
+    }.get(group.category, 'teal') %}
+    <div class="ic-doc-category-block ic-cat-{{ cat_theme }}">
+      <div class="ic-doc-category-heading">
+        <span class="ic-doc-category-icon">{{ category_icons.get(group.category, '📋') }}</span>
+        <span>{{ group.category }}</span>
+      </div>
+
+      {% for pg in group.policy_groups %}
+      <div class="ic-doc-policy-block">
+        <div class="ic-doc-policy-heading">
+          {% if pg.policy %}
+            {{ pg.policy.display_type }} <span class="ic-doc-policy-sub">— {{ pg.policy.insurer }}</span>
+          {% else %}
+            <span class="ic-doc-policy-sub">Policy no longer available</span>
+          {% endif %}
+        </div>
+        <div class="dv-list">
+          {% for doc in pg.documents %}
+          <div class="dv-list-row">
+            <div>
+              <span class="dv-list-primary">{{ doc.display_name }}</span>
+              <span class="dv-list-secondary">{{ doc.doc_type }} · {{ format_date(doc.uploaded_at) }} · {{ doc.file_size_display }}</span>
+            </div>
+            <div class="dv-list-actions">
+              {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+              {% if ext in ['pdf','jpg','jpeg','png'] %}
+              <a href="/insurance-centre/documents/{{ doc.id }}/preview" target="_blank" class="dv-btn dv-btn-preview">View</a>
+              {% endif %}
+              <a href="/insurance-centre/documents/{{ doc.id }}/download" class="dv-btn dv-btn-download">Download</a>
+              <button class="dv-btn dv-btn-delete" onclick="confirmDeleteDocVault({{ doc.id }}, '{{ doc.display_name }}')">Delete</button>
+              <form method="POST" action="/insurance-centre/documents/{{ doc.id }}/delete"
+                    id="delDocVaultForm{{ doc.id }}" style="display:none;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="next" value="vault" />
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endfor %}
   {% else %}
-  <div class="ic-empty-state">
-    <div class="ic-empty-icon">📁</div>
-    <h2 class="ic-empty-title">No insurance documents uploaded yet</h2>
-    <p class="ic-empty-desc">
-      Open any policy and upload documents such as policy PDFs,
-      premium receipts and renewal notices.
-    </p>
-    <a href="/insurance-centre/policies" class="ic-btn-primary ic-btn-lg">
-      View Policies
-    </a>
-  </div>
+    <div class="ic-empty-state">
+      <div class="ic-empty-icon">📁</div>
+      {% if q or category or doc_type %}
+      <h2 class="ic-empty-title">No documents match your filters</h2>
+      <p class="ic-empty-desc">Try a different search term or clear your filters.</p>
+      {% else %}
+      <h2 class="ic-empty-title">No insurance documents uploaded yet</h2>
+      <p class="ic-empty-desc">Upload policy PDFs, premium receipts and renewal notices to keep them organized in one place.</p>
+      <button type="button" class="ic-btn-primary ic-btn-lg" onclick="toggleVaultUpload()">+ Upload Document</button>
+      {% endif %}
+    </div>
   {% endif %}
 
+  {% endif %}
 </div>
 
 <!-- Modal -->
@@ -153,49 +198,71 @@
 
 <style>
   .ic-wrap          { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
-  .ic-breadcrumb    { display:flex; align-items:center; gap:8px; }
-  .ic-breadcrumb-link { color:var(--text); text-decoration:none; font-size:0.92rem; font-weight:600; }
+  .ic-breadcrumb    { font-size:0.95rem; }
+  .ic-breadcrumb-link { color:var(--accent2, var(--accent)); text-decoration:none; font-weight:600; }
   .ic-breadcrumb-link:hover { color:var(--accent); }
-  .ic-breadcrumb-sep  { color:var(--text2); font-weight:600; }
+  .ic-breadcrumb-sep  { color:var(--text2); font-weight:600; margin:0 6px; }
   .ic-breadcrumb-current { font-size:0.92rem; color:var(--text); font-weight:700; }
   .ic-header        { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; }
   .ic-title         { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
   .ic-subtitle      { font-size:0.875rem; color:var(--muted); }
-  .ic-btn-primary   { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:0.875rem; font-weight:700; text-decoration:none; display:inline-block; transition:opacity 0.2s; }
+  .ic-btn-primary   { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 20px; font-size:0.875rem; font-weight:700; text-decoration:none; display:inline-block; cursor:pointer; font-family:var(--font-ui); transition:opacity 0.2s; }
   .ic-btn-primary:hover { opacity:0.88; }
+  .ic-btn-secondary { background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px; padding:10px 18px; font-size:0.82rem; font-weight:500; text-decoration:none; cursor:pointer; font-family:var(--font-ui); transition:all 0.2s; }
+  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
   .ic-btn-lg        { padding:12px 28px; font-size:0.95rem; }
   .ic-empty-state   { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:60px 32px; text-align:center; display:flex; flex-direction:column; align-items:center; gap:12px; }
   .ic-empty-icon    { font-size:3.5rem; }
   .ic-empty-title   { font-size:1.2rem; font-weight:700; color:var(--text); }
   .ic-empty-desc    { font-size:0.875rem; color:var(--muted); max-width:400px; line-height:1.6; }
 
-  .dv-table-wrap    { overflow-x:auto; background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow-sm); }
-  .dv-table         { width:100%; border-collapse:collapse; font-size:0.85rem; }
-  .dv-table th      { padding:11px 14px; text-align:left; font-size:0.72rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; border-bottom:1px solid var(--border); background:var(--surface2); }
-  .dv-table td      { padding:12px 14px; border-bottom:1px solid var(--border); color:var(--text2); vertical-align:middle; }
-  .dv-table tr:last-child td { border-bottom:none; }
-  .dv-table tr:hover td { background:var(--surface2); }
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:22px; box-shadow:var(--shadow-sm); }
+  .ic-card-title { font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:16px; }
+  .ic-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px; }
+  .ic-field { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+  .ic-label { font-size:0.72rem; font-weight:600; color:var(--muted2); letter-spacing:0.06em; text-transform:uppercase; }
+  .ic-input, .ic-select { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; color:var(--text); font-family:var(--font-ui); font-size:0.875rem; outline:none; transition:border-color 0.2s; width:100%; }
+  .ic-input:focus, .ic-select:focus { border-color:var(--accent); }
+  .ic-required { color:var(--down); }
+  .doc-upload-hint { font-size:0.75rem; color:var(--muted2); margin-top:4px; }
 
-  .dv-policy-name   { display:flex; align-items:center; gap:6px; font-weight:600; color:var(--text); font-size:0.875rem; }
-  .dv-policy-insurer{ font-size:0.75rem; color:var(--muted); margin-top:2px; }
-  .dv-link          { color:var(--accent); text-decoration:none; }
-  .dv-link:hover    { text-decoration:underline; }
-  .dv-type-badge    { background:var(--accent-bg); color:var(--accent); border:1px solid var(--accent); border-radius:12px; font-size:0.7rem; padding:3px 10px; font-weight:600; white-space:nowrap; }
-  .dv-filename      { font-weight:500; color:var(--text); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
-  .dv-notes         { font-size:0.72rem; color:var(--muted); margin-top:2px; font-weight:400; flex-basis:100%; }
-  .dv-date          { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
-  .dv-size          { font-size:0.78rem; color:var(--muted); white-space:nowrap; }
-  .dv-actions       { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  .ic-summary-grid  { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:16px; }
+  .ic-stat-card     { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
+  .ic-stat-label    { font-size:0.72rem; font-weight:600; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; margin-bottom:10px; }
+  .ic-stat-value    { font-family:var(--font-data); font-size:1.3rem; font-weight:700; color:var(--accent); }
+
+  .ic-filter-bar    { display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px; }
+  .ic-search-input  { flex:1; min-width:200px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:9px 14px; color:var(--text); font-family:var(--font-ui); font-size:0.85rem; }
+  .ic-search-btn    { background:var(--accent); border:1px solid var(--accent); border-radius:8px; padding:10px 22px; font-size:0.88rem; font-weight:700; color:#fff; font-family:var(--font-ui); cursor:pointer; transition:opacity 0.2s; }
+  .ic-search-btn:hover { opacity:0.88; }
+  .ic-clear-link    { font-size:0.8rem; color:var(--muted); text-decoration:none; }
+  .ic-clear-link:hover { color:var(--accent); }
+
+  /* Category / Policy grouped document blocks */
+  .ic-doc-category-block { border-radius:14px; padding:20px; margin-bottom:16px; border:1px solid; }
+  .ic-cat-blue   { background:#EFF6FF; border-color:#BFDBFE; }
+  .ic-cat-teal   { background:var(--accent-bg); border-color:#99F6E4; }
+  .ic-cat-purple { background:#F5F3FF; border-color:#DDD6FE; }
+  .ic-cat-pink   { background:#FDF2F8; border-color:#FBCFE8; }
+  .ic-cat-amber  { background:#FFFBEB; border-color:#FDE68A; }
+  .ic-doc-category-heading { display:flex; align-items:center; gap:10px; font-size:1.05rem; font-weight:700; color:var(--text); margin-bottom:16px; }
+  .ic-doc-category-icon    { font-size:1.3rem; }
+  .ic-doc-policy-block     { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:12px; }
+  .ic-doc-policy-block:last-child { margin-bottom:0; }
+  .ic-doc-policy-heading   { font-size:0.9rem; font-weight:700; color:var(--text); margin-bottom:10px; }
+  .ic-doc-policy-sub       { font-size:0.8rem; font-weight:500; color:var(--muted); }
+
+  .dv-list          { display:flex; flex-direction:column; gap:2px; }
+  .dv-list-row      { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); gap:12px; flex-wrap:wrap; }
+  .dv-list-row:last-child { border-bottom:none; }
+  .dv-list-primary  { font-weight:600; color:var(--text); font-size:0.9rem; }
+  .dv-list-secondary{ display:block; font-size:0.78rem; color:var(--muted); margin-top:2px; }
+  .dv-list-actions  { display:flex; gap:14px; align-items:center; }
   .dv-btn           { background:none; border:none; padding:0; font-size:0.8rem; font-weight:700; font-family:var(--font-ui); cursor:pointer; text-decoration:none; }
   .dv-btn:hover     { text-decoration:underline; }
   .dv-btn-preview   { color:var(--accent); }
   .dv-btn-download  { color:var(--accent); }
   .dv-btn-delete    { color:var(--down); }
-
-  /* Mobile */
-  .dv-cards-mobile  { display:none; }
-  .dv-card          { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:10px; }
-  .dv-card-top      { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
 
   /* Modal */
   .mwl-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px);}
@@ -209,12 +276,38 @@
   .mwl-modal-confirm.danger{background:var(--down);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:0.875rem;font-weight:700;font-family:var(--font-ui);cursor:pointer;}
 
   @media (max-width:768px) {
-    .dv-table-wrap  { display:none; }
-    .dv-cards-mobile{ display:block; }
+    .ic-form-grid-2 { grid-template-columns:1fr; }
+    .ic-filter-bar  { flex-direction:column; align-items:stretch; }
   }
 </style>
 
 <script>
+function toggleVaultUpload() {
+  var form = document.getElementById('vaultUploadForm');
+  if (!form) return;
+  form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  if (form.style.display === 'block') form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function showVaultFileInfo(input) {
+  var info = document.getElementById('vaultFileInfo');
+  if (!info) return;
+  if (input.files && input.files[0]) {
+    var file = input.files[0];
+    var size = file.size > 1024*1024 ? (file.size/(1024*1024)).toFixed(1) + ' MB' : (file.size/1024).toFixed(0) + ' KB';
+    info.textContent = file.name + ' (' + size + ')';
+    info.style.color = file.size > 25*1024*1024 ? 'var(--down)' : 'var(--up)';
+  }
+}
+document.addEventListener('DOMContentLoaded', function() {
+  var f = document.getElementById('vaultUploadFormEl');
+  if (f) {
+    f.addEventListener('submit', function() {
+      var btn = document.getElementById('vaultUploadSubmitBtn');
+      if (btn) { btn.textContent = 'Uploading…'; btn.disabled = true; }
+    });
+  }
+});
+
 function showModal(title, body, onConfirm, confirmText, isDanger) {
   document.getElementById('mwlModalTitle').innerHTML = title;
   document.getElementById('mwlModalBody').innerHTML  = body;
@@ -226,11 +319,11 @@ function showModal(title, body, onConfirm, confirmText, isDanger) {
   document.getElementById('mwlModal').classList.add('active');
 }
 function closeModal() { document.getElementById('mwlModal').classList.remove('active'); }
-function confirmDeleteDoc(id, name) {
+function confirmDeleteDocVault(id, name) {
   showModal(
     'Delete Document?',
     '"' + name + '"<br><br>This permanently removes the file from local storage.<br>This action cannot be undone.',
-    function() { document.getElementById('delDocForm' + id).submit(); },
+    function() { document.getElementById('delDocVaultForm' + id).submit(); },
     'Delete', true
   );
 }
