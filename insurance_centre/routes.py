@@ -10,6 +10,7 @@ from flask import (
     flash, jsonify, send_file, abort, current_app
 )
 from flask_login import login_required, current_user
+
 from . import insurance_bp
 from .models import (
     InsurancePolicy, InsuranceNominee, InsuranceMember,
@@ -25,6 +26,7 @@ def _db():
     from models import db
     return db
 
+
 from . import validators
 from .utils import (
     save_document_file, delete_document_file,
@@ -33,9 +35,7 @@ from .utils import (
 )
 
 
-
-
-# ── Template Helpers ──────────────────────────────────────────────────────────
+# ── Template Helpers ────────────────────────────────────────────────────────
 
 def _build_types_json():
     """Build JSON of insurance types per category for JS dropdown."""
@@ -57,6 +57,7 @@ def _category_icons():
         "Property Insurance": "🏠",
         "General Insurance":  "📋",
     }
+
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
@@ -125,7 +126,6 @@ def add_policy():
         category_icons=_category_icons(),
         preset_category=preset_category,
     )
-
 
 
 @insurance_bp.route("/policies")
@@ -203,6 +203,7 @@ def policy_listing():
         result_count=len(policies),
     )
 
+
 @insurance_bp.route("/policy/<int:policy_id>")
 @login_required
 def policy_detail(policy_id):
@@ -225,6 +226,7 @@ def policy_detail(policy_id):
         renewal_badge=renewal_badge,
         doc_types=DocumentType.ALL,
     )
+
 
 @insurance_bp.route("/policy/<int:policy_id>/edit", methods=["GET", "POST"])
 @login_required
@@ -256,6 +258,7 @@ def edit_policy(policy_id):
                 existing_members=policy.members.all(),
                 existing_addons=[a.addon_name for a in policy.addons.all()],
             )
+
         flash("Policy updated successfully!", "success")
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=policy_id))
@@ -277,6 +280,7 @@ def edit_policy(policy_id):
         existing_addons=[a.addon_name for a in policy.addons.all()],
     )
 
+
 @insurance_bp.route("/policy/<int:policy_id>/archive", methods=["POST"])
 @login_required
 def archive_policy(policy_id):
@@ -285,12 +289,15 @@ def archive_policy(policy_id):
     if policy.is_archived:
         flash("Policy is already archived.", "info")
         return redirect(url_for("insurance_centre.archive_listing"))
+
     success, error = services.archive_policy(_db(), policy, current_user.id)
     if error:
         flash(error, "error")
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=policy_id))
+
     flash("Policy archived. You can restore it from the Archive.", "success")
+
     # Redirect back to referring page or policy listing
     referrer = request.form.get("next") or url_for("insurance_centre.policy_listing")
     return redirect(referrer)
@@ -316,8 +323,10 @@ def delete_policy_permanent(policy_id):
     # Delete policy (cascades to nominees, members, addons, timeline, documents)
     _db().session.delete(policy)
     _db().session.commit()
+
     flash("Policy permanently deleted.", "success")
     return redirect(url_for("insurance_centre.archive_listing"))
+
 
 @insurance_bp.route("/policy/<int:policy_id>/restore", methods=["POST"])
 @login_required
@@ -325,19 +334,23 @@ def restore_policy(policy_id):
     """Restore an archived policy."""
     policy = InsurancePolicy.query.filter_by(
         id=policy_id, user_id=current_user.id).first_or_404()
+
     success, error = services.restore_policy(_db(), policy, current_user.id)
     if error:
         flash(error, "error")
     else:
         flash("Policy restored successfully!", "success")
+
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy_id))
+
 
 @insurance_bp.route("/policy/<int:policy_id>/renew", methods=["POST"])
 @login_required
 def renew_policy(policy_id):
     """Record a policy renewal."""
     policy = _get_policy_or_404(policy_id)
+
     errors = validators.validate_renewal(request.form.to_dict(), policy)
     if errors:
         flash(errors[0], "error")
@@ -346,19 +359,19 @@ def renew_policy(policy_id):
 
     from .utils import _parse_date
     from datetime import datetime
+
     new_renewal = datetime.strptime(
         request.form.get("new_renewal_date"), "%Y-%m-%d").date()
-    new_expiry  = request.form.get("new_expiry_date")
-    new_expiry  = datetime.strptime(new_expiry, "%Y-%m-%d").date() \
-                  if new_expiry else None
+    new_expiry = request.form.get("new_expiry_date")
+    new_expiry = datetime.strptime(new_expiry, "%Y-%m-%d").date() \
+        if new_expiry else None
 
     services.renew_policy(_db(), policy, current_user.id,
                           new_renewal, new_expiry)
+
     flash("Policy renewed successfully!", "success")
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy_id))
-
-
 
 
 # ── Category Placeholder ──────────────────────────────────────────────────────
@@ -368,13 +381,13 @@ def renew_policy(policy_id):
 def category_view(slug):
     """Dedicated category page — shows only policies for that category."""
     from .models import InsuranceCategory
+
     category = slug_to_category(slug)
     if category not in InsuranceCategory.ALL:
         abort(404)
 
     policies = services.get_policies_by_category(current_user.id, category)
     total_coverage = sum(p.sum_assured for p in policies)
-
     icons = _category_icons()
 
     return render_template(
@@ -388,6 +401,7 @@ def category_view(slug):
         format_date=format_date,
     )
 
+
 # ── Archive View ──────────────────────────────────────────────────────────────
 
 @insurance_bp.route("/archive")
@@ -395,6 +409,7 @@ def category_view(slug):
 def archive_listing():
     """View all archived policies."""
     archived = services.get_archived_policies(current_user.id)
+
     return render_template(
         "insurance_centre/archive_listing.html",
         policies=archived,
@@ -402,9 +417,6 @@ def archive_listing():
         format_inr=format_inr,
         format_date=format_date,
     )
-
-
-
 
 
 # ── Nominees ──────────────────────────────────────────────────────────────────
@@ -421,6 +433,7 @@ def add_nominee(policy_id):
         flash(error, "error")
     else:
         flash("Nominee added.", "success")
+
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy_id))
 
@@ -430,9 +443,10 @@ def add_nominee(policy_id):
 @login_required
 def delete_nominee(nominee_id):
     nominee = InsuranceNominee.query.get_or_404(nominee_id)
-    policy  = _get_policy_or_404(nominee.policy_id)
+    policy = _get_policy_or_404(nominee.policy_id)
     services.remove_nominee(_db(), nominee, current_user.id)
     flash("Nominee removed.", "success")
+
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy.id))
 
@@ -451,6 +465,7 @@ def add_member(policy_id):
         flash(error, "error")
     else:
         flash("Member added.", "success")
+
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy_id))
 
@@ -463,6 +478,7 @@ def delete_member(member_id):
     policy = _get_policy_or_404(member.policy_id)
     services.remove_member(_db(), member, current_user.id)
     flash("Member removed.", "success")
+
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy.id))
 
@@ -482,6 +498,7 @@ def update_addons(policy_id):
         flash(error, "error")
     else:
         flash("Add-ons updated.", "success")
+
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy_id))
 
@@ -493,16 +510,18 @@ def update_addons(policy_id):
 @login_required
 def upload_document(policy_id):
     """Upload a document to a policy. Validates ownership and file."""
-    policy   = _get_policy_or_404(policy_id)
-    file     = request.files.get("document")
+    policy = _get_policy_or_404(policy_id)
+    file = request.files.get("document")
     doc_type = request.form.get("doc_type", "").strip()
-    notes    = request.form.get("doc_notes", "").strip() or None
+    doc_title = request.form.get("doc_title", "").strip() or None
+    notes = request.form.get("doc_notes", "").strip() or None
 
     errors = validators.validate_document(file, doc_type)
     if errors:
         flash(errors[0], "error")
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=policy_id))
+
     try:
         from .utils import save_document_file
         stored_name, file_path, file_size = save_document_file(file, policy_id)
@@ -511,7 +530,6 @@ def upload_document(policy_id):
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=policy_id))
 
-    doc_title = request.form.get("doc_title", "").strip() or None
     services.save_document_metadata(
         _db(), policy, current_user.id,
         doc_type      = doc_type,
@@ -526,33 +544,42 @@ def upload_document(policy_id):
     return redirect(url_for("insurance_centre.policy_detail",
                             policy_id=policy_id))
 
+
 @insurance_bp.route("/documents/<int:doc_id>/delete", methods=["POST"])
 @login_required
 def delete_document(doc_id):
-    """Delete document — removes file and metadata. Validates ownership."""
+    """Delete document — removes file and metadata. Validates ownership.
+    Redirects back to wherever the delete was triggered from (policy
+    detail page or the Document Vault) via a 'next' form field."""
     from insurance_centre.models import InsuranceDocument
+
     doc = InsuranceDocument.query.filter_by(
         id=doc_id, user_id=current_user.id).first_or_404()
     policy_id = doc.policy_id
+    next_target = request.form.get("next", "policy")
+    redirect_url = (url_for("insurance_centre.document_vault")
+                    if next_target == "vault"
+                    else url_for("insurance_centre.policy_detail", policy_id=policy_id))
 
     # Security: verify file is within expected directory
     from .utils import delete_document_file, secure_file_path
     if doc.file_path and not secure_file_path(doc.file_path, policy_id):
         flash("Invalid file path — operation denied.", "error")
-        return redirect(url_for("insurance_centre.policy_detail",
-                                policy_id=policy_id))
+        return redirect(redirect_url)
 
     delete_document_file(doc.file_path)
     services.delete_document(_db(), doc, current_user.id)
     flash("Document deleted.", "success")
-    return redirect(url_for("insurance_centre.policy_detail",
-                            policy_id=policy_id))
+
+    return redirect(redirect_url)
+
 
 @insurance_bp.route("/documents/<int:doc_id>/download")
 @login_required
 def download_document(doc_id):
     """Download document — validates ownership, preserves original filename."""
     from insurance_centre.models import InsuranceDocument
+
     doc = InsuranceDocument.query.filter_by(
         id=doc_id, user_id=current_user.id).first_or_404()
 
@@ -581,6 +608,7 @@ def download_document(doc_id):
 def preview_document(doc_id):
     """Preview document inline in browser (PDF and images only)."""
     from insurance_centre.models import InsuranceDocument
+
     doc = InsuranceDocument.query.filter_by(
         id=doc_id, user_id=current_user.id).first_or_404()
 
@@ -603,18 +631,21 @@ def preview_document(doc_id):
                                 policy_id=doc.policy_id))
 
     mimetype = get_preview_mimetype(doc.original_name)
+
     return send_file(
         doc.file_path,
         mimetype=mimetype,
-        as_attachment=False,    # inline — opens in browser
+        as_attachment=False,  # inline — opens in browser
         download_name=doc.original_name,
     )
+
 
 @insurance_bp.route("/search")
 @login_required
 def search():
     query = request.args.get("q", "").strip()
     results = services.search_policies(current_user.id, query) if query else []
+
     return render_template(
         "insurance_centre/search.html",
         query=query,
@@ -626,10 +657,16 @@ def search():
 
 # ── API — types for dynamic dropdown ─────────────────────────────────────────
 
+@insurance_bp.route("/api/types")
+@login_required
+def api_types():
+    """Return insurance types for a given category (used by JS dropdown)."""
+    category = request.args.get("category", "")
+    types = InsuranceType.for_category(category)
+    return jsonify({"types": types})
+
 
 # ── Export ────────────────────────────────────────────────────────────────────
-
-
 
 @insurance_bp.route("/export/pdf")
 @login_required
@@ -651,6 +688,7 @@ def export_pdf():
 
     policies = services.get_all_active_policies_for_listing(current_user.id)
     stats    = services.InsuranceStatisticsService(current_user.id)
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4,
         topMargin=3.5*cm, bottomMargin=2.5*cm,
@@ -698,9 +736,9 @@ def export_pdf():
     # ── Summary Stats ──
     summary_rows = [
         ["Total Active Policies", str(stats.active_count()),
-         "Total Coverage",        f"Rs.{stats.total_coverage():,.0f}"],
-        ["Annual Premium",        f"Rs.{stats.total_annual_premium():,.0f}",
-         "Upcoming Renewals",     str(stats.upcoming_renewals_count())],
+         "Total Coverage", f"Rs.{stats.total_coverage():,.0f}"],
+        ["Annual Premium", f"Rs.{stats.total_annual_premium():,.0f}",
+         "Upcoming Renewals", str(stats.upcoming_renewals_count())],
     ]
     sum_tbl = Table(summary_rows, colWidths=[4.5*cm, 4*cm, 4.5*cm, 4*cm])
     sum_tbl.setStyle(TableStyle([
@@ -734,7 +772,7 @@ def export_pdf():
         # Core details
         rows = [
             ["Category", p.category or "—",
-             "Status",   p.status or "—"],
+             "Status", p.status or "—"],
             ["Policy No.", p.policy_number or "—",
              "Policy Holder", p.policy_holder or "—"],
             ["Coverage", f"Rs.{p.sum_assured:,.0f}",
@@ -819,38 +857,117 @@ def export_pdf():
         download_name=f"insurance_policies_{_dt.now().strftime('%Y%m%d')}.pdf")
 
 
+# ── Document Vault ─────────────────────────────────────────────────────────────
+
 @insurance_bp.route("/documents")
 @login_required
 def document_vault():
-    """Document Vault — all uploaded documents across all policies."""
-    from insurance_centre.models import InsuranceDocument
-    documents = (InsuranceDocument.query
-                 .filter_by(user_id=current_user.id)
-                 .order_by(InsuranceDocument.uploaded_at.desc())
-                 .all())
+    """
+    Document Vault — first-class page listing every document across
+    all of the user's insurance policies, with search and filters.
+    Documents are grouped by category then by policy, mirroring the
+    same navigation structure as Retirement Centre's Document Vault.
+    """
+    q        = request.args.get("q", "").strip()
+    category = request.args.get("category", "")
+    doc_type = request.args.get("doc_type", "")
 
-    policy_map = {}
-    for doc in documents:
-        if doc.policy_id not in policy_map:
-            p = InsurancePolicy.query.filter_by(
-                id=doc.policy_id, user_id=current_user.id).first()
-            policy_map[doc.policy_id] = p
-        doc._policy = policy_map.get(doc.policy_id)
+    documents = services.get_vault_documents(
+        current_user.id, q=q or None, category=category or None,
+        doc_type=doc_type or None,
+    )
+    summary = services.vault_summary(current_user.id)
+
+    # Group: category -> policy -> documents, preserving first-seen order.
+    grouped = {}
+    order = []
+    for d in documents:
+        policy = d._policy
+        cat = policy.category if policy else "Other"
+        if cat not in grouped:
+            grouped[cat] = {}
+            order.append(cat)
+        pid = policy.id if policy else 0
+        if pid not in grouped[cat]:
+            grouped[cat][pid] = {"policy": policy, "documents": []}
+        grouped[cat][pid]["documents"].append(d)
+
+    grouped_documents = [
+        {"category": cat, "policy_groups": list(grouped[cat].values())}
+        for cat in order
+    ]
+
+    # Policies for the upload form's dropdown (active policies only)
+    upload_policies = (InsurancePolicy.query
+                       .filter_by(user_id=current_user.id, is_archived=False)
+                       .order_by(InsurancePolicy.category.asc())
+                       .all())
+    preselect_policy_id = request.args.get("policy_id", type=int)
 
     return render_template(
         "insurance_centre/document_vault.html",
         documents=documents,
+        grouped_documents=grouped_documents,
+        summary=summary,
+        categories=InsuranceCategory.ALL,
+        doc_types=DocumentType.ALL,
+        upload_policies=upload_policies,
+        preselect_policy_id=preselect_policy_id,
+        q=q, category=category, doc_type=doc_type,
         format_date=format_date,
         category_icons=_category_icons(),
     )
 
-@insurance_bp.route("/api/types")
+
+@insurance_bp.route("/documents/upload", methods=["POST"])
 @login_required
-def api_types():
-    """Return insurance types for a given category (used by JS dropdown)."""
-    category = request.args.get("category", "")
-    types = InsuranceType.for_category(category)
-    return jsonify({"types": types})
+def upload_document_vault():
+    """
+    Upload a document from the Vault directly — the policy is chosen
+    via a form dropdown rather than implied by the URL. Reuses the
+    exact same storage/validation logic as the per-policy upload
+    route — no parallel storage system.
+    """
+    policy_id = request.form.get("policy_id", type=int)
+    if not policy_id:
+        flash("Please select an insurance policy for this document.", "error")
+        return redirect(url_for("insurance_centre.document_vault"))
+
+    policy = InsurancePolicy.query.filter_by(
+        id=policy_id, user_id=current_user.id, is_archived=False).first()
+    if not policy:
+        flash("Invalid policy selected.", "error")
+        return redirect(url_for("insurance_centre.document_vault"))
+
+    file = request.files.get("document")
+    doc_type = request.form.get("doc_type", "").strip()
+    doc_title = request.form.get("doc_title", "").strip() or None
+    notes = request.form.get("doc_notes", "").strip() or None
+
+    errors = validators.validate_document(file, doc_type)
+    if errors:
+        flash(errors[0], "error")
+        return redirect(url_for("insurance_centre.document_vault"))
+
+    try:
+        from .utils import save_document_file
+        stored_name, file_path, file_size = save_document_file(file, policy_id)
+    except OSError as e:
+        flash(f"File could not be saved: {e}", "error")
+        return redirect(url_for("insurance_centre.document_vault"))
+
+    services.save_document_metadata(
+        _db(), policy, current_user.id,
+        doc_type      = doc_type,
+        title         = doc_title,
+        original_name = file.filename,
+        stored_name   = stored_name,
+        file_path     = file_path,
+        file_size     = file_size,
+        notes         = notes,
+    )
+    flash("Document uploaded successfully!", "success")
+    return redirect(url_for("insurance_centre.document_vault"))
 
 
 # ── Private Helpers ───────────────────────────────────────────────────────────

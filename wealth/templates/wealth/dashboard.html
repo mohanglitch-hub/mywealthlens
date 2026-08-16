@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="wealth-wrap">
+
+  <div class="wealth-header">
+    <h1>Wealth Centre</h1>
+    <p>Track what you own, what you owe, and your overall net worth in one place.</p>
+  </div>
+
+  <!-- ── Overview ── -->
+  <div class="wealth-summary-grid">
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Total Assets</div>
+      <div class="wealth-stat-value">{{ format_inr(data.total_assets) }}</div>
+      <div class="wealth-stat-helper">
+        {% if data.asset_count == 0 %}No assets tracked yet
+        {% else %}Across {{ data.asset_count }} asset{{ 's' if data.asset_count != 1 }}{% endif %}
+      </div>
+    </div>
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Total Liabilities</div>
+      <div class="wealth-stat-value">{{ format_inr(data.total_liabilities) }}</div>
+      <div class="wealth-stat-helper">
+        {% if data.liability_count == 0 %}No liabilities tracked yet
+        {% else %}Across {{ data.liability_count }} liabilit{{ 'y' if data.liability_count == 1 else 'ies' }}{% endif %}
+      </div>
+    </div>
+    <!--
+      Restored in Phase D — this card was hidden during Phase C
+      (Section 69 there explicitly forbade it), now correctly
+      restored per Phase D's own explicit instruction (Section 23:
+      "update the dashboard to use the authoritative Net Worth
+      service... connect it if appropriate"). Same summary_dict()
+      call as /wealth/net-worth uses — cannot diverge (Section 24).
+    -->
+    <div class="wealth-stat-card wealth-stat-primary">
+      <div class="wealth-stat-label">Net Worth</div>
+      <div class="wealth-stat-value {{ 'wealth-negative' if data.net_worth < 0 }}">{{ format_inr(data.net_worth) }}</div>
+      <div class="wealth-stat-helper">
+        {% if data.has_wealth_data %}My Attributable: {{ format_inr(data.attributable_net_worth) }}
+        {% else %}No assets or liabilities tracked yet{% endif %}
+      </div>
+      <a href="{{ url_for('wealth.net_worth') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Details →</a>
+    </div>
+  </div>
+
+  <!-- ── Assets Section (real, Phase B) ── -->
+  <div class="wealth-list-card">
+    <div class="wealth-section-header">
+      <div class="wealth-section-label">Assets</div>
+      <div style="display:flex; gap:14px; align-items:center;">
+        <a href="{{ url_for('wealth.assets_listing') }}" class="wealth-view-all-link">View All →</a>
+        <a href="{{ url_for('wealth.add_asset') }}" class="wealth-btn-add">+ Add Asset</a>
+      </div>
+    </div>
+
+    {% if data.category_breakdown %}
+      <div class="wealth-category-breakdown">
+        {% for c in data.category_breakdown %}
+        <div class="wealth-category-row">
+          <span>{{ c.category }}</span>
+          <span class="wealth-category-total">{{ format_inr(c.total) }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if data.recent_assets %}
+      <div class="wealth-section-label" style="margin-top:20px;">Recent Assets</div>
+      <div class="wealth-asset-list">
+        {% for asset in data.recent_assets %}
+        <a href="{{ url_for('wealth.asset_detail', asset_id=asset.id) }}" class="wealth-asset-row">
+          <div class="wealth-asset-main">
+            <div class="wealth-asset-name">{{ asset.name }}</div>
+            <div class="wealth-asset-meta"><span>{{ asset.category }}{% if asset.asset_type %} · {{ asset.asset_type }}{% endif %}</span></div>
+          </div>
+          <div class="wealth-asset-value">{{ format_inr(asset.current_value) }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="wealth-empty-state">
+        <div class="wealth-empty-title">No assets added yet</div>
+        <div class="wealth-empty-sub">Add your property, gold, vehicles, deposits and other assets to start building your complete wealth picture.</div>
+        <a href="{{ url_for('wealth.add_asset') }}" class="wealth-btn-add" style="margin-top:16px;">+ Add Asset</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Liabilities Section (real, Phase C) ── -->
+  <div class="wealth-list-card">
+    <div class="wealth-section-header">
+      <div class="wealth-section-label">Liabilities</div>
+      <div style="display:flex; gap:14px; align-items:center;">
+        <a href="{{ url_for('wealth.liabilities_listing') }}" class="wealth-view-all-link">View All →</a>
+        <a href="{{ url_for('wealth.add_liability') }}" class="wealth-btn-add">+ Add Liability</a>
+      </div>
+    </div>
+
+    {% if data.liability_category_breakdown %}
+      <div class="wealth-category-breakdown">
+        {% for c in data.liability_category_breakdown %}
+        <div class="wealth-category-row">
+          <span>{{ c.category }}</span>
+          <span class="wealth-category-total">{{ format_inr(c.total) }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {% if data.recent_liabilities %}
+      <div class="wealth-section-label" style="margin-top:20px;">Recent Liabilities</div>
+      <div class="wealth-asset-list">
+        {% for liability in data.recent_liabilities %}
+        <a href="{{ url_for('wealth.liability_detail', liability_id=liability.id) }}" class="wealth-asset-row">
+          <div class="wealth-asset-main">
+            <div class="wealth-asset-name">{{ liability.name }}</div>
+            <div class="wealth-asset-meta"><span>{{ liability.category }}{% if liability.liability_type %} · {{ liability.liability_type }}{% endif %}</span></div>
+          </div>
+          <div class="wealth-asset-value">{{ format_inr(liability.outstanding_amount) }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="wealth-empty-state">
+        <div class="wealth-empty-title">No liabilities added yet</div>
+        <div class="wealth-empty-sub">Add your loans, credit card balances and other outstanding obligations to build a complete picture of your financial position.</div>
+        <a href="{{ url_for('wealth.add_liability') }}" class="wealth-btn-add" style="margin-top:16px;">+ Add Liability</a>
+      </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Family & Inherited Wealth (real, Phase E) ── -->
+  <div class="wealth-section-card">
+    <div class="wealth-section-header" style="margin-bottom:0;">
+      <div class="wealth-section-title" style="margin-bottom:0;">Family &amp; Inherited Wealth</div>
+    </div>
+    {% if data.family_asset_count > 0 %}
+      <div class="wealth-section-count">{{ data.family_asset_count }} Asset{{ 's' if data.family_asset_count != 1 }}</div>
+      <div class="wealth-stat-value" style="font-size:1.15rem; margin-top:2px;">{{ format_inr(data.total_family_value) }}</div>
+    {% else %}
+      <div class="wealth-section-count">No family or inherited wealth recorded yet</div>
+    {% endif %}
+    <div class="wealth-section-desc">
+      A dedicated view of assets you've inherited, received as gifts, or hold jointly with family — built on top of your existing Assets, not a separate copy of them.
+    </div>
+    <a href="{{ url_for('wealth.family_wealth') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Family Wealth →</a>
+  </div>
+
+</div>
+
+<style>
+  .wealth-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+  .wealth-header h1 {
+    font-size: 1.6rem; font-weight: 700; margin-bottom: 6px; color: var(--text);
+  }
+  .wealth-header p {
+    color: var(--muted); font-size: 0.875rem;
+  }
+
+  .wealth-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .wealth-stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; box-shadow: var(--shadow-sm);
+  }
+  .wealth-stat-networth { border-color: var(--accent); }
+  .wealth-stat-primary { border-color: var(--accent); border-width: 1.5px; }
+  .wealth-stat-label {
+    font-size: 0.72rem; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px;
+  }
+  .wealth-stat-value {
+    font-family: 'Roboto Mono', monospace; font-size: 1.5rem;
+    font-weight: 700; color: var(--accent);
+  }
+  .wealth-stat-value.wealth-negative { color: var(--down); }
+  .wealth-stat-helper { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+
+  .wealth-list-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm);
+  }
+  .wealth-section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+  .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
+  .wealth-view-all-link { font-size: 0.82rem; font-weight: 600; color: var(--accent); text-decoration: none; }
+  .wealth-view-all-link:hover { text-decoration: underline; }
+  .wealth-btn-add {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 8px 16px; font-size: 0.82rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; transition: opacity 0.2s;
+  }
+  .wealth-btn-add:hover { opacity: 0.88; }
+
+  .wealth-category-breakdown { display: flex; flex-direction: column; gap: 2px; }
+  .wealth-category-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  .wealth-category-row:last-child { border-bottom: none; }
+  .wealth-category-total { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); }
+
+  .wealth-asset-list { display: flex; flex-direction: column; gap: 8px; }
+  .wealth-asset-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; gap: 12px; text-decoration: none; color: inherit; transition: border-color 0.2s;
+  }
+  .wealth-asset-row:hover { border-color: var(--accent); }
+  .wealth-asset-name { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+  .wealth-asset-meta span { font-size: 0.76rem; color: var(--muted); }
+  .wealth-asset-value { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); }
+
+  .wealth-empty-state { text-align: center; padding: 32px 20px; color: var(--muted); }
+  .wealth-empty-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 6px; color: var(--text); }
+  .wealth-empty-sub { font-size: 0.82rem; max-width: 420px; margin: 0 auto; }
+
+  .wealth-section-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+  .wealth-section-card {
+    background: var(--surface); border: 1px dashed var(--border);
+    border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .wealth-section-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .wealth-section-count { font-size: 0.78rem; color: var(--accent); font-weight: 600; }
+  .wealth-section-desc { font-size: 0.82rem; color: var(--muted); line-height: 1.5; margin-top: 4px; }
+
+  @media (max-width: 900px) {
+    .wealth-summary-grid { grid-template-columns: 1fr; }
+    .wealth-section-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

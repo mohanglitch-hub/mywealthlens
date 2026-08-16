@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}Assets — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "wealth/_confirm_modal.html" %}
+<div class="wealth-wrap">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">← Wealth Centre</a>
+  </div>
+
+  <div class="wealth-header">
+    <div>
+      <h1>Assets</h1>
+      <p>Search, filter, and manage everything you own.</p>
+    </div>
+    <a href="{{ url_for('wealth.add_asset') }}" class="wealth-btn-primary">+ Add Asset</a>
+  </div>
+
+  <!-- ── Summary Cards ── -->
+  <div class="wealth-summary-grid">
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Total Assets</div>
+      <div class="wealth-stat-value">{{ format_inr(summary.total_assets) }}</div>
+    </div>
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Number of Assets</div>
+      <div class="wealth-stat-value">{{ summary.asset_count }}</div>
+    </div>
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Inherited / Family</div>
+      <div class="wealth-stat-value">{{ summary.inherited_family_count }}</div>
+    </div>
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Archived</div>
+      <div class="wealth-stat-value">{{ summary.archived_asset_count }}</div>
+    </div>
+  </div>
+
+  <!-- ── Status Tabs ── -->
+  <div class="wealth-status-tabs">
+    <a href="{{ url_for('wealth.assets_listing', status='active', category=category, ownership=ownership, source=source, q=q, sort=sort_by) }}"
+       class="wealth-status-tab {{ 'wealth-status-tab-selected' if status_filter == 'active' }}">Active</a>
+    <a href="{{ url_for('wealth.assets_listing', status='archived', category=category, ownership=ownership, source=source, q=q, sort=sort_by) }}"
+       class="wealth-status-tab {{ 'wealth-status-tab-selected' if status_filter == 'archived' }}">Archived</a>
+  </div>
+
+  <!-- ── Filters ── -->
+  <form method="GET" action="{{ url_for('wealth.assets_listing') }}" class="wealth-filter-bar">
+    <input type="hidden" name="status" value="{{ status_filter }}" />
+    <input type="text" name="q" value="{{ q }}" placeholder="Search by name, type, category, institution..." class="wealth-search-input" />
+    <select name="category" class="wealth-select" onchange="this.form.submit()">
+      <option value="">All Categories</option>
+      {% for c in categories %}<option value="{{ c }}" {{ 'selected' if category == c }}>{{ c }}</option>{% endfor %}
+    </select>
+    <select name="ownership" class="wealth-select" onchange="this.form.submit()">
+      <option value="">All Ownership</option>
+      {% for o in ownership_types %}<option value="{{ o }}" {{ 'selected' if ownership == o }}>{{ o }}</option>{% endfor %}
+    </select>
+    <select name="source" class="wealth-select" onchange="this.form.submit()">
+      <option value="">All Sources</option>
+      {% for s in source_types %}<option value="{{ s }}" {{ 'selected' if source == s }}>{{ s }}</option>{% endfor %}
+    </select>
+    <select name="sort" class="wealth-select" onchange="this.form.submit()">
+      <option value="newest" {{ 'selected' if sort_by == 'newest' }}>Newest Added</option>
+      <option value="oldest" {{ 'selected' if sort_by == 'oldest' }}>Oldest Added</option>
+      <option value="value_high" {{ 'selected' if sort_by == 'value_high' }}>Highest Value</option>
+      <option value="value_low" {{ 'selected' if sort_by == 'value_low' }}>Lowest Value</option>
+      <option value="name_az" {{ 'selected' if sort_by == 'name_az' }}>Name A–Z</option>
+      <option value="name_za" {{ 'selected' if sort_by == 'name_za' }}>Name Z–A</option>
+    </select>
+    <button type="submit" class="wealth-search-btn">🔍 Search</button>
+    {% if q or category or ownership or source %}
+      <a href="{{ url_for('wealth.assets_listing', status=status_filter) }}" class="wealth-clear-link">Clear Filters</a>
+    {% endif %}
+  </form>
+
+  <!-- ── Asset List ── -->
+  <div class="wealth-list-card">
+    <div class="wealth-section-label">{{ assets|length }} Asset{{ 's' if assets|length != 1 }}</div>
+
+    {% if assets %}
+      <div class="wealth-asset-list">
+        {% for asset in assets %}
+        <div class="wealth-asset-row" onclick="window.location='{{ url_for('wealth.asset_detail', asset_id=asset.id) }}'">
+          <div class="wealth-asset-main">
+            <div class="wealth-asset-name">{{ asset.name }}</div>
+            <div class="wealth-asset-meta">
+              <span>{{ asset.category }}{% if asset.asset_type %} · {{ asset.asset_type }}{% endif %}</span>
+              {% if asset.ownership_percentage < 100 %}<span>{{ asset.ownership_percentage }}% owned</span>{% endif %}
+              {% if asset.is_family_or_inherited %}<span>{{ asset.source_type }}</span>{% endif %}
+            </div>
+          </div>
+          <div class="wealth-asset-stats">
+            <div class="wealth-asset-value">{{ format_inr(asset.current_value) }}</div>
+            {% if asset.ownership_percentage < 100 %}
+            <div class="wealth-asset-attributable">Attributable: {{ format_inr(asset.attributable_value) }}</div>
+            {% endif %}
+          </div>
+          <div class="wealth-asset-actions" onclick="event.stopPropagation()">
+            <a href="{{ url_for('wealth.edit_asset', asset_id=asset.id) }}" class="wealth-link-btn">Edit</a>
+            <a href="{{ url_for('wealth.asset_detail', asset_id=asset.id) }}" class="wealth-link-btn wealth-link-btn-primary">View →</a>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="wealth-empty-state">
+        {% if status_filter == 'archived' %}
+          <div class="wealth-empty-title">No archived assets</div>
+          <div class="wealth-empty-sub">Assets you archive will show up here, and you can restore them any time.</div>
+        {% elif q or category or ownership or source %}
+          <div class="wealth-empty-title">No assets match your filters</div>
+          <div class="wealth-empty-sub">Try a different search term or clear your filters.</div>
+        {% else %}
+          <div class="wealth-empty-title">No assets added yet</div>
+          <div class="wealth-empty-sub">Start adding your property, gold, vehicles, deposits and other assets to build your complete wealth picture.</div>
+          <a href="{{ url_for('wealth.add_asset') }}" class="wealth-btn-primary" style="margin-top:16px;">+ Add Asset</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+  .wealth-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .wealth-breadcrumb { font-size: 0.95rem; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+
+  .wealth-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .wealth-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  .wealth-header p { color: var(--muted); font-size: 0.875rem; }
+  .wealth-btn-primary {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 20px; font-size: 0.85rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; transition: opacity 0.2s;
+  }
+  .wealth-btn-primary:hover { opacity: 0.88; }
+
+  .wealth-summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .wealth-stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow-sm); }
+  .wealth-stat-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .wealth-stat-value { font-family: 'Roboto Mono', monospace; font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+
+  .wealth-status-tabs { display: flex; gap: 8px; }
+  .wealth-status-tab {
+    padding: 7px 18px; border-radius: 20px; font-size: 0.85rem; font-weight: 600;
+    color: var(--muted); background: var(--surface2); border: 1px solid var(--border);
+    text-decoration: none; transition: all 0.2s;
+  }
+  .wealth-status-tab-selected { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+
+  .wealth-filter-bar {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  }
+  .wealth-search-input {
+    flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 14px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+  .wealth-select {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+  .wealth-search-btn {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 22px; font-size: 0.88rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; cursor: pointer; transition: opacity 0.2s;
+  }
+  .wealth-search-btn:hover { opacity: 0.88; }
+  .wealth-clear-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+  .wealth-clear-link:hover { color: var(--accent); }
+
+  .wealth-list-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+  .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; }
+
+  .wealth-asset-list { display: flex; flex-direction: column; gap: 8px; }
+  .wealth-asset-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 16px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; gap: 16px; flex-wrap: wrap; cursor: pointer; transition: border-color 0.2s;
+  }
+  .wealth-asset-row:hover { border-color: var(--accent); }
+  .wealth-asset-main { flex: 1; min-width: 180px; }
+  .wealth-asset-name { font-weight: 600; font-size: 0.9rem; color: var(--text); margin-bottom: 4px; }
+  .wealth-asset-meta { display: flex; gap: 10px; flex-wrap: wrap; }
+  .wealth-asset-meta span { font-size: 0.76rem; color: var(--muted); }
+  .wealth-asset-stats { text-align: right; flex-shrink: 0; }
+  .wealth-asset-value { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); font-size: 1.1rem; }
+  .wealth-asset-attributable { font-size: 0.72rem; color: var(--muted); margin-top: 3px; }
+  .wealth-asset-actions { display: flex; gap: 16px; align-items: center; flex-shrink: 0; }
+  .wealth-link-btn { font-size: 0.8rem; font-weight: 700; color: var(--muted); text-decoration: none; }
+  .wealth-link-btn:hover { color: var(--text2); }
+  .wealth-link-btn-primary { color: var(--accent); }
+  .wealth-link-btn-primary:hover { color: var(--accent); }
+
+  .wealth-empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .wealth-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .wealth-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  @media (max-width: 640px) {
+    .wealth-summary-grid { grid-template-columns: repeat(2, 1fr); }
+    .wealth-asset-row { flex-direction: column; align-items: stretch; }
+    .wealth-asset-stats { text-align: left; }
+    .wealth-asset-actions { justify-content: flex-end; }
+    .wealth-filter-bar { flex-direction: column; align-items: stretch; }
+  }
+  @media (max-width: 480px) {
+    .wealth-summary-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

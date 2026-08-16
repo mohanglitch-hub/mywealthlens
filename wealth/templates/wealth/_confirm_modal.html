@@ -1,0 +1,73 @@
+{# ── Reusable confirmation modal — mirrors retirement_centre's proven pattern ── #}
+
+<div id="confirmModalOverlay" class="wealth-modal-overlay" style="display:none;">
+  <div class="wealth-modal">
+    <div class="wealth-modal-title" id="confirmModalTitle"></div>
+    <div class="wealth-modal-message" id="confirmModalMessage"></div>
+    <div class="wealth-modal-actions">
+      <button type="button" class="wealth-modal-cancel" onclick="closeConfirmModal()">Cancel</button>
+      <button type="button" class="wealth-modal-confirm" id="confirmModalConfirmBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .wealth-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 500;
+    padding: 20px;
+  }
+  .wealth-modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; max-width: 380px; width: 100%;
+    box-shadow: var(--shadow-lg);
+  }
+  .wealth-modal-title { font-weight: 700; font-size: 1rem; color: var(--text); margin-bottom: 8px; }
+  .wealth-modal-message { font-size: 0.88rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; white-space: pre-line; }
+  .wealth-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .wealth-modal-cancel {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: var(--text2); cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .wealth-modal-cancel:hover { border-color: var(--muted2); }
+  .wealth-modal-confirm {
+    background: var(--down); border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: #fff; font-weight: 600;
+    cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .wealth-modal-confirm:hover { opacity: 0.9; }
+</style>
+
+<script>
+  let _wealthPendingConfirmForm = null;
+
+  function confirmAction(formEl, title, message, confirmLabel) {
+    _wealthPendingConfirmForm = formEl;
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+    document.getElementById('confirmModalConfirmBtn').textContent = confirmLabel || 'Confirm';
+    document.getElementById('confirmModalOverlay').style.display = 'flex';
+    return false;
+  }
+
+  function closeConfirmModal() {
+    document.getElementById('confirmModalOverlay').style.display = 'none';
+    _wealthPendingConfirmForm = null;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const confirmBtn = document.getElementById('confirmModalConfirmBtn');
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', function () {
+        if (_wealthPendingConfirmForm) _wealthPendingConfirmForm.submit();
+        closeConfirmModal();
+      });
+    }
+    const overlay = document.getElementById('confirmModalOverlay');
+    if (overlay) {
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeConfirmModal();
+      });
+    }
+  });
+</script>

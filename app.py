@@ -8,6 +8,7 @@ from datetime import datetime as dt, timedelta
 from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, NetWorthHistory, Family, FamilyMember, FamilyInvite
 from insurance_centre import insurance_bp
 from retirement_centre import retirement_bp
+from wealth import wealth_bp
 from insurance_centre.models import (
     InsurancePolicy, InsuranceNominee, InsuranceMember,
     InsuranceAddon, InsuranceDocument, InsuranceTimeline,
@@ -1305,6 +1306,7 @@ def change_password():
 
 app.register_blueprint(insurance_bp)
 app.register_blueprint(retirement_bp)
+app.register_blueprint(wealth_bp)
 
 if __name__ == '__main__': 
      app.run(debug=True, port=5000, host='0.0.0.0')
