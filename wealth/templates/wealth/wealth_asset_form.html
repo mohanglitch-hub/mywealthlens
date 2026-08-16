@@ -1,0 +1,412 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if is_edit else 'Add' }} Asset — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:960px; margin:0 auto;">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">Wealth Centre</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <a href="{{ url_for('wealth.assets_listing') }}">Assets</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <span class="wealth-breadcrumb-current">{{ 'Edit Asset' if is_edit else 'Add Asset' }}</span>
+  </div>
+
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">
+    {{ 'Edit Asset' if is_edit else 'Add Asset' }}
+  </h1>
+  <p style="color:var(--muted); font-size:0.875rem; margin-bottom:28px;">
+    Fields marked <span class="wealth-required-mark">*</span> are required.
+  </p>
+
+  <form method="POST" action="{{ url_for('wealth.edit_asset', asset_id=asset.id) if is_edit else url_for('wealth.add_asset') }}" id="assetForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <!-- ── Basic Information ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Basic Information</span></div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="category">Category <span class="wealth-required-mark">*</span></label>
+          <select name="category" id="category" class="wealth-select" required onchange="applyCategory()">
+            <option value="">— Select category —</option>
+            {% for cat in categories %}
+              <option value="{{ cat }}" {{ 'selected' if values.category == cat }}>{{ cat }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="asset_type">Asset Type <span class="wealth-required-mark">*</span></label>
+          <select name="asset_type" id="asset_type" class="wealth-select" required>
+            <option value="">— Select category first —</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="name">Asset Name <span class="wealth-required-mark">*</span></label>
+        <input type="text" name="name" id="name" value="{{ values.name }}"
+               placeholder="e.g. My Family Home, HDFC Fixed Deposit" required />
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description</label>
+        <textarea name="description" id="description" rows="2"
+                  style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; resize:vertical;">{{ values.description }}</textarea>
+      </div>
+    </div>
+
+    <!-- ── Current Value ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Current Value</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="current_value">Current Value (₹) <span class="wealth-required-mark">*</span></label>
+          <input type="number" name="current_value" id="current_value" step="0.01" min="0"
+                 value="{{ values.current_value }}" required />
+        </div>
+        <div class="form-group">
+          <label for="value_as_of">Value As Of</label>
+          <input type="date" name="value_as_of" id="value_as_of" value="{{ values.value_as_of }}" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Ownership ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">3</span><span class="wealth-card-title">Ownership</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="ownership_type">Ownership Type <span class="wealth-required-mark">*</span></label>
+          <select name="ownership_type" id="ownership_type" class="wealth-select" required>
+            {% for ot in ownership_types %}
+              <option value="{{ ot }}" {{ 'selected' if values.ownership_type == ot }}>{{ ot }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ownership_percentage">Ownership Percentage (%) <span class="wealth-required-mark">*</span></label>
+          <input type="number" name="ownership_percentage" id="ownership_percentage" step="0.01" min="0" max="100"
+                 value="{{ values.ownership_percentage if values.ownership_percentage != '' else 100 }}" required />
+        </div>
+      </div>
+      <div style="font-size:0.78rem; color:var(--muted);">
+        Example: a ₹1 Crore property at 50% ownership shows an attributable value of ₹50 Lakh — the original ₹1 Crore value is never changed.
+      </div>
+    </div>
+
+    <!-- ── Acquisition ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">4</span><span class="wealth-card-title">Acquisition</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="acquisition_date">Acquisition Date</label>
+          <input type="date" name="acquisition_date" id="acquisition_date" value="{{ values.acquisition_date }}" />
+        </div>
+        <div class="form-group">
+          <label for="acquisition_value">Acquisition Value (₹)</label>
+          <input type="number" name="acquisition_value" id="acquisition_value" step="0.01" min="0"
+                 value="{{ values.acquisition_value }}" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Source ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">5</span><span class="wealth-card-title">Source</span></div>
+      <div class="form-group">
+        <label for="source_type">Source Type <span class="wealth-required-mark">*</span></label>
+        <select name="source_type" id="source_type" class="wealth-select" required onchange="applySourceType()">
+          {% for st in source_types %}
+            <option value="{{ st }}" {{ 'selected' if values.source_type == st }}>{{ st }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group wealth-group" id="grp-family-source">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+          <div class="form-group">
+            <label for="original_owner">Original Owner</label>
+            <input type="text" name="original_owner" id="original_owner" value="{{ values.original_owner }}"
+                   placeholder="e.g. Father's name" />
+          </div>
+          <div class="form-group">
+            <label for="original_owner_relationship">Relationship</label>
+            <input type="text" name="original_owner_relationship" id="original_owner_relationship"
+                   value="{{ values.original_owner_relationship }}" placeholder="e.g. Father" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="date_received">Date Received</label>
+          <input type="date" name="date_received" id="date_received" value="{{ values.date_received }}" />
+        </div>
+        <div style="font-size:0.76rem; color:var(--muted);">
+          This information is what will let this asset appear under Family &amp; Inherited Wealth later — no separate record is created.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Category-Specific: Real Estate ── -->
+    <div class="wealth-card wealth-group wealth-card-conditional" id="grp-real_estate">
+      <div class="wealth-card-heading-plain">Real Estate Details</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="property_type">Property Type</label>
+          <input type="text" name="property_type" id="property_type" value="{{ values.property_type }}" />
+        </div>
+        <div class="form-group">
+          <label for="property_address">Property Address</label>
+          <input type="text" name="property_address" id="property_address" value="{{ values.property_address }}" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="city">City</label>
+          <input type="text" name="city" id="city" value="{{ values.city }}" />
+        </div>
+        <div class="form-group">
+          <label for="state">State</label>
+          <input type="text" name="state" id="state" value="{{ values.state }}" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="area">Area</label>
+          <input type="number" name="area" id="area" step="0.01" min="0" value="{{ values.area }}" />
+        </div>
+        <div class="form-group">
+          <label for="area_unit">Area Unit</label>
+          <select name="area_unit" id="area_unit" class="wealth-select">
+            <option value="">— Select —</option>
+            {% for u in area_units %}<option value="{{ u }}" {{ 'selected' if values.area_unit == u }}>{{ u }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Category-Specific: Precious Metals ── -->
+    <div class="wealth-card wealth-group wealth-card-conditional" id="grp-precious_metals">
+      <div class="wealth-card-heading-plain">Precious Metal Details</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="metal_type">Metal Type</label>
+          <select name="metal_type" id="metal_type" class="wealth-select">
+            <option value="">— Select —</option>
+            <option value="Gold" {{ 'selected' if values.metal_type == 'Gold' }}>Gold</option>
+            <option value="Silver" {{ 'selected' if values.metal_type == 'Silver' }}>Silver</option>
+            <option value="Other" {{ 'selected' if values.metal_type == 'Other' }}>Other</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="weight">Weight</label>
+          <input type="number" name="weight" id="weight" step="0.001" min="0" value="{{ values.weight }}" />
+        </div>
+        <div class="form-group">
+          <label for="weight_unit">Weight Unit</label>
+          <select name="weight_unit" id="weight_unit" class="wealth-select">
+            <option value="">— Select —</option>
+            {% for u in weight_units %}<option value="{{ u }}" {{ 'selected' if values.weight_unit == u }}>{{ u }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted);">
+        Purchase price is captured under Acquisition above — no separate field here.
+      </div>
+    </div>
+
+    <!-- ── Category-Specific: Vehicles ── -->
+    <div class="wealth-card wealth-group wealth-card-conditional" id="grp-vehicles">
+      <div class="wealth-card-heading-plain">Vehicle Details</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="vehicle_type">Vehicle Type</label>
+          <input type="text" name="vehicle_type" id="vehicle_type" value="{{ values.vehicle_type }}" />
+        </div>
+        <div class="form-group">
+          <label for="registration_number">Registration Number</label>
+          <input type="text" name="registration_number" id="registration_number" value="{{ values.registration_number }}" />
+        </div>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted);">
+        Purchase date/value are captured under Acquisition above.
+      </div>
+    </div>
+
+    <!-- ── Category-Specific: Institution/Reference (shared: Bank & Deposits, Investments) ── -->
+    <div class="wealth-card wealth-group wealth-card-conditional" id="grp-institution_ref">
+      <div class="wealth-card-heading-plain">Institution</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="institution">Institution</label>
+          <input type="text" name="institution" id="institution" value="{{ values.institution }}" />
+        </div>
+        <div class="form-group">
+          <label for="account_reference">Account / Reference Number</label>
+          <input type="text" name="account_reference" id="account_reference" value="{{ values.account_reference }}" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Category-Specific: Bank & Deposits ── -->
+    <div class="wealth-card wealth-group wealth-card-conditional" id="grp-bank_deposits">
+      <div class="wealth-card-heading-plain">Deposit Details</div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="deposit_type">Deposit Type</label>
+          <input type="text" name="deposit_type" id="deposit_type" value="{{ values.deposit_type }}" />
+        </div>
+        <div class="form-group">
+          <label for="interest_rate">Interest Rate (%) — informational only</label>
+          <input type="number" name="interest_rate" id="interest_rate" step="0.01" min="0" max="100" value="{{ values.interest_rate }}" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="maturity_date">Maturity Date</label>
+        <input type="date" name="maturity_date" id="maturity_date" value="{{ values.maturity_date }}" />
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted);">
+        Interest is never auto-calculated — this rate is informational only.
+      </div>
+    </div>
+
+    <!-- ── Category-Specific: Investments ── -->
+    <div class="wealth-card wealth-group wealth-card-conditional" id="grp-investments">
+      <div class="wealth-card-heading-plain">Investment Details</div>
+      <div class="form-group">
+        <label for="investment_type">Investment Type</label>
+        <input type="text" name="investment_type" id="investment_type" value="{{ values.investment_type }}" placeholder="e.g. Bonds" />
+      </div>
+    </div>
+
+    <!-- ── Status & Notes ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">6</span><span class="wealth-card-title">Status &amp; Notes</span></div>
+      <div class="form-group">
+        <label for="status">Status</label>
+        <select name="status" id="status" class="wealth-select">
+          {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if values.status == s }}>{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea name="notes" id="notes" rows="3"
+                  style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; resize:vertical;">{{ values.notes }}</textarea>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button type="submit" class="btn-primary" style="width:auto; padding:11px 28px;">
+        {{ 'Save Changes' if is_edit else 'Add Asset' }}
+      </button>
+      <a href="{{ url_for('wealth.asset_detail', asset_id=asset.id) if is_edit else url_for('wealth.assets_listing') }}" class="wealth-btn-cancel">
+        Cancel
+      </a>
+    </div>
+
+  </form>
+</div>
+
+<style>
+  .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 18px; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .wealth-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .wealth-required-mark { color: var(--down); font-weight: 700; }
+
+  .wealth-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .wealth-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .wealth-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wealth-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .wealth-card-heading-plain {
+    font-size: 0.85rem; font-weight: 700; color: var(--accent2);
+    margin-bottom: 16px; padding-left: 12px; border-left: 3px solid var(--accent2);
+  }
+  .wealth-card-conditional { border-color: var(--accent2); }
+
+  .wealth-select {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 11px 14px; color: var(--text);
+    font-family: 'Inter', sans-serif; font-size: 0.9rem; outline: none;
+  }
+  .wealth-select:focus { border-color: var(--accent); }
+  .wealth-group { display: none; }
+
+  .wealth-btn-cancel {
+    display: inline-flex; align-items: center; padding: 10px 20px;
+    color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+    transition: border-color 0.2s;
+  }
+  .wealth-btn-cancel:hover { border-color: var(--muted2); }
+
+  @media (max-width: 640px) {
+    .wealth-card > div[style*="grid-template-columns:1fr 1fr"],
+    .wealth-card > div[style*="grid-template-columns:1fr 1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+  }
+</style>
+
+<script>
+  const ASSET_TYPES_BY_CATEGORY = {{ asset_types_by_category | tojson }};
+  const FIELD_GROUPS_BY_CATEGORY = {{ field_groups | tojson }};
+  const CURRENT_ASSET_TYPE = {{ (values.asset_type or '') | tojson }};
+  const CURRENT_SOURCE_TYPE = {{ (values.source_type or '') | tojson }};
+
+  function applyCategory() {
+    const catSelect = document.getElementById('category');
+    const category = catSelect.value;
+    const typeSelect = document.getElementById('asset_type');
+
+    // Rebuild Asset Type dropdown for the selected category
+    typeSelect.innerHTML = '';
+    if (!category) {
+      typeSelect.innerHTML = '<option value="">— Select category first —</option>';
+    } else {
+      const opt0 = document.createElement('option');
+      opt0.value = ''; opt0.textContent = '— Select type —';
+      typeSelect.appendChild(opt0);
+      const types = ASSET_TYPES_BY_CATEGORY[category] || [];
+      types.forEach(function (t) {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        if (t === CURRENT_ASSET_TYPE) opt.selected = true;
+        typeSelect.appendChild(opt);
+      });
+    }
+
+    // Show/hide category-specific groups
+    document.querySelectorAll('.wealth-group:not(#grp-family-source)').forEach(function (el) {
+      el.style.display = 'none';
+    });
+    const groups = FIELD_GROUPS_BY_CATEGORY[category] || [];
+    groups.forEach(function (g) {
+      const el = document.getElementById('grp-' + g);
+      if (el) el.style.display = 'block';
+    });
+  }
+
+  function applySourceType() {
+    const source = document.getElementById('source_type').value;
+    const familyLike = ['Inherited', 'Gifted / Transferred', 'Family Owned', 'Joint Family Asset'];
+    const grp = document.getElementById('grp-family-source');
+    grp.style.display = familyLike.includes(source) ? 'block' : 'none';
+  }
+
+  window.addEventListener('DOMContentLoaded', function () {
+    applyCategory();
+    applySourceType();
+  });
+</script>
+{% endblock %}

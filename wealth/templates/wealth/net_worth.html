@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Net Worth — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="wealth-wrap">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">← Wealth Centre</a>
+  </div>
+
+  <div class="wealth-header">
+    <h1>Net Worth</h1>
+    <p>Your financial position based on your current assets and outstanding liabilities.</p>
+  </div>
+
+  {% if not data.has_wealth_data %}
+    <!-- ── No Data State (Section 21 — distinct from a real ₹0) ── -->
+    <div class="wealth-list-card">
+      <div class="wealth-empty-state">
+        <div class="wealth-empty-title">Your Net Worth isn't available yet</div>
+        <div class="wealth-empty-sub">Add your assets and liabilities to start building your complete financial picture.</div>
+        <div style="display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap;">
+          <a href="{{ url_for('wealth.add_asset') }}" class="wealth-btn-primary">+ Add Asset</a>
+          <a href="{{ url_for('wealth.add_liability') }}" class="wealth-btn-secondary">+ Add Liability</a>
+        </div>
+      </div>
+    </div>
+  {% else %}
+
+  <!-- ── Primary Net Worth ── -->
+  <div class="wealth-summary-grid wealth-summary-grid-2">
+    <div class="wealth-stat-card wealth-stat-primary">
+      <div class="wealth-stat-label">Total Net Worth</div>
+      <div class="wealth-stat-value-lg {{ 'wealth-negative' if data.net_worth < 0 }}">{{ format_inr(data.net_worth) }}</div>
+      <div class="wealth-stat-helper">Total Assets − Total Liabilities</div>
+    </div>
+    <div class="wealth-stat-card wealth-stat-primary">
+      <div class="wealth-stat-label">My Attributable Net Worth</div>
+      <div class="wealth-stat-value-lg {{ 'wealth-negative' if data.attributable_net_worth < 0 }}">{{ format_inr(data.attributable_net_worth) }}</div>
+      <div class="wealth-stat-helper">My Attributable Assets − My Attributable Liabilities</div>
+    </div>
+  </div>
+
+  <div class="wealth-explainer">
+    Your attributable value reflects your ownership percentage of jointly or partially owned assets and liabilities. Nothing here changes the actual stored value of any asset or liability — this is purely a calculated view.
+  </div>
+
+  <!-- ── Assets vs Liabilities ── -->
+  <div class="wealth-summary-grid">
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Assets</div>
+      <div class="wealth-stat-value">{{ format_inr(data.total_assets) }}</div>
+      <div class="wealth-stat-helper">My Attributable: {{ format_inr(data.attributable_assets) }}</div>
+    </div>
+    <div class="wealth-stat-card">
+      <div class="wealth-stat-label">Liabilities</div>
+      <div class="wealth-stat-value">{{ format_inr(data.total_liabilities) }}</div>
+      <div class="wealth-stat-helper">My Attributable: {{ format_inr(data.attributable_liabilities) }}</div>
+    </div>
+  </div>
+
+  <!-- ── Simple Comparison ── -->
+  <div class="wealth-comparison">
+    <div class="wealth-comparison-item">
+      <span class="wealth-comparison-label">Assets</span>
+      <span class="wealth-comparison-value">{{ format_inr(data.total_assets) }}</span>
+    </div>
+    <span class="wealth-comparison-op">−</span>
+    <div class="wealth-comparison-item">
+      <span class="wealth-comparison-label">Liabilities</span>
+      <span class="wealth-comparison-value">{{ format_inr(data.total_liabilities) }}</span>
+    </div>
+    <span class="wealth-comparison-op">=</span>
+    <div class="wealth-comparison-item wealth-comparison-result">
+      <span class="wealth-comparison-label">Net Worth</span>
+      <span class="wealth-comparison-value {{ 'wealth-negative' if data.net_worth < 0 }}">{{ format_inr(data.net_worth) }}</span>
+    </div>
+  </div>
+
+  <!-- ── Asset Breakdown ── -->
+  {% if data.category_breakdown %}
+  <div class="wealth-list-card">
+    <div class="wealth-section-label">Asset Breakdown</div>
+    <div class="wealth-breakdown-list">
+      {% for c in data.category_breakdown %}
+      <a href="{{ url_for('wealth.assets_listing', category=c.category) }}" class="wealth-breakdown-row">
+        <span class="wealth-breakdown-category">{{ c.category }}</span>
+        <span class="wealth-breakdown-values">
+          <span class="wealth-breakdown-total">{{ format_inr(c.total) }}</span>
+          {% if c.attributable != c.total %}
+          <span class="wealth-breakdown-attributable">My Share: {{ format_inr(c.attributable) }}</span>
+          {% endif %}
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Liability Breakdown ── -->
+  {% if data.liability_category_breakdown %}
+  <div class="wealth-list-card">
+    <div class="wealth-section-label">Liability Breakdown</div>
+    <div class="wealth-breakdown-list">
+      {% for c in data.liability_category_breakdown %}
+      <a href="{{ url_for('wealth.liabilities_listing', category=c.category) }}" class="wealth-breakdown-row">
+        <span class="wealth-breakdown-category">{{ c.category }}</span>
+        <span class="wealth-breakdown-values">
+          <span class="wealth-breakdown-total">{{ format_inr(c.total) }}</span>
+          {% if c.attributable != c.total %}
+          <span class="wealth-breakdown-attributable">My Share: {{ format_inr(c.attributable) }}</span>
+          {% endif %}
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}
+</div>
+
+<style>
+  .wealth-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .wealth-breadcrumb { font-size: 0.95rem; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+
+  .wealth-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  .wealth-header p { color: var(--muted); font-size: 0.875rem; }
+
+  .wealth-btn-primary {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 20px; font-size: 0.85rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; transition: opacity 0.2s;
+  }
+  .wealth-btn-primary:hover { opacity: 0.88; }
+  .wealth-btn-secondary {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 20px; font-size: 0.85rem; font-weight: 700; color: var(--text2);
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; transition: all 0.2s;
+  }
+  .wealth-btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .wealth-summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .wealth-summary-grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .wealth-stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px; box-shadow: var(--shadow-sm); }
+  .wealth-stat-primary { border-color: var(--accent); border-width: 1.5px; }
+  .wealth-stat-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .wealth-stat-value { font-family: 'Roboto Mono', monospace; font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+  .wealth-stat-value-lg { font-family: 'Roboto Mono', monospace; font-size: 1.7rem; font-weight: 700; color: var(--accent); }
+  .wealth-stat-value-lg.wealth-negative, .wealth-stat-value.wealth-negative { color: var(--down); }
+  .wealth-stat-helper { font-size: 0.75rem; color: var(--muted); margin-top: 8px; }
+
+  .wealth-explainer {
+    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 14px 18px; font-size: 0.82rem; color: var(--text2); line-height: 1.6;
+  }
+
+  .wealth-comparison {
+    display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px;
+    box-shadow: var(--shadow-sm);
+  }
+  .wealth-comparison-item { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 100px; }
+  .wealth-comparison-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-comparison-value { font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 1.1rem; color: var(--text); }
+  .wealth-comparison-value.wealth-negative { color: var(--down); }
+  .wealth-comparison-op { font-size: 1.3rem; color: var(--muted); font-weight: 300; }
+  .wealth-comparison-result .wealth-comparison-value { color: var(--accent); font-size: 1.3rem; }
+  .wealth-comparison-result .wealth-comparison-value.wealth-negative { color: var(--down); }
+
+  .wealth-list-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+  .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; }
+
+  .wealth-breakdown-list { display: flex; flex-direction: column; gap: 2px; }
+  .wealth-breakdown-row {
+    display: flex; justify-content: space-between; align-items: center; padding: 12px 10px;
+    border-bottom: 1px solid var(--border); text-decoration: none; color: inherit; border-radius: 6px; transition: background 0.2s;
+  }
+  .wealth-breakdown-row:last-child { border-bottom: none; }
+  .wealth-breakdown-row:hover { background: var(--surface2); }
+  .wealth-breakdown-category { font-size: 0.88rem; font-weight: 600; color: var(--text); }
+  .wealth-breakdown-values { text-align: right; display: flex; flex-direction: column; gap: 2px; }
+  .wealth-breakdown-total { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); }
+  .wealth-breakdown-attributable { font-size: 0.72rem; color: var(--muted); }
+
+  .wealth-empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .wealth-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .wealth-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  @media (max-width: 700px) {
+    .wealth-summary-grid, .wealth-summary-grid-2 { grid-template-columns: 1fr; }
+    .wealth-comparison { flex-direction: column; }
+    .wealth-comparison-op { transform: rotate(90deg); }
+  }
+</style>
+{% endblock %}

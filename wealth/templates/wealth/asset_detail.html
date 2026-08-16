@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}{{ asset.name }} — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "wealth/_confirm_modal.html" %}
+<div style="max-width:960px; margin:0 auto;">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">Wealth Centre</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <a href="{{ url_for('wealth.assets_listing') }}">Assets</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <span class="wealth-breadcrumb-current">{{ asset.name }}</span>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
+    <div>
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">
+        {{ asset.category }}{% if asset.asset_type %} · {{ asset.asset_type }}{% endif %}
+        {% if asset.is_archived %}<span class="wealth-badge wealth-badge-muted">Archived</span>{% endif %}
+      </div>
+      <h1 style="font-size:1.5rem; font-weight:700; color:var(--text);">{{ asset.name }}</h1>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <a href="{{ url_for('wealth.edit_asset', asset_id=asset.id) }}" class="wealth-btn-primary-outline">Edit</a>
+      {% if asset.is_archived %}
+        <form method="POST" action="{{ url_for('wealth.restore_asset', asset_id=asset.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="wealth-btn-primary-outline">Restore</button>
+        </form>
+        <form method="POST" action="{{ url_for('wealth.delete_asset_permanent', asset_id=asset.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="button" class="wealth-btn-danger-outline"
+                  onclick="confirmAction(this.form, 'Delete Asset?', 'This asset will be permanently removed. This action cannot be undone.', 'Delete Permanently')">
+            Delete Permanently
+          </button>
+        </form>
+      {% else %}
+        <form method="POST" action="{{ url_for('wealth.archive_asset', asset_id=asset.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="next" value="detail" />
+          <button type="button" class="wealth-btn-neutral-outline"
+                  onclick="confirmAction(this.form, 'Archive this asset?', 'You can restore it any time.', 'Archive')">
+            Archive
+          </button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Financial Information ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Financial Information</span></div>
+    <div class="wealth-detail-grid">
+      <div class="wealth-field"><span class="wealth-field-label">Current Value</span><span class="wealth-field-value wealth-accent">{{ format_inr(asset.current_value) }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Value As Of</span><span class="wealth-field-value">{{ format_date(asset.value_as_of) }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Acquisition Value</span><span class="wealth-field-value">{{ format_inr(asset.acquisition_value) if asset.acquisition_value is not none else '—' }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Acquisition Date</span><span class="wealth-field-value">{{ format_date(asset.acquisition_date) }}</span></div>
+    </div>
+  </div>
+
+  <!-- ── Ownership ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Ownership</span></div>
+    <div class="wealth-detail-grid">
+      <div class="wealth-field"><span class="wealth-field-label">Ownership Type</span><span class="wealth-field-value">{{ asset.ownership_type }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Ownership Percentage</span><span class="wealth-field-value">{{ asset.ownership_percentage }}%</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">My Attributable Value</span><span class="wealth-field-value wealth-accent">{{ format_inr(asset.attributable_value) }}</span></div>
+    </div>
+    {% if asset.ownership_percentage < 100 %}
+    <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
+      Asset value {{ format_inr(asset.current_value) }} × {{ asset.ownership_percentage }}% ownership = {{ format_inr(asset.attributable_value) }} attributable to you. The full asset value is never changed by ownership.
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Source ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading"><span class="wealth-card-num">3</span><span class="wealth-card-title">Source</span></div>
+    <div class="wealth-detail-grid">
+      <div class="wealth-field"><span class="wealth-field-label">Source Type</span><span class="wealth-field-value">{{ asset.source_type }}</span></div>
+      {% if asset.original_owner %}<div class="wealth-field"><span class="wealth-field-label">Original Owner</span><span class="wealth-field-value">{{ asset.original_owner }}</span></div>{% endif %}
+      {% if asset.original_owner_relationship %}<div class="wealth-field"><span class="wealth-field-label">Relationship</span><span class="wealth-field-value">{{ asset.original_owner_relationship }}</span></div>{% endif %}
+      {% if asset.date_received %}<div class="wealth-field"><span class="wealth-field-label">Date Received</span><span class="wealth-field-value">{{ format_date(asset.date_received) }}</span></div>{% endif %}
+    </div>
+  </div>
+
+  <!-- ── Category-Specific Information ── -->
+  {% if asset.category == 'Real Estate' and (asset.property_type or asset.property_address or asset.city or asset.state or asset.area) %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Real Estate Details</div>
+    <div class="wealth-detail-grid">
+      {% if asset.property_type %}<div class="wealth-field"><span class="wealth-field-label">Property Type</span><span class="wealth-field-value">{{ asset.property_type }}</span></div>{% endif %}
+      {% if asset.property_address %}<div class="wealth-field"><span class="wealth-field-label">Address</span><span class="wealth-field-value">{{ asset.property_address }}</span></div>{% endif %}
+      {% if asset.city %}<div class="wealth-field"><span class="wealth-field-label">City</span><span class="wealth-field-value">{{ asset.city }}</span></div>{% endif %}
+      {% if asset.state %}<div class="wealth-field"><span class="wealth-field-label">State</span><span class="wealth-field-value">{{ asset.state }}</span></div>{% endif %}
+      {% if asset.area %}<div class="wealth-field"><span class="wealth-field-label">Area</span><span class="wealth-field-value">{{ asset.area }} {{ asset.area_unit or '' }}</span></div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if asset.category == 'Precious Metals' and (asset.metal_type or asset.weight) %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Precious Metal Details</div>
+    <div class="wealth-detail-grid">
+      {% if asset.metal_type %}<div class="wealth-field"><span class="wealth-field-label">Metal Type</span><span class="wealth-field-value">{{ asset.metal_type }}</span></div>{% endif %}
+      {% if asset.weight %}<div class="wealth-field"><span class="wealth-field-label">Weight</span><span class="wealth-field-value">{{ asset.weight }} {{ asset.weight_unit or '' }}</span></div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if asset.category == 'Vehicles' and (asset.vehicle_type or asset.registration_number) %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Vehicle Details</div>
+    <div class="wealth-detail-grid">
+      {% if asset.vehicle_type %}<div class="wealth-field"><span class="wealth-field-label">Vehicle Type</span><span class="wealth-field-value">{{ asset.vehicle_type }}</span></div>{% endif %}
+      {% if asset.registration_number %}<div class="wealth-field"><span class="wealth-field-label">Registration Number</span><span class="wealth-field-value">{{ asset.registration_number }}</span></div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if asset.category == 'Bank & Deposits' and (asset.institution or asset.deposit_type) %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Deposit Details</div>
+    <div class="wealth-detail-grid">
+      {% if asset.institution %}<div class="wealth-field"><span class="wealth-field-label">Institution</span><span class="wealth-field-value">{{ asset.institution }}</span></div>{% endif %}
+      {% if asset.account_reference %}<div class="wealth-field"><span class="wealth-field-label">Account / Reference</span><span class="wealth-field-value">{{ asset.account_reference }}</span></div>{% endif %}
+      {% if asset.deposit_type %}<div class="wealth-field"><span class="wealth-field-label">Deposit Type</span><span class="wealth-field-value">{{ asset.deposit_type }}</span></div>{% endif %}
+      {% if asset.interest_rate is not none %}<div class="wealth-field"><span class="wealth-field-label">Interest Rate</span><span class="wealth-field-value">{{ asset.interest_rate }}%</span></div>{% endif %}
+      {% if asset.maturity_date %}<div class="wealth-field"><span class="wealth-field-label">Maturity Date</span><span class="wealth-field-value">{{ format_date(asset.maturity_date) }}</span></div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if asset.category == 'Investments' and (asset.institution or asset.investment_type) %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Investment Details</div>
+    <div class="wealth-detail-grid">
+      {% if asset.institution %}<div class="wealth-field"><span class="wealth-field-label">Institution</span><span class="wealth-field-value">{{ asset.institution }}</span></div>{% endif %}
+      {% if asset.account_reference %}<div class="wealth-field"><span class="wealth-field-label">Account / Reference</span><span class="wealth-field-value">{{ asset.account_reference }}</span></div>{% endif %}
+      {% if asset.investment_type %}<div class="wealth-field"><span class="wealth-field-label">Investment Type</span><span class="wealth-field-value">{{ asset.investment_type }}</span></div>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if asset.notes %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Notes</div>
+    <div style="font-size:0.9rem; color:var(--text2); white-space:pre-wrap;">{{ asset.notes }}</div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 14px; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .wealth-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .wealth-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .wealth-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .wealth-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wealth-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .wealth-card-heading-plain {
+    font-size: 0.85rem; font-weight: 700; color: var(--accent2);
+    margin-bottom: 16px; padding-left: 12px; border-left: 3px solid var(--accent2);
+  }
+
+  .wealth-btn-primary-outline {
+    background: var(--accent-bg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--accent); font-family: 'Inter', sans-serif;
+    text-decoration: none; cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-primary-outline:hover { background: var(--accent); color: #fff; }
+  .wealth-btn-neutral-outline {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--text2); font-family: 'Inter', sans-serif;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-neutral-outline:hover { border-color: var(--muted2); }
+  .wealth-btn-danger-outline {
+    background: var(--surface); border: 1px solid var(--down);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--down); font-family: 'Inter', sans-serif;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-danger-outline:hover { background: var(--down-bg); }
+
+  .wealth-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .wealth-field { display: flex; flex-direction: column; gap: 4px; }
+  .wealth-field-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-field-value { font-size: 0.92rem; color: var(--text); font-weight: 500; }
+  .wealth-field-value.wealth-accent { color: var(--accent); font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 1.15rem; }
+
+  .wealth-badge { display: inline-block; margin-left: 8px; font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .wealth-badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+  @media (max-width: 600px) {
+    .wealth-detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

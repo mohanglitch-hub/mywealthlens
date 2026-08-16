@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}{{ liability.name }} — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "wealth/_confirm_modal.html" %}
+<div style="max-width:960px; margin:0 auto;">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">Wealth Centre</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <a href="{{ url_for('wealth.liabilities_listing') }}">Liabilities</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <span class="wealth-breadcrumb-current">{{ liability.name }}</span>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
+    <div>
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">
+        {{ liability.category }}{% if liability.liability_type %} · {{ liability.liability_type }}{% endif %}
+        {% if liability.is_archived %}<span class="wealth-badge wealth-badge-muted">Archived</span>{% endif %}
+      </div>
+      <h1 style="font-size:1.5rem; font-weight:700; color:var(--text);">{{ liability.name }}</h1>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <a href="{{ url_for('wealth.edit_liability', liability_id=liability.id) }}" class="wealth-btn-primary-outline">Edit</a>
+      {% if liability.is_archived %}
+        <form method="POST" action="{{ url_for('wealth.restore_liability', liability_id=liability.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="wealth-btn-primary-outline">Restore</button>
+        </form>
+        <form method="POST" action="{{ url_for('wealth.delete_liability_permanent', liability_id=liability.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="button" class="wealth-btn-danger-outline"
+                  onclick="confirmAction(this.form, 'Delete Liability?', 'This liability will be permanently removed. This action cannot be undone.', 'Delete Permanently')">
+            Delete Permanently
+          </button>
+        </form>
+      {% else %}
+        <form method="POST" action="{{ url_for('wealth.archive_liability', liability_id=liability.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="next" value="detail" />
+          <button type="button" class="wealth-btn-neutral-outline"
+                  onclick="confirmAction(this.form, 'Archive this liability?', 'You can restore it any time.', 'Archive')">
+            Archive
+          </button>
+        </form>
+      {% endif %}
+      <a href="{{ url_for('wealth.liabilities_listing') }}" class="wealth-btn-neutral-outline">Back to Liabilities</a>
+    </div>
+  </div>
+
+  <!-- ── Financial Information ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Financial Information</span></div>
+    <div class="wealth-detail-grid">
+      <div class="wealth-field"><span class="wealth-field-label">Original Amount</span><span class="wealth-field-value">{{ format_inr(liability.original_amount) if liability.original_amount else '—' }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Outstanding Liability</span><span class="wealth-field-value wealth-accent">{{ format_inr(liability.outstanding_amount) }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Interest Rate</span><span class="wealth-field-value">{{ (liability.interest_rate ~ '%') if liability.interest_rate is not none else '—' }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Start Date</span><span class="wealth-field-value">{{ format_date(liability.start_date) }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Maturity / End Date</span><span class="wealth-field-value">{{ format_date(liability.expected_end_date) }}</span></div>
+    </div>
+  </div>
+
+  <!-- ── Lender Information ── -->
+  {% if liability.lender or liability.account_reference %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Lender Information</span></div>
+    <div class="wealth-detail-grid">
+      {% if liability.lender %}<div class="wealth-field"><span class="wealth-field-label">Lender / Institution</span><span class="wealth-field-value">{{ liability.lender }}</span></div>{% endif %}
+      {% if liability.account_reference %}<div class="wealth-field"><span class="wealth-field-label">Account / Loan Reference</span><span class="wealth-field-value">{{ liability.account_reference }}</span></div>{% endif %}
+    </div>
+    <div style="font-size:0.72rem; color:var(--muted); margin-top:10px;">
+      This reference is only ever shown here — never in listings, search results, or the dashboard.
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Ownership ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading"><span class="wealth-card-num">3</span><span class="wealth-card-title">Ownership</span></div>
+    <div class="wealth-detail-grid">
+      <div class="wealth-field"><span class="wealth-field-label">Ownership Type</span><span class="wealth-field-value">{{ liability.ownership_type }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">My Ownership</span><span class="wealth-field-value">{{ liability.ownership_percentage }}%</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">My Attributable Liability</span><span class="wealth-field-value wealth-accent">{{ format_inr(liability.attributable_liability) }}</span></div>
+    </div>
+    {% if liability.ownership_percentage < 100 %}
+    <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
+      Outstanding liability {{ format_inr(liability.outstanding_amount) }} × {{ liability.ownership_percentage }}% ownership = {{ format_inr(liability.attributable_liability) }} attributable to you. The full outstanding amount is never changed.
+    </div>
+    {% endif %}
+  </div>
+
+  {% if liability.notes %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Notes</div>
+    <div style="font-size:0.9rem; color:var(--text2); white-space:pre-wrap;">{{ liability.notes }}</div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 14px; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .wealth-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .wealth-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .wealth-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .wealth-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wealth-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .wealth-card-heading-plain {
+    font-size: 0.85rem; font-weight: 700; color: var(--accent2);
+    margin-bottom: 16px; padding-left: 12px; border-left: 3px solid var(--accent2);
+  }
+
+  .wealth-btn-primary-outline {
+    background: var(--accent-bg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--accent); font-family: 'Inter', sans-serif;
+    text-decoration: none; cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-primary-outline:hover { background: var(--accent); color: #fff; }
+  .wealth-btn-neutral-outline {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--text2); font-family: 'Inter', sans-serif;
+    text-decoration: none; cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-neutral-outline:hover { border-color: var(--muted2); }
+  .wealth-btn-danger-outline {
+    background: var(--surface); border: 1px solid var(--down);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--down); font-family: 'Inter', sans-serif;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-danger-outline:hover { background: var(--down-bg); }
+
+  .wealth-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .wealth-field { display: flex; flex-direction: column; gap: 4px; }
+  .wealth-field-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-field-value { font-size: 0.92rem; color: var(--text); font-weight: 500; }
+  .wealth-field-value.wealth-accent { color: var(--accent); font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 1.15rem; }
+
+  .wealth-badge { display: inline-block; margin-left: 8px; font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .wealth-badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+  @media (max-width: 600px) {
+    .wealth-detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

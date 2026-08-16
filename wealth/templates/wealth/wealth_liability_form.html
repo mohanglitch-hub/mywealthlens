@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if is_edit else 'Add' }} Liability — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:960px; margin:0 auto;">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">Wealth Centre</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <a href="{{ url_for('wealth.liabilities_listing') }}">Liabilities</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <span class="wealth-breadcrumb-current">{{ 'Edit Liability' if is_edit else 'Add Liability' }}</span>
+  </div>
+
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">
+    {{ 'Edit Liability' if is_edit else 'Add Liability' }}
+  </h1>
+  <p style="color:var(--muted); font-size:0.875rem; margin-bottom:28px;">
+    Fields marked <span class="wealth-required-mark">*</span> are required.
+  </p>
+
+  <form method="POST" action="{{ url_for('wealth.edit_liability', liability_id=liability.id) if is_edit else url_for('wealth.add_liability') }}" id="liabilityForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <!-- ── Basic Information ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Basic Information</span></div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="category">Category <span class="wealth-required-mark">*</span></label>
+          <select name="category" id="category" class="wealth-select" required onchange="applyCategory()">
+            <option value="">— Select category —</option>
+            {% for cat in categories %}
+              <option value="{{ cat }}" {{ 'selected' if values.category == cat }}>{{ cat }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="liability_type">Liability Type <span class="wealth-required-mark">*</span></label>
+          <select name="liability_type" id="liability_type" class="wealth-select" required>
+            <option value="">— Select category first —</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="name">Liability Name <span class="wealth-required-mark">*</span></label>
+        <input type="text" name="name" id="name" value="{{ values.name }}"
+               placeholder="e.g. HDFC Home Loan, My Car Loan, ICICI Credit Card" required />
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description</label>
+        <textarea name="description" id="description" rows="2"
+                  style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; resize:vertical;">{{ values.description }}</textarea>
+      </div>
+    </div>
+
+    <!-- ── Financial Information ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Financial Information</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="original_amount">Original Amount (₹)</label>
+          <input type="number" name="original_amount" id="original_amount" step="0.01" min="0" value="{{ values.original_amount }}" />
+        </div>
+        <div class="form-group">
+          <label for="outstanding_amount">Outstanding Amount (₹) <span class="wealth-required-mark">*</span></label>
+          <input type="number" name="outstanding_amount" id="outstanding_amount" step="0.01" min="0"
+                 value="{{ values.outstanding_amount }}" required />
+        </div>
+      </div>
+      <div style="font-size:0.76rem; color:var(--muted); margin-bottom:14px;">
+        If provided, Outstanding Amount can't exceed Original Amount. Leave Original Amount blank or 0 if it's unknown — that check is skipped in that case.
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="interest_rate">Interest Rate (%) — informational only</label>
+          <input type="number" name="interest_rate" id="interest_rate" step="0.01" min="0" max="100" value="{{ values.interest_rate }}" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="start_date">Start Date</label>
+          <input type="date" name="start_date" id="start_date" value="{{ values.start_date }}" />
+        </div>
+        <div class="form-group">
+          <label for="expected_end_date">Maturity / End Date</label>
+          <input type="date" name="expected_end_date" id="expected_end_date" value="{{ values.expected_end_date }}" />
+        </div>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted);">
+        Interest is never auto-calculated — no EMI, amortization, or automatic balance updates happen anywhere in MyWealthLens.
+      </div>
+    </div>
+
+    <!-- ── Lender Information ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">3</span><span class="wealth-card-title">Lender Information</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="lender">Lender / Institution</label>
+          <input type="text" name="lender" id="lender" value="{{ values.lender }}" placeholder="e.g. HDFC Bank, Family Member" />
+        </div>
+        <div class="form-group">
+          <label for="account_reference">Account / Loan Reference</label>
+          <input type="text" name="account_reference" id="account_reference" value="{{ values.account_reference }}" />
+        </div>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted);">
+        This reference is only ever shown on this liability's own detail page — never in listings or search results.
+      </div>
+    </div>
+
+    <!-- ── Ownership ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">4</span><span class="wealth-card-title">Ownership</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="ownership_type">Ownership Type <span class="wealth-required-mark">*</span></label>
+          <select name="ownership_type" id="ownership_type" class="wealth-select" required>
+            {% for ot in ownership_types %}
+              <option value="{{ ot }}" {{ 'selected' if values.ownership_type == ot }}>{{ ot }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ownership_percentage">Ownership Percentage (%) <span class="wealth-required-mark">*</span></label>
+          <input type="number" name="ownership_percentage" id="ownership_percentage" step="0.01" min="0" max="100"
+                 value="{{ values.ownership_percentage if values.ownership_percentage != '' else 100 }}" required />
+        </div>
+      </div>
+      <div style="font-size:0.78rem; color:var(--muted);">
+        Example: a ₹40 Lakh outstanding liability at 50% ownership shows an attributable liability of ₹20 Lakh — the full outstanding amount is never changed.
+      </div>
+    </div>
+
+    <!-- ── Status & Notes ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">5</span><span class="wealth-card-title">Status &amp; Notes</span></div>
+      <div class="form-group">
+        <label for="status">Status</label>
+        <select name="status" id="status" class="wealth-select">
+          {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if values.status == s }}>{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea name="notes" id="notes" rows="3"
+                  style="width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:11px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.9rem; resize:vertical;">{{ values.notes }}</textarea>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:8px;">
+      <button type="submit" class="btn-primary" style="width:auto; padding:11px 28px;">
+        {{ 'Save Changes' if is_edit else 'Add Liability' }}
+      </button>
+      <a href="{{ url_for('wealth.liability_detail', liability_id=liability.id) if is_edit else url_for('wealth.liabilities_listing') }}" class="wealth-btn-cancel">
+        Cancel
+      </a>
+    </div>
+
+  </form>
+</div>
+
+<style>
+  .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 18px; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .wealth-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .wealth-required-mark { color: var(--down); font-weight: 700; }
+
+  .wealth-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .wealth-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .wealth-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wealth-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+
+  .wealth-select {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 11px 14px; color: var(--text);
+    font-family: 'Inter', sans-serif; font-size: 0.9rem; outline: none;
+  }
+  .wealth-select:focus { border-color: var(--accent); }
+
+  .wealth-btn-cancel {
+    display: inline-flex; align-items: center; padding: 10px 20px;
+    color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+    transition: border-color 0.2s;
+  }
+  .wealth-btn-cancel:hover { border-color: var(--muted2); }
+
+  @media (max-width: 640px) {
+    .wealth-card > div[style*="grid-template-columns:1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+  }
+</style>
+
+<script>
+  const LIABILITY_TYPES_BY_CATEGORY = {{ liability_types_by_category | tojson }};
+  const CURRENT_LIABILITY_TYPE = {{ (values.liability_type or '') | tojson }};
+
+  function applyCategory() {
+    const category = document.getElementById('category').value;
+    const typeSelect = document.getElementById('liability_type');
+
+    typeSelect.innerHTML = '';
+    if (!category) {
+      typeSelect.innerHTML = '<option value="">— Select category first —</option>';
+      return;
+    }
+    const opt0 = document.createElement('option');
+    opt0.value = ''; opt0.textContent = '— Select type —';
+    typeSelect.appendChild(opt0);
+    const types = LIABILITY_TYPES_BY_CATEGORY[category] || [];
+    types.forEach(function (t) {
+      const opt = document.createElement('option');
+      opt.value = t; opt.textContent = t;
+      if (t === CURRENT_LIABILITY_TYPE) opt.selected = true;
+      typeSelect.appendChild(opt);
+    });
+  }
+
+  window.addEventListener('DOMContentLoaded', applyCategory);
+</script>
+{% endblock %}
