@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.display_name }} — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "wealth/_confirm_modal.html" %}
+<div style="max-width:800px; margin:0 auto;">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">Wealth Centre</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <a href="{{ url_for('wealth.documents_vault') }}">Documents</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <span class="wealth-breadcrumb-current">{{ doc.display_name }}</span>
+  </div>
+
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:24px; flex-wrap:wrap; gap:12px;">
+    <div>
+      <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">
+        {{ doc.category }} · {{ doc.document_type }}
+      </div>
+      <h1 style="font-size:1.4rem; font-weight:700; color:var(--text);">{{ doc.display_name }}</h1>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      {% if is_previewable %}
+      <a href="{{ url_for('wealth.preview_document', document_id=doc.id) }}" target="_blank" class="wealth-btn-primary-outline">View</a>
+      {% endif %}
+      <a href="{{ url_for('wealth.download_document', document_id=doc.id) }}" class="wealth-btn-primary-outline">Download</a>
+      <a href="{{ url_for('wealth.edit_document', document_id=doc.id) }}" class="wealth-btn-neutral-outline">Edit</a>
+      <form method="POST" action="{{ url_for('wealth.delete_document', document_id=doc.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="button" class="wealth-btn-danger-outline"
+                onclick="confirmAction(this.form, 'Delete Wealth Document?', 'This document will be permanently removed. Deleting this document will not affect your Assets, Liabilities, Net Worth or Wealth History.', 'Delete Document')">
+          Delete
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Document Details ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Document Details</span></div>
+    <div class="wealth-detail-grid">
+      <div class="wealth-field"><span class="wealth-field-label">Document Type</span><span class="wealth-field-value">{{ doc.document_type }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Category</span><span class="wealth-field-value">{{ doc.category }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Original Filename</span><span class="wealth-field-value">{{ doc.original_name }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">File Size</span><span class="wealth-field-value">{{ doc.file_size_display }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Uploaded</span><span class="wealth-field-value">{{ format_date(doc.uploaded_at, "%d %b %Y, %I:%M %p") }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Last Updated</span><span class="wealth-field-value">{{ format_date(doc.updated_at, "%d %b %Y, %I:%M %p") }}</span></div>
+    </div>
+    {% if doc.description %}
+    <div style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+      <div class="wealth-field-label" style="margin-bottom:6px;">Description</div>
+      <div style="font-size:0.9rem; color:var(--text2); white-space:pre-wrap;">{{ doc.description }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Related Records ── -->
+  {% if related_asset or related_liability %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Related To</div>
+    <div class="wealth-detail-grid">
+      {% if related_asset %}
+      <div class="wealth-field">
+        <span class="wealth-field-label">Asset</span>
+        <span class="wealth-field-value"><a href="{{ url_for('wealth.asset_detail', asset_id=related_asset.id) }}" style="color:var(--accent2);">{{ related_asset.name }}</a></span>
+      </div>
+      {% endif %}
+      {% if related_liability %}
+      <div class="wealth-field">
+        <span class="wealth-field-label">Liability</span>
+        <span class="wealth-field-value"><a href="{{ url_for('wealth.liability_detail', liability_id=related_liability.id) }}" style="color:var(--accent2);">{{ related_liability.name }}</a></span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Related To</div>
+    <div style="font-size:0.85rem; color:var(--muted);">This is a standalone document — it isn't linked to a specific Asset or Liability.</div>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 14px; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .wealth-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .wealth-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .wealth-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .wealth-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wealth-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+  .wealth-card-heading-plain {
+    font-size: 0.85rem; font-weight: 700; color: var(--accent2);
+    margin-bottom: 16px; padding-left: 12px; border-left: 3px solid var(--accent2);
+  }
+
+  .wealth-btn-primary-outline {
+    background: var(--accent-bg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--accent); font-family: 'Inter', sans-serif;
+    text-decoration: none; cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-primary-outline:hover { background: var(--accent); color: #fff; }
+  .wealth-btn-neutral-outline {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--text2); font-family: 'Inter', sans-serif;
+    text-decoration: none; cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-neutral-outline:hover { border-color: var(--muted2); }
+  .wealth-btn-danger-outline {
+    background: var(--surface); border: 1px solid var(--down);
+    border-radius: 8px; padding: 9px 18px; font-size: 0.85rem;
+    font-weight: 600; color: var(--down); font-family: 'Inter', sans-serif;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .wealth-btn-danger-outline:hover { background: var(--down-bg); }
+
+  .wealth-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .wealth-field { display: flex; flex-direction: column; gap: 4px; }
+  .wealth-field-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-field-value { font-size: 0.92rem; color: var(--text); font-weight: 500; }
+
+  @media (max-width: 600px) {
+    .wealth-detail-grid { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}

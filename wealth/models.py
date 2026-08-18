@@ -481,8 +481,153 @@ class WealthSnapshot(db.Model):
     #   an explicit column (rather than relying on row-existence
     #   alone) purely so a future phase could soft-delete without a
     #   schema change — never read as ARCHIVED anywhere in Phase F.
+class WealthDocumentCategory:
+    """
+    Top-level document categories (Section 10 of Phase G spec).
+    Mirrors the WealthAssetCategory / ASSET_TYPES_BY_CATEGORY pattern
+    already established for Assets — a `category` column plus a
+    `document_type` column, rather than a single flat type string
+    (which is what Insurance Centre's simpler DocumentType uses).
+    This is a deliberate departure from Insurance's flatter model:
+    Wealth documents span a much wider category range (Property,
+    Loans, Retirement, Gold, Tax, ...) where two-level classification
+    genuinely helps filtering, and the Wealth module already has a
+    working two-level convention to reuse.
+    """
+    PROPERTY       = "Property"
+    BANKING        = "Banking & Deposits"
+    INVESTMENTS    = "Investments"
+    LOANS          = "Loans"
+    RETIREMENT     = "Retirement"
+    GOLD           = "Gold & Precious Assets"
+    VEHICLE        = "Vehicle"
+    FAMILY_ESTATE  = "Family & Estate"
+    TAX            = "Tax"
+    OTHER          = "Other"
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    ALL = [PROPERTY, BANKING, INVESTMENTS, LOANS, RETIREMENT,
+           GOLD, VEHICLE, FAMILY_ESTATE, TAX, OTHER]
+
+
+DOCUMENT_TYPES_BY_CATEGORY = {
+    WealthDocumentCategory.PROPERTY: [
+        "Sale Deed", "Purchase Agreement", "Registration Document",
+        "Property Tax Document", "Property Valuation", "Other Property Document",
+    ],
+    WealthDocumentCategory.BANKING: [
+        "Bank Statement", "Fixed Deposit", "Recurring Deposit",
+        "Account Document", "Other Banking Document",
+    ],
+    WealthDocumentCategory.INVESTMENTS: [
+        "Mutual Fund Statement", "Demat Statement", "Stock Statement",
+        "Bond Document", "Investment Statement", "Other Investment Document",
+    ],
+    WealthDocumentCategory.LOANS: [
+        "Loan Agreement", "Sanction Letter", "Loan Statement",
+        "Repayment Schedule", "Closure Certificate", "Other Loan Document",
+    ],
+    WealthDocumentCategory.RETIREMENT: [
+        "PPF", "EPF", "NPS", "Pension Document", "Other Retirement Document",
+    ],
+    WealthDocumentCategory.GOLD: [
+        "Purchase Invoice", "Valuation Certificate", "Ownership Document",
+        "Other Gold Document",
+    ],
+    WealthDocumentCategory.VEHICLE: [
+        "Registration Document", "Purchase Invoice", "Loan Document",
+        "Other Vehicle Document",
+    ],
+    WealthDocumentCategory.FAMILY_ESTATE: [
+        "Will", "Inheritance Document", "Nomination Document",
+        "Succession Document", "Family Asset Document", "Other Estate Document",
+    ],
+    WealthDocumentCategory.TAX: [
+        "Income Tax Document", "Capital Gains Document", "Tax Statement",
+        "Other Tax Document",
+    ],
+    WealthDocumentCategory.OTHER: [
+        "Other Wealth Document",
+    ],
+}
+
+CATEGORY_OF_DOCUMENT_TYPE = {
+    dtype: cat
+    for cat, types in DOCUMENT_TYPES_BY_CATEGORY.items()
+    for dtype in types
+}
+
+
+class WealthDocument(db.Model):
+    """
+    Phase G — Wealth Document Vault. Metadata only; the physical file
+    lives on disk (Section 65: database stores metadata, filesystem
+    stores content — mirrors Insurance/Retirement's InsuranceDocument
+    / RetirementDocument exactly).
+
+    A document may OPTIONALLY relate to one Asset and/or one
+    Liability (Section 7) — both are nullable, and a document is
+    equally valid standalone (e.g. a Will with no Asset/Liability at
+    all, Section 81). SET NULL on delete of the related Asset/
+    Liability, mirroring InsuranceDocument's policy_id relationship —
+    the document record survives even if its related Asset is later
+    deleted, for the user's own record-keeping.
+
+    Storage path convention: instance/documents/wealth/<user_id>/
+    (Section 16) — keyed by user_id, NOT by asset_id/liability_id,
+    specifically because standalone documents have no such id to key
+    on. This is the one deliberate difference from Insurance/
+    Retirement's per-policy/per-scheme folder convention.
+    """
+    __tablename__ = "wealth_document"
+    __table_args__ = (
+        db.Index("ix_wealth_doc_user",       "user_id"),
+        db.Index("ix_wealth_doc_type",       "document_type"),
+        db.Index("ix_wealth_doc_asset",      "asset_id"),
+        db.Index("ix_wealth_doc_liability",  "liability_id"),
+        db.Index("ix_wealth_doc_uploaded",   "uploaded_at"),
+    )
+
+    id      = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey("user.id", ondelete="CASCADE"),
+                        nullable=False)
+
+    asset_id = db.Column(db.Integer,
+                         db.ForeignKey("wealth_asset.id", ondelete="SET NULL"),
+                         nullable=True)
+    liability_id = db.Column(db.Integer,
+                             db.ForeignKey("wealth_liability.id", ondelete="SET NULL"),
+                             nullable=True)
+
+    category      = db.Column(db.String(50),  nullable=False)
+    document_type = db.Column(db.String(50),  nullable=False)
+
+    title       = db.Column(db.String(255), nullable=True)
+    description = db.Column(db.String(500), nullable=True)
+
+    original_name = db.Column(db.String(255), nullable=False)
+    stored_name   = db.Column(db.String(255), nullable=False)
+    file_path     = db.Column(db.String(500), nullable=False)
+    file_extension = db.Column(db.String(10), nullable=True)
+    mime_type      = db.Column(db.String(100), nullable=True)
+    file_size      = db.Column(db.Integer, nullable=True)
+
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at  = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def display_name(self):
+        return self.title or self.original_name
+
+    @property
+    def file_size_display(self):
+        if not self.file_size:
+            return "Unknown"
+        if self.file_size < 1024:
+            return f"{self.file_size} B"
+        if self.file_size < 1024 * 1024:
+            return f"{self.file_size / 1024:.1f} KB"
+        return f"{self.file_size / (1024*1024):.1f} MB"
 
     def __repr__(self):
-        return f"<WealthSnapshot user={self.user_id} date={self.snapshot_date} net_worth={self.net_worth}>"
+        return f"<WealthDocument {self.document_type} user={self.user_id} name={self.original_name}>"

@@ -181,6 +181,33 @@
   </div>
   {% endif %}
 
+  <!-- ── Wealth Document Vault (Phase G) ── -->
+  {% if document_summary %}
+  <div class="wealth-section-card">
+    <div class="wealth-section-header" style="margin-bottom:0;">
+      <div class="wealth-section-title" style="margin-bottom:0;">Wealth Documents</div>
+    </div>
+    <div class="wealth-stat-value" style="font-size:1.15rem; margin-top:2px;">{{ document_summary.total }} Document{{ 's' if document_summary.total != 1 }} Stored</div>
+    {% if document_summary.recent %}
+    <div class="wealth-section-desc">
+      Recent: {{ document_summary.recent | map(attribute='display_name') | join(', ') }}
+    </div>
+    {% endif %}
+    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Document Vault →</a>
+  </div>
+  {% else %}
+  <div class="wealth-section-card">
+    <div class="wealth-section-header" style="margin-bottom:0;">
+      <div class="wealth-section-title" style="margin-bottom:0;">Wealth Documents</div>
+    </div>
+    <div class="wealth-section-count">Keep important Wealth documents in one secure place</div>
+    <div class="wealth-section-desc">
+      Property papers, loan agreements, statements and more.
+    </div>
+    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">Add Your First Document →</a>
+  </div>
+  {% endif %}
+
 </div>
 
 <style>

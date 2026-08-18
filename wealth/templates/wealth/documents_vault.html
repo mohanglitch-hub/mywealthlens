@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Wealth Document Vault — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "wealth/_confirm_modal.html" %}
+<div class="wealth-wrap">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">← Wealth Centre</a>
+  </div>
+
+  <div class="wealth-header">
+    <div>
+      <h1>Wealth Document Vault</h1>
+      <p>Securely store property, loan, investment and other Wealth-related documents in one place.</p>
+    </div>
+    <a href="{{ url_for('wealth.add_document') }}" class="wealth-btn-primary">+ Add Document</a>
+  </div>
+
+  {% if summary.total == 0 %}
+    <!-- ── Empty State (Section 35) ── -->
+    <div class="wealth-list-card">
+      <div class="wealth-empty-state">
+        <div class="wealth-empty-icon">📁</div>
+        <div class="wealth-empty-title">Your Wealth Document Vault is Empty</div>
+        <div class="wealth-empty-sub">Securely store important financial and Wealth-related documents in one place. Property documents, investment statements, loan documents and other important records.</div>
+        <a href="{{ url_for('wealth.add_document') }}" class="wealth-btn-primary" style="margin-top:16px;">+ Add Your First Document</a>
+      </div>
+    </div>
+  {% else %}
+
+    <!-- ── Summary ── -->
+    <div class="wealth-summary-grid">
+      <div class="wealth-stat-card">
+        <div class="wealth-stat-label">Total Documents</div>
+        <div class="wealth-stat-value">{{ summary.total }}</div>
+      </div>
+      {% for c in summary.by_category[:3] %}
+      <div class="wealth-stat-card">
+        <div class="wealth-stat-label">{{ c.category }}</div>
+        <div class="wealth-stat-value">{{ c.count }}</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- ── Filters ── -->
+    <form method="GET" action="{{ url_for('wealth.documents_vault') }}" class="wealth-filter-bar">
+      <input type="text" name="q" value="{{ q }}" placeholder="Search by title, filename or description..." class="wealth-search-input" />
+      <select name="category" id="filterCategory" class="wealth-select" onchange="applyFilterCategory(); this.form.submit()">
+        <option value="">All Categories</option>
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if category == c }}>{{ c }}</option>{% endfor %}
+      </select>
+      <select name="document_type" id="filterDocType" class="wealth-select" onchange="this.form.submit()">
+        <option value="">All Types</option>
+        {% if category %}
+          {% for t in document_types_by_category.get(category, []) %}
+            <option value="{{ t }}" {{ 'selected' if document_type == t }}>{{ t }}</option>
+          {% endfor %}
+        {% endif %}
+      </select>
+      <select name="sort" class="wealth-select" onchange="this.form.submit()">
+        <option value="newest" {{ 'selected' if sort_by == 'newest' }}>Newest First</option>
+        <option value="oldest" {{ 'selected' if sort_by == 'oldest' }}>Oldest First</option>
+        <option value="name_az" {{ 'selected' if sort_by == 'name_az' }}>Name A–Z</option>
+        <option value="name_za" {{ 'selected' if sort_by == 'name_za' }}>Name Z–A</option>
+        <option value="largest" {{ 'selected' if sort_by == 'largest' }}>Largest File</option>
+        <option value="smallest" {{ 'selected' if sort_by == 'smallest' }}>Smallest File</option>
+      </select>
+      <button type="submit" class="wealth-search-btn">🔍 Search</button>
+      {% if q or category or document_type %}
+        <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-clear-link">Clear Filters</a>
+      {% endif %}
+    </form>
+
+    <!-- ── Document List ── -->
+    <div class="wealth-list-card">
+      <div class="wealth-section-label">{{ documents|length }} Document{{ 's' if documents|length != 1 }}</div>
+
+      {% if documents %}
+      <div class="wealth-doc-table" role="table" aria-label="Wealth Documents">
+        <div class="wealth-doc-row wealth-doc-head" role="row">
+          <span role="columnheader">Document</span>
+          <span role="columnheader">Type</span>
+          <span role="columnheader">Related To</span>
+          <span role="columnheader">Uploaded</span>
+          <span role="columnheader">Actions</span>
+        </div>
+        {% for doc in documents %}
+        <div class="wealth-doc-row" role="row">
+          <span role="cell">
+            <a href="{{ url_for('wealth.document_detail', document_id=doc.id) }}" class="wealth-doc-name">{{ doc.display_name }}</a>
+            <span class="wealth-doc-sub">{{ doc.original_name }} · {{ doc.file_size_display }}</span>
+          </span>
+          <span role="cell">{{ doc.document_type }}</span>
+          <span role="cell">
+            {% if doc.asset_id %}Asset{% elif doc.liability_id %}Liability{% else %}—{% endif %}
+          </span>
+          <span role="cell">{{ format_date(doc.uploaded_at) }}</span>
+          <span role="cell" class="wealth-doc-actions">
+            <a href="{{ url_for('wealth.document_detail', document_id=doc.id) }}" class="wealth-link-btn wealth-link-btn-primary">View →</a>
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+        <!-- ── Filtered Empty State (Section 36 — distinct from "no documents exist") ── -->
+        <div class="wealth-empty-state">
+          <div class="wealth-empty-title">No Documents Found</div>
+          <div class="wealth-empty-sub">Try changing your search or filter.</div>
+        </div>
+      {% endif %}
+    </div>
+
+  {% endif %}
+</div>
+
+<style>
+  .wealth-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .wealth-breadcrumb { font-size: 0.95rem; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+  .wealth-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  .wealth-header p { color: var(--muted); font-size: 0.875rem; }
+
+  .wealth-btn-primary {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 20px; font-size: 0.85rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; cursor: pointer; transition: opacity 0.2s;
+  }
+  .wealth-btn-primary:hover { opacity: 0.88; }
+
+  .wealth-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; }
+  .wealth-stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow-sm); }
+  .wealth-stat-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px; }
+  .wealth-stat-value { font-family: 'Roboto Mono', monospace; font-size: 1.3rem; font-weight: 700; color: var(--accent); }
+
+  .wealth-filter-bar {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+  }
+  .wealth-search-input {
+    flex: 1; min-width: 200px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 14px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+  .wealth-select {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; color: var(--text); font-family: 'Inter', sans-serif; font-size: 0.85rem;
+  }
+  .wealth-search-btn {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 22px; font-size: 0.88rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; cursor: pointer; transition: opacity 0.2s;
+  }
+  .wealth-search-btn:hover { opacity: 0.88; }
+  .wealth-clear-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+  .wealth-clear-link:hover { color: var(--accent); }
+
+  .wealth-list-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+  .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; }
+
+  .wealth-empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .wealth-empty-icon { font-size: 3rem; margin-bottom: 8px; }
+  .wealth-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .wealth-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  .wealth-doc-table { display: flex; flex-direction: column; }
+  .wealth-doc-row {
+    display: grid; grid-template-columns: 2fr 1.3fr 1fr 1fr 0.8fr; gap: 10px; align-items: center;
+    padding: 12px 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem;
+  }
+  .wealth-doc-row:last-child { border-bottom: none; }
+  .wealth-doc-head { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-doc-name { font-weight: 600; color: var(--text); text-decoration: none; display: block; }
+  .wealth-doc-name:hover { color: var(--accent); }
+  .wealth-doc-sub { display: block; font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
+  .wealth-doc-actions { display: flex; gap: 10px; }
+  .wealth-link-btn { font-size: 0.8rem; font-weight: 700; color: var(--muted); text-decoration: none; }
+  .wealth-link-btn-primary { color: var(--accent); }
+
+  @media (max-width: 700px) {
+    .wealth-filter-bar { flex-direction: column; align-items: stretch; }
+    .wealth-doc-row { grid-template-columns: 1fr 1fr; row-gap: 6px; }
+  }
+</style>
+
+<script>
+  const VAULT_DOC_TYPES_BY_CATEGORY = {{ document_types_by_category | tojson }};
+  const CURRENT_FILTER_DOC_TYPE = {{ (document_type or '') | tojson }};
+
+  function applyFilterCategory() {
+    const category = document.getElementById('filterCategory').value;
+    const typeSelect = document.getElementById('filterDocType');
+    typeSelect.innerHTML = '<option value="">All Types</option>';
+    const types = VAULT_DOC_TYPES_BY_CATEGORY[category] || [];
+    types.forEach(function (t) {
+      const opt = document.createElement('option');
+      opt.value = t; opt.textContent = t;
+      if (t === CURRENT_FILTER_DOC_TYPE) opt.selected = true;
+      typeSelect.appendChild(opt);
+    });
+  }
+</script>
+{% endblock %}
