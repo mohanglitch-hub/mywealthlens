@@ -149,6 +149,38 @@
     <a href="{{ url_for('wealth.family_wealth') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Family Wealth →</a>
   </div>
 
+  <!-- ── Wealth History Trend (Phase F, Section 42) ── -->
+  <!-- Only rendered with >=2 snapshots (Section 42: "Only show change
+       information if at least two snapshots exist") — consumes the
+       exact same history_service call /wealth/history uses, so this
+       card can never diverge from the History page (Section 43). -->
+  {% if history_trend %}
+  <div class="wealth-section-card">
+    <div class="wealth-section-header" style="margin-bottom:0;">
+      <div class="wealth-section-title" style="margin-bottom:0;">Net Worth Trend</div>
+    </div>
+    <div class="wealth-stat-value" style="font-size:1.15rem; margin-top:2px;">{{ format_inr(history_trend.latest.net_worth) }}</div>
+    <div class="wealth-section-count {{ 'wealth-negative' if history_trend.change.absolute < 0 }}">
+      {{ '+' if history_trend.change.absolute >= 0 }}{{ format_inr(history_trend.change.absolute) }} since last snapshot
+    </div>
+    <div class="wealth-section-desc">
+      Based on your saved Wealth snapshots — as of {{ format_date(history_trend.latest.snapshot_date) }}.
+    </div>
+    <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Wealth History →</a>
+  </div>
+  {% else %}
+  <div class="wealth-section-card">
+    <div class="wealth-section-header" style="margin-bottom:0;">
+      <div class="wealth-section-title" style="margin-bottom:0;">Wealth History</div>
+    </div>
+    <div class="wealth-section-count">Track how your Net Worth changes over time</div>
+    <div class="wealth-section-desc">
+      Save periodic snapshots of your Wealth position to see trends and changes over time.
+    </div>
+    <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">Create a Snapshot →</a>
+  </div>
+  {% endif %}
+
 </div>
 
 <style>
@@ -230,6 +262,7 @@
   }
   .wealth-section-title { font-size: 1rem; font-weight: 700; color: var(--text); }
   .wealth-section-count { font-size: 0.78rem; color: var(--accent); font-weight: 600; }
+  .wealth-section-count.wealth-negative { color: var(--down); }
   .wealth-section-desc { font-size: 0.82rem; color: var(--muted); line-height: 1.5; margin-top: 4px; }
 
   @media (max-width: 900px) {
