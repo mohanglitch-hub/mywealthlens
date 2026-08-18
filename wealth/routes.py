@@ -7,12 +7,15 @@ Phase B: full Asset CRUD — listing (search/filter/sort), Add, Edit,
 Phase C: full Liability CRUD, same lifecycle pattern.
 """
 
+from datetime import date
+
 from flask import render_template, redirect, url_for, request, flash, abort
 from flask_login import login_required, current_user
 
 from . import wealth_bp
 from . import services
 from . import validators
+from . import history_service
 from .models import (
     WealthAsset, WealthAssetCategory, ASSET_TYPES_BY_CATEGORY,
     FIELD_GROUPS_BY_CATEGORY, OwnershipType, SourceType, WealthStatus,
@@ -57,9 +60,15 @@ def dashboard():
     stats = services.WealthStatisticsService(current_user.id)
     data  = stats.summary_dict()
 
+    # Section 42/43 of Phase F spec — dashboard's History card
+    # consumes the exact same history_service calls as /wealth/history,
+    # and is None (hidden entirely) with fewer than 2 snapshots.
+    history_trend = history_service.dashboard_trend_summary(current_user.id)
+
     return render_template(
         "wealth/dashboard.html",
         data=data,
+        history_trend=history_trend,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -546,3 +555,130 @@ def family_wealth():
         status_filter=status_filter,
         format_inr=format_inr, format_date=format_date,
     )
+# ── Wealth History (Phase F) ────────────────────────────────────────────────
+
+def _get_snapshot_or_404(snapshot_id):
+    """Get a snapshot — must belong to the current user. 404
+    otherwise. Mirrors _get_asset_or_404 / _get_liability_or_404
+    exactly (Section 30 — user isolation enforced at the query
+    level)."""
+    snapshot = history_service.get_snapshot_or_none(snapshot_id, current_user.id)
+    if not snapshot:
+        abort(404)
+    return snapshot
+
+
+@wealth_bp.route("/history")
+@login_required
+def wealth_history():
+    """
+    Wealth History — chronological list + Net Worth chart of the
+    user's saved snapshots, with a 3M/6M/1Y/All range filter
+    (Section 4/17/18/20). Also shows today's live Wealth position at
+    the top for the "create snapshot" action, kept clearly separate
+    from historical rows (Section 41).
+    """
+    range_filter = request.args.get("range", "1y")
+    if range_filter not in ("3m", "6m", "1y", "all"):
+        range_filter = "1y"
+
+    snapshots = history_service.get_snapshots(current_user.id, range_filter=range_filter)
+    total_snapshot_count = history_service.snapshot_count(current_user.id)
+
+    # Section 22/23: change info only makes sense with >=2 snapshots
+    # in total — a filtered range showing only 1 of many is still a
+    # real "not enough data in view" case, so this checks the total,
+    # not just what's in the current range.
+    latest = snapshots[0] if snapshots else None
+    latest_change = (history_service.snapshot_change(latest, current_user.id)
+                     if latest else None)
+
+    current_position = services.WealthStatisticsService(current_user.id).summary_dict()
+
+    return render_template(
+        "wealth/history.html",
+        snapshots=snapshots,
+        total_snapshot_count=total_snapshot_count,
+        latest=latest,
+        latest_change=latest_change,
+        current_position=current_position,
+        chart_points=history_service.chart_data(snapshots),
+        range_filter=range_filter,
+        today=date.today().isoformat(),
+        duplicate_date=request.args.get("duplicate_date", ""),
+        format_inr=format_inr, format_date=format_date,
+    )
+
+
+@wealth_bp.route("/history/create", methods=["POST"])
+@login_required
+def create_wealth_snapshot():
+    """
+    Manual snapshot creation (Section 9). Handles the duplicate-date
+    case without silently overwriting anything (Section 10/11) — a
+    second submit with confirm_replace=1 is required to actually
+    replace an existing snapshot for that date.
+    """
+    snapshot_date_raw = request.form.get("snapshot_date")
+    confirm_replace = request.form.get("confirm_replace") == "1"
+
+    snapshot_date, error = validators.validate_snapshot_date(snapshot_date_raw)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("wealth.wealth_history"))
+
+    snapshot, error, needs_confirmation = history_service.create_snapshot(
+        _db(), current_user.id, snapshot_date, confirm_replace=confirm_replace)
+
+    if needs_confirmation:
+        # Nothing was written. Redirect back with the pending date so
+        # the template can show the "Replace Snapshot?" confirmation
+        # (Section 10/11) — no silent duplicate, no data loss either way.
+        return redirect(url_for("wealth.wealth_history",
+                                range=request.form.get("range", "1y"),
+                                duplicate_date=snapshot_date.isoformat()))
+
+    if error:
+        flash(error, "error")
+        return redirect(url_for("wealth.wealth_history"))
+
+    verb = "replaced" if confirm_replace else "created"
+    flash(f"Wealth snapshot {verb} for {format_date(snapshot_date)}.", "success")
+    return redirect(url_for("wealth.snapshot_detail", snapshot_id=snapshot.id))
+
+
+@wealth_bp.route("/history/<int:snapshot_id>")
+@login_required
+def snapshot_detail(snapshot_id):
+    """
+    Snapshot detail page (Section 26/27) — displays ONLY the stored
+    historical values, never recalculated from today's Assets/
+    Liabilities (Section 16/27: historical data must not depend on
+    live records).
+    """
+    snapshot = _get_snapshot_or_404(snapshot_id)
+    change = history_service.snapshot_change(snapshot, current_user.id)
+
+    return render_template(
+        "wealth/history_detail.html",
+        snapshot=snapshot,
+        change=change,
+        format_inr=format_inr, format_date=format_date,
+    )
+
+
+@wealth_bp.route("/history/<int:snapshot_id>/delete", methods=["POST"])
+@login_required
+def delete_wealth_snapshot(snapshot_id):
+    """
+    Permanently delete a single snapshot (Section 28). Never touches
+    Assets, Liabilities, or any other snapshot (Section 61/65) —
+    history_service.delete_snapshot() only ever removes this one row.
+    """
+    snapshot = _get_snapshot_or_404(snapshot_id)
+    success, error = history_service.delete_snapshot(_db(), snapshot, current_user.id)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("wealth.snapshot_detail", snapshot_id=snapshot_id))
+    flash("Wealth snapshot permanently deleted.", "success")
+    return redirect(url_for("wealth.wealth_history"))

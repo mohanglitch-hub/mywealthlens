@@ -428,3 +428,61 @@ class WealthValueSnapshot(db.Model):
 
     def __repr__(self):
         return f"<WealthValueSnapshot {self.entity_type}={self.entity_id} value={self.value}>"
+
+
+class WealthSnapshot(db.Model):
+    """
+    Phase F — Wealth History. An aggregate, point-in-time record of
+    the user's whole Wealth position (Total/Attributable Assets,
+    Total/Attributable Liabilities, Net Worth).
+
+    NOT the same thing as WealthValueSnapshot above — that table is a
+    Phase A foundation for future PER-ENTITY (single asset/liability)
+    value history, which Section 36/37 of the Phase F spec explicitly
+    puts out of scope. This table is deliberately separate: one row
+    = one Wealth-wide position on one date, immutable once created
+    (except for an explicit, confirmed replace — Section 6/11).
+
+    Net Worth stored here = My Attributable Assets − My Attributable
+    Liabilities, matching the Phase F spec's own worked example in
+    Section 13 (₹1,00,00,000 attributable assets − ₹10,00,000
+    attributable liabilities = ₹90,00,000 net worth, NOT the
+    ₹1,30,00,000 that gross totals would give). This mirrors
+    WealthStatisticsService.attributable_net_worth() exactly — no
+    competing formula (Section 15/74).
+    """
+    __tablename__ = "wealth_snapshot"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "snapshot_date",
+                            name="uq_wealth_snapshot_user_date"),
+        db.Index("ix_wealth_snapshot_user_date", "user_id", "snapshot_date"),
+    )
+
+    id      = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey("user.id", ondelete="CASCADE"),
+                        nullable=False)
+
+    snapshot_date = db.Column(db.Date, nullable=False)
+    # ^ the financial date this snapshot represents — distinct from
+    #   created_at below (Section 7: a snapshot may be created after
+    #   the period it represents, e.g. dated 31 Mar but created 1 Apr)
+
+    total_asset_value            = db.Column(db.Float, nullable=False, default=0)
+    attributable_asset_value     = db.Column(db.Float, nullable=False, default=0)
+    total_liability_value        = db.Column(db.Float, nullable=False, default=0)
+    attributable_liability_value = db.Column(db.Float, nullable=False, default=0)
+    net_worth                    = db.Column(db.Float, nullable=False, default=0)
+
+    status = db.Column(db.String(20), nullable=False, default="Active")
+    # ^ Section 29: no archive lifecycle for snapshots, just a simple
+    #   Active/Deleted — but rows are hard-deleted on delete (Section
+    #   28), so in practice this column is always "Active". Kept as
+    #   an explicit column (rather than relying on row-existence
+    #   alone) purely so a future phase could soft-delete without a
+    #   schema change — never read as ARCHIVED anywhere in Phase F.
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<WealthSnapshot user={self.user_id} date={self.snapshot_date} net_worth={self.net_worth}>"

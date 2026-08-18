@@ -123,6 +123,33 @@ def validate_wealth_asset(form):
     return errors
 
 
+# ── Wealth Snapshot Validation (Phase F) ──────────────────────────────────────
+
+def validate_snapshot_date(snapshot_date_raw):
+    """
+    Validate a submitted Wealth History snapshot date. Returns
+    (date_obj, error_string) — error_string is None when valid.
+
+    Only rule enforced beyond "is it a real date": it cannot be in
+    the future (Section 9 of Phase F spec: "validate the snapshot
+    date" — a Wealth position can't be recorded for a date that
+    hasn't happened yet). Past dates are always allowed (Section 33:
+    manual snapshots may be created for any valid date, not just
+    month-end).
+    """
+    if not snapshot_date_raw:
+        return None, "Snapshot date is required."
+
+    d = _parse_date(snapshot_date_raw)
+    if not d:
+        return None, "Snapshot date is invalid."
+
+    if d > date.today():
+        return None, "Snapshot date cannot be in the future."
+
+    return d, None
+
+
 # ── Liability Validation (Phase C) ────────────────────────────────────────────
 
 def validate_wealth_liability(form):

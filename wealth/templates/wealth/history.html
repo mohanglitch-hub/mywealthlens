@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% block title %}Wealth History — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "wealth/_confirm_modal.html" %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<div class="wealth-wrap">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">← Wealth Centre</a>
+  </div>
+
+  <div class="wealth-header">
+    <div>
+      <h1>Wealth History</h1>
+      <p>How your Net Worth has changed over time, based on the snapshots you've saved.</p>
+    </div>
+  </div>
+
+  <!-- ── Current (live) position — Section 41: kept visually separate from history ── -->
+  <div class="wealth-list-card wealth-current-card">
+    <div class="wealth-section-label">Current Wealth (Live)</div>
+    <div class="wealth-current-row">
+      <div>
+        <div class="wealth-stat-helper">Net Worth right now</div>
+        <div class="wealth-stat-value-lg {{ 'wealth-negative' if current_position.attributable_net_worth < 0 }}">
+          {{ format_inr(current_position.attributable_net_worth) }}
+        </div>
+      </div>
+
+      {% if duplicate_date %}
+        <!-- ── Duplicate date confirmation (Section 10/11) ── -->
+        <form method="POST" action="{{ url_for('wealth.create_wealth_snapshot') }}" id="replaceSnapshotForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="snapshot_date" value="{{ duplicate_date }}" />
+          <input type="hidden" name="confirm_replace" value="1" />
+          <input type="hidden" name="range" value="{{ range_filter }}" />
+          <div class="wealth-duplicate-warning">
+            <strong>A Wealth snapshot already exists for {{ format_date(duplicate_date) }}.</strong>
+            Replacing it will update the historical values stored for that date.
+          </div>
+          <div style="display:flex; gap:10px; margin-top:10px;">
+            <a href="{{ url_for('wealth.wealth_history', range=range_filter) }}" class="wealth-btn-secondary">Cancel</a>
+            <button type="button" class="wealth-btn-primary"
+                    onclick="confirmAction(document.getElementById('replaceSnapshotForm'), 'Replace Snapshot?', 'A snapshot already exists for {{ format_date(duplicate_date) }}. Replacing it will update the historical values stored for that date.', 'Replace Snapshot')">
+              Replace Snapshot
+            </button>
+          </div>
+        </form>
+      {% else %}
+        <form method="POST" action="{{ url_for('wealth.create_wealth_snapshot') }}" class="wealth-create-snapshot-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="range" value="{{ range_filter }}" />
+          <div class="wealth-field">
+            <label for="snapshot_date">Snapshot Date</label>
+            <input type="date" id="snapshot_date" name="snapshot_date" value="{{ today }}" max="{{ today }}" required />
+          </div>
+          <button type="submit" class="wealth-btn-primary">Create Snapshot</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if total_snapshot_count == 0 %}
+    <!-- ── Empty State (Section 21) ── -->
+    <div class="wealth-list-card">
+      <div class="wealth-empty-state">
+        <div class="wealth-empty-title">No Wealth History Yet</div>
+        <div class="wealth-empty-sub">Create your first Wealth snapshot to start tracking how your financial position changes over time.</div>
+      </div>
+    </div>
+  {% else %}
+
+    {% if total_snapshot_count == 1 %}
+      <!-- ── Insufficient History (Section 22) — no misleading growth % ── -->
+      <div class="wealth-explainer">
+        One snapshot recorded. Create another snapshot later to begin comparing your Wealth over time.
+      </div>
+    {% elif latest_change %}
+      <div class="wealth-explainer wealth-change-explainer">
+        <span>Change since previous snapshot:</span>
+        <strong class="{{ 'wealth-negative' if latest_change.absolute < 0 else 'wealth-positive' }}">
+          {{ '+' if latest_change.absolute >= 0 }}{{ format_inr(latest_change.absolute) }}
+          {% if latest_change.percentage is not none %}
+            ({{ '+' if latest_change.percentage >= 0 }}{{ '%.1f'|format(latest_change.percentage) }}%)
+          {% else %}
+            (percentage not available)
+          {% endif %}
+        </strong>
+      </div>
+    {% endif %}
+
+    <!-- ── Range Filter (Section 20) ── -->
+    <div class="wealth-status-tabs">
+      <a href="{{ url_for('wealth.wealth_history', range='3m') }}" class="wealth-status-tab {{ 'wealth-status-tab-selected' if range_filter == '3m' }}">3 Months</a>
+      <a href="{{ url_for('wealth.wealth_history', range='6m') }}" class="wealth-status-tab {{ 'wealth-status-tab-selected' if range_filter == '6m' }}">6 Months</a>
+      <a href="{{ url_for('wealth.wealth_history', range='1y') }}" class="wealth-status-tab {{ 'wealth-status-tab-selected' if range_filter == '1y' }}">1 Year</a>
+      <a href="{{ url_for('wealth.wealth_history', range='all') }}" class="wealth-status-tab {{ 'wealth-status-tab-selected' if range_filter == 'all' }}">All</a>
+    </div>
+
+    {% if not snapshots %}
+      <div class="wealth-list-card">
+        <div class="wealth-empty-state">
+          <div class="wealth-empty-title">No snapshots in this range</div>
+          <div class="wealth-empty-sub">Try a wider range, such as "All".</div>
+        </div>
+      </div>
+    {% else %}
+
+      <!-- ── Net Worth Chart (Section 18) ── -->
+      {% if chart_points|length > 1 %}
+      <div class="wealth-list-card">
+        <div class="wealth-section-label">Net Worth Over Time</div>
+        <div class="wealth-chart-container">
+          <canvas id="netWorthChart" role="img" aria-label="Line chart of Net Worth over time. See the table below for exact figures."></canvas>
+        </div>
+      </div>
+
+      <!-- ── Assets vs Liabilities Chart (Section 19) ── -->
+      <div class="wealth-list-card">
+        <div class="wealth-section-label">Assets vs Liabilities</div>
+        <div class="wealth-chart-container">
+          <canvas id="assetsLiabilitiesChart" role="img" aria-label="Line chart comparing total assets and total liabilities over time. See the table below for exact figures."></canvas>
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- ── Historical Table (Section 17/48 — always the accessible source of truth) ── -->
+      <div class="wealth-list-card">
+        <div class="wealth-section-label">Snapshot History</div>
+        <div class="wealth-history-table" role="table" aria-label="Wealth History">
+          <div class="wealth-history-row wealth-history-head" role="row">
+            <span role="columnheader">Date</span>
+            <span role="columnheader">Assets</span>
+            <span role="columnheader">Liabilities</span>
+            <span role="columnheader">Net Worth</span>
+          </div>
+          {% for s in snapshots %}
+          <a href="{{ url_for('wealth.snapshot_detail', snapshot_id=s.id) }}" class="wealth-history-row" role="row">
+            <span role="cell">{{ format_date(s.snapshot_date) }}</span>
+            <span role="cell">{{ format_inr(s.total_asset_value) }}</span>
+            <span role="cell">{{ format_inr(s.total_liability_value) }}</span>
+            <span role="cell" class="{{ 'wealth-negative' if s.net_worth < 0 }}">{{ format_inr(s.net_worth) }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      <script>
+        (function () {
+          const isDark   = document.documentElement.getAttribute('data-theme') === 'dark';
+          const gridColor  = isDark ? '#1e2130' : '#E2E8F0';
+          const labelColor = isDark ? '#64748b' : '#64748B';
+
+          const points = {{ chart_points | tojson }};
+          if (points.length > 1) {
+            Chart.defaults.color = labelColor;
+            Chart.defaults.font.family = "'Inter', sans-serif";
+            Chart.defaults.font.size = 11;
+
+            const inrTick = v => v >= 10000000 ? '₹' + (v/10000000).toFixed(1) + 'Cr'
+                              : v >= 100000    ? '₹' + (v/100000).toFixed(1) + 'L'
+                              : '₹' + (v/1000).toFixed(0) + 'K';
+
+            new Chart(document.getElementById('netWorthChart'), {
+              type: 'line',
+              data: {
+                labels: points.map(p => p.date),
+                datasets: [{
+                  label: 'Net Worth',
+                  data: points.map(p => p.net_worth),
+                  borderColor: '#6366f1',
+                  backgroundColor: 'rgba(99,102,241,0.15)',
+                  fill: true, tension: 0.3, pointRadius: 3,
+                }]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                  legend: { display: false },
+                  tooltip: { callbacks: { label: ctx => ' ₹' + ctx.parsed.y.toLocaleString('en-IN') } }
+                },
+                scales: {
+                  x: { grid: { color: gridColor }, ticks: { color: labelColor, font: { size: 9 } } },
+                  y: { grid: { color: gridColor }, ticks: { color: labelColor, callback: inrTick } }
+                }
+              }
+            });
+
+            const alCanvas = document.getElementById('assetsLiabilitiesChart');
+            if (alCanvas) {
+              new Chart(alCanvas, {
+                type: 'line',
+                data: {
+                  labels: points.map(p => p.date),
+                  datasets: [
+                    { label: 'Total Assets', data: points.map(p => p.total_assets), borderColor: '#16A34A', backgroundColor: 'rgba(22,163,74,0.1)', fill: false, tension: 0.3, pointRadius: 3 },
+                    { label: 'Total Liabilities', data: points.map(p => p.total_liabilities), borderColor: '#DC2626', backgroundColor: 'rgba(220,38,38,0.1)', fill: false, tension: 0.3, pointRadius: 3 },
+                  ]
+                },
+                options: {
+                  responsive: true, maintainAspectRatio: false,
+                  plugins: {
+                    legend: { position: 'bottom', labels: { usePointStyle: true, font: { size: 10 } } },
+                    tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ₹' + ctx.parsed.y.toLocaleString('en-IN') } }
+                  },
+                  scales: {
+                    x: { grid: { color: gridColor }, ticks: { color: labelColor, font: { size: 9 } } },
+                    y: { grid: { color: gridColor }, ticks: { color: labelColor, callback: inrTick } }
+                  }
+                }
+              });
+            }
+          }
+        })();
+      </script>
+    {% endif %}
+  {% endif %}
+</div>
+
+<style>
+  .wealth-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .wealth-breadcrumb { font-size: 0.95rem; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  .wealth-header p { color: var(--muted); font-size: 0.875rem; }
+
+  .wealth-list-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+  .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; }
+
+  .wealth-current-card { border-color: var(--accent); border-width: 1.5px; }
+  .wealth-current-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
+  .wealth-stat-helper { font-size: 0.75rem; color: var(--muted); margin-bottom: 6px; }
+  .wealth-stat-value-lg { font-family: 'Roboto Mono', monospace; font-size: 1.7rem; font-weight: 700; color: var(--accent); }
+  .wealth-stat-value-lg.wealth-negative { color: var(--down); }
+
+  .wealth-create-snapshot-form { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+  .wealth-field { display: flex; flex-direction: column; gap: 6px; }
+  .wealth-field label { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-field input[type="date"] {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; font-size: 0.88rem; color: var(--text); font-family: 'Inter', sans-serif;
+  }
+
+  .wealth-btn-primary {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 20px; font-size: 0.85rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; cursor: pointer; transition: opacity 0.2s;
+  }
+  .wealth-btn-primary:hover { opacity: 0.88; }
+  .wealth-btn-secondary {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 20px; font-size: 0.85rem; font-weight: 700; color: var(--text2);
+    font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; transition: all 0.2s;
+  }
+  .wealth-btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .wealth-duplicate-warning {
+    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 12px 16px; font-size: 0.82rem; color: var(--text2); line-height: 1.5; max-width: 380px;
+  }
+
+  .wealth-empty-state { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .wealth-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .wealth-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  .wealth-explainer {
+    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 14px 18px; font-size: 0.85rem; color: var(--text2); line-height: 1.6;
+  }
+  .wealth-change-explainer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .wealth-positive { color: var(--up); }
+  .wealth-negative { color: var(--down); }
+
+  .wealth-status-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .wealth-status-tab {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text2); font-size: 0.82rem; font-weight: 600;
+    text-decoration: none; transition: all 0.2s;
+  }
+  .wealth-status-tab:hover { border-color: var(--accent); }
+  .wealth-status-tab-selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .wealth-chart-container { position: relative; height: 280px; }
+
+  .wealth-history-table { display: flex; flex-direction: column; }
+  .wealth-history-row {
+    display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; gap: 10px;
+    padding: 12px 10px; border-bottom: 1px solid var(--border);
+    text-decoration: none; color: inherit; border-radius: 6px; transition: background 0.2s;
+    font-size: 0.85rem;
+  }
+  .wealth-history-row:last-child { border-bottom: none; }
+  a.wealth-history-row:hover { background: var(--surface2); }
+  .wealth-history-head { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-history-row span[role="cell"] { font-family: 'Roboto Mono', monospace; }
+  .wealth-history-row span[role="cell"]:first-child { font-family: 'Inter', sans-serif; font-weight: 600; }
+
+  @media (max-width: 700px) {
+    .wealth-current-row { flex-direction: column; align-items: flex-start; }
+    .wealth-history-row { grid-template-columns: 1fr 1fr; row-gap: 4px; }
+  }
+</style>
+{% endblock %}
