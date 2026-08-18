@@ -10,6 +10,7 @@ from datetime import date, datetime
 
 from .models import (
     OwnershipType, SourceType, WealthStatus, WealthAssetCategory,
+    WealthDocumentCategory, DOCUMENT_TYPES_BY_CATEGORY,
 )
 
 
@@ -148,6 +149,55 @@ def validate_snapshot_date(snapshot_date_raw):
         return None, "Snapshot date cannot be in the future."
 
     return d, None
+
+
+# ── Wealth Document Validation (Phase G) ──────────────────────────────────────
+
+ALLOWED_DOCUMENT_EXTENSIONS = {
+    ".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx",
+}
+
+MAX_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024  # 25MB
+
+
+def validate_document(file, category, document_type):
+    """
+    Validate an uploaded Wealth document. `file` is a werkzeug
+    FileStorage object. Returns a list of error strings (empty list
+    = valid).
+    """
+    errors = []
+
+    if not file or not file.filename:
+        errors.append("No file selected.")
+        return errors
+
+    if category not in WealthDocumentCategory.ALL:
+        errors.append("Invalid document category selected.")
+    elif document_type not in DOCUMENT_TYPES_BY_CATEGORY.get(category, []):
+        errors.append("Invalid document type for the selected category.")
+
+    ext = _file_extension(file.filename)
+    if ext not in ALLOWED_DOCUMENT_EXTENSIONS:
+        errors.append(
+            f"File type '{ext}' not allowed. "
+            f"Allowed: PDF, JPG, JPEG, PNG, DOC, DOCX, XLS, XLSX."
+        )
+
+    file.seek(0, 2)
+    size = file.tell()
+    file.seek(0)
+    if size == 0:
+        errors.append("The selected file is empty.")
+    elif size > MAX_DOCUMENT_SIZE_BYTES:
+        errors.append("File size exceeds the 25MB limit.")
+
+    return errors
+
+
+def _file_extension(filename):
+    import os
+    return os.path.splitext(filename)[1].lower()
 
 
 # ── Liability Validation (Phase C) ────────────────────────────────────────────

@@ -97,6 +97,24 @@
   </div>
   {% endif %}
 
+  <!-- ── Related Documents (Phase G) ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Documents ({{ documents|length }})</div>
+    {% if documents %}
+    <div class="wealth-doc-mini-list">
+      {% for doc in documents %}
+      <a href="{{ url_for('wealth.document_detail', document_id=doc.id) }}" class="wealth-doc-mini-row">
+        <span class="wealth-doc-mini-name">{{ doc.display_name }}</span>
+        <span class="wealth-doc-mini-type">{{ doc.document_type }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="font-size:0.85rem; color:var(--muted);">No documents linked to this liability yet.</div>
+    {% endif %}
+    <a href="{{ url_for('wealth.add_document', liability_id=liability.id) }}" class="wealth-btn-primary-outline" style="margin-top:14px; display:inline-block;">+ Add Document</a>
+  </div>
+
 </div>
 
 <style>
@@ -153,6 +171,17 @@
 
   .wealth-badge { display: inline-block; margin-left: 8px; font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
   .wealth-badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+
+  .wealth-doc-mini-list { display: flex; flex-direction: column; gap: 2px; }
+  .wealth-doc-mini-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 9px 0; border-bottom: 1px solid var(--border);
+    text-decoration: none; color: inherit; font-size: 0.85rem;
+  }
+  .wealth-doc-mini-row:last-child { border-bottom: none; }
+  .wealth-doc-mini-row:hover .wealth-doc-mini-name { color: var(--accent); }
+  .wealth-doc-mini-name { font-weight: 600; color: var(--text); }
+  .wealth-doc-mini-type { font-size: 0.75rem; color: var(--muted); }
 
   @media (max-width: 600px) {
     .wealth-detail-grid { grid-template-columns: 1fr; }

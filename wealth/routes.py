@@ -8,20 +8,24 @@ Phase C: full Liability CRUD, same lifecycle pattern.
 """
 
 from datetime import date
+import os
 
-from flask import render_template, redirect, url_for, request, flash, abort
+from flask import render_template, redirect, url_for, request, flash, abort, send_file
 from flask_login import login_required, current_user
 
 from . import wealth_bp
 from . import services
 from . import validators
 from . import history_service
+from . import document_service
 from .models import (
     WealthAsset, WealthAssetCategory, ASSET_TYPES_BY_CATEGORY,
     FIELD_GROUPS_BY_CATEGORY, OwnershipType, SourceType, WealthStatus,
     AreaUnit, WeightUnit,
     WealthLiability, WealthLiabilityCategory, LIABILITY_TYPES_BY_CATEGORY,
+    WealthDocumentCategory, DOCUMENT_TYPES_BY_CATEGORY,
 )
+from . import utils
 from .utils import format_inr, format_date
 
 
@@ -65,10 +69,16 @@ def dashboard():
     # and is None (hidden entirely) with fewer than 2 snapshots.
     history_trend = history_service.dashboard_trend_summary(current_user.id)
 
+    # Section 32/43 of Phase G spec — same rule for the Document
+    # Vault card: consumes document_service.dashboard_summary(), the
+    # exact same call the Vault page itself would use for its totals.
+    document_summary = document_service.dashboard_summary(current_user.id)
+
     return render_template(
         "wealth/dashboard.html",
         data=data,
         history_trend=history_trend,
+        document_summary=document_summary,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -244,9 +254,12 @@ def asset_detail(asset_id):
     if not asset:
         abort(404)
 
+    documents = document_service.get_documents_for_asset(asset.id, current_user.id)
+
     return render_template(
         "wealth/asset_detail.html",
         asset=asset,
+        documents=documents,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -444,9 +457,12 @@ def liability_detail(liability_id):
     if not liability:
         abort(404)
 
+    documents = document_service.get_documents_for_liability(liability.id, current_user.id)
+
     return render_template(
         "wealth/liability_detail.html",
         liability=liability,
+        documents=documents,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -682,3 +698,239 @@ def delete_wealth_snapshot(snapshot_id):
         return redirect(url_for("wealth.snapshot_detail", snapshot_id=snapshot_id))
     flash("Wealth snapshot permanently deleted.", "success")
     return redirect(url_for("wealth.wealth_history"))
+# ── Wealth Document Vault (Phase G) ─────────────────────────────────────────
+
+def _get_document_or_404(document_id):
+    doc = document_service.get_document_or_none(document_id, current_user.id)
+    if not doc:
+        abort(404)
+    return doc
+
+
+def _document_upload_options(user_id):
+    assets = (WealthAsset.query
+             .filter_by(user_id=user_id, is_archived=False)
+             .order_by(WealthAsset.name.asc()).all())
+    liabilities = (WealthLiability.query
+                  .filter_by(user_id=user_id, is_archived=False)
+                  .order_by(WealthLiability.name.asc()).all())
+    return assets, liabilities
+
+
+@wealth_bp.route("/documents")
+@login_required
+def documents_vault():
+    q             = request.args.get("q", "").strip()
+    category      = request.args.get("category", "")
+    document_type = request.args.get("document_type", "")
+    sort_by       = request.args.get("sort", "newest")
+
+    documents = document_service.get_vault_documents(
+        current_user.id, q=q or None, category=category or None,
+        document_type=document_type or None, sort_by=sort_by,
+    )
+    summary = document_service.vault_summary(current_user.id)
+
+    return render_template(
+        "wealth/documents_vault.html",
+        documents=documents,
+        summary=summary,
+        categories=WealthDocumentCategory.ALL,
+        document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+        q=q, category=category, document_type=document_type, sort_by=sort_by,
+        format_date=format_date,
+    )
+
+
+@wealth_bp.route("/documents/add", methods=["GET", "POST"])
+@login_required
+def add_document():
+    assets, liabilities = _document_upload_options(current_user.id)
+
+    if request.method == "POST":
+        file          = request.files.get("document")
+        category      = request.form.get("category", "").strip()
+        document_type = request.form.get("document_type", "").strip()
+        title         = request.form.get("title", "").strip()
+        description   = request.form.get("description", "").strip()
+        asset_id      = request.form.get("asset_id", type=int)
+        liability_id  = request.form.get("liability_id", type=int)
+
+        errors = validators.validate_document(file, category, document_type)
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template(
+                "wealth/document_form.html", is_edit=False, document=None,
+                assets=assets, liabilities=liabilities,
+                categories=WealthDocumentCategory.ALL,
+                document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+                values=request.form, preselect_asset_id=asset_id,
+                preselect_liability_id=liability_id,
+            )
+
+        try:
+            stored_name, file_path, file_size = utils.save_document_file(file, current_user.id)
+        except OSError as e:
+            flash(f"File could not be saved: {e}", "error")
+            return redirect(url_for("wealth.add_document"))
+
+        doc, error = document_service.save_document_metadata(
+            _db(), current_user.id,
+            category=category, document_type=document_type,
+            original_name=file.filename, stored_name=stored_name,
+            file_path=file_path, file_size=file_size,
+            title=title, description=description,
+            asset_id=asset_id, liability_id=liability_id,
+        )
+        if error:
+            utils.delete_document_file(file_path)
+            flash(error, "error")
+            return redirect(url_for("wealth.add_document"))
+
+        flash("Document uploaded successfully.", "success")
+        return redirect(url_for("wealth.document_detail", document_id=doc.id))
+
+    preselect_asset_id     = request.args.get("asset_id", type=int)
+    preselect_liability_id = request.args.get("liability_id", type=int)
+
+    return render_template(
+        "wealth/document_form.html", is_edit=False, document=None,
+        assets=assets, liabilities=liabilities,
+        categories=WealthDocumentCategory.ALL,
+        document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+        values={}, preselect_asset_id=preselect_asset_id,
+        preselect_liability_id=preselect_liability_id,
+    )
+
+
+@wealth_bp.route("/documents/<int:document_id>")
+@login_required
+def document_detail(document_id):
+    doc = _get_document_or_404(document_id)
+
+    related_asset = (WealthAsset.query.filter_by(
+        id=doc.asset_id, user_id=current_user.id).first() if doc.asset_id else None)
+    related_liability = (WealthLiability.query.filter_by(
+        id=doc.liability_id, user_id=current_user.id).first() if doc.liability_id else None)
+
+    return render_template(
+        "wealth/document_detail.html",
+        doc=doc,
+        related_asset=related_asset,
+        related_liability=related_liability,
+        is_previewable=utils.is_previewable(doc.original_name),
+        format_date=format_date,
+    )
+
+
+@wealth_bp.route("/documents/<int:document_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_document(document_id):
+    doc = _get_document_or_404(document_id)
+    assets, liabilities = _document_upload_options(current_user.id)
+
+    if request.method == "POST":
+        category      = request.form.get("category", "").strip()
+        document_type = request.form.get("document_type", "").strip()
+        title         = request.form.get("title", "").strip()
+        description   = request.form.get("description", "").strip()
+        asset_id      = request.form.get("asset_id", type=int)
+        liability_id  = request.form.get("liability_id", type=int)
+
+        success, error = document_service.update_document_metadata(
+            _db(), doc, current_user.id,
+            title=title, description=description,
+            category=category, document_type=document_type,
+            asset_id=asset_id, liability_id=liability_id,
+        )
+        if error:
+            flash(error, "error")
+            return render_template(
+                "wealth/document_form.html", is_edit=True, document=doc,
+                assets=assets, liabilities=liabilities,
+                categories=WealthDocumentCategory.ALL,
+                document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+                values=request.form,
+                preselect_asset_id=asset_id, preselect_liability_id=liability_id,
+            )
+
+        flash("Document updated successfully.", "success")
+        return redirect(url_for("wealth.document_detail", document_id=doc.id))
+
+    values = {
+        "title": doc.title or "", "description": doc.description or "",
+        "category": doc.category, "document_type": doc.document_type,
+    }
+    return render_template(
+        "wealth/document_form.html", is_edit=True, document=doc,
+        assets=assets, liabilities=liabilities,
+        categories=WealthDocumentCategory.ALL,
+        document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+        values=values,
+        preselect_asset_id=doc.asset_id, preselect_liability_id=doc.liability_id,
+    )
+
+
+@wealth_bp.route("/documents/<int:document_id>/download")
+@login_required
+def download_document(document_id):
+    doc = _get_document_or_404(document_id)
+
+    if not doc.file_path or not os.path.exists(doc.file_path):
+        flash("Document file is no longer available.", "error")
+        return redirect(url_for("wealth.document_detail", document_id=document_id))
+
+    if not utils.secure_file_path(doc.file_path, current_user.id):
+        flash("Invalid file path — operation denied.", "error")
+        return redirect(url_for("wealth.document_detail", document_id=document_id))
+
+    return send_file(
+        doc.file_path,
+        as_attachment=True,
+        download_name=doc.original_name,
+    )
+
+
+@wealth_bp.route("/documents/<int:document_id>/preview")
+@login_required
+def preview_document(document_id):
+    doc = _get_document_or_404(document_id)
+
+    if not doc.file_path or not os.path.exists(doc.file_path):
+        flash("Document file is no longer available.", "error")
+        return redirect(url_for("wealth.document_detail", document_id=document_id))
+
+    if not utils.secure_file_path(doc.file_path, current_user.id):
+        flash("Invalid file path — operation denied.", "error")
+        return redirect(url_for("wealth.document_detail", document_id=document_id))
+
+    if not utils.is_previewable(doc.original_name):
+        flash("Preview is not available for this file type — please download it instead.", "error")
+        return redirect(url_for("wealth.document_detail", document_id=document_id))
+
+    return send_file(
+        doc.file_path,
+        mimetype=utils.get_preview_mimetype(doc.original_name),
+        as_attachment=False,
+        download_name=doc.original_name,
+    )
+
+
+@wealth_bp.route("/documents/<int:document_id>/delete", methods=["POST"])
+@login_required
+def delete_document(document_id):
+    doc = _get_document_or_404(document_id)
+
+    if doc.file_path and not utils.secure_file_path(doc.file_path, current_user.id):
+        flash("Invalid file path — operation denied.", "error")
+        return redirect(url_for("wealth.document_detail", document_id=document_id))
+
+    utils.delete_document_file(doc.file_path)
+    success, error = document_service.delete_document(_db(), doc, current_user.id)
+    if error:
+        flash(error, "error")
+        return redirect(url_for("wealth.document_detail", document_id=document_id))
+
+    flash("Document permanently deleted.", "success")
+    return redirect(url_for("wealth.documents_vault"))

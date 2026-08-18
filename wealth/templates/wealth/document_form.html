@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if is_edit else 'Add' }} Document — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:800px; margin:0 auto;">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">Wealth Centre</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <a href="{{ url_for('wealth.documents_vault') }}">Documents</a>
+    <span class="wealth-breadcrumb-sep">›</span>
+    <span class="wealth-breadcrumb-current">{{ 'Edit Document' if is_edit else 'Add Document' }}</span>
+  </div>
+
+  <h1 style="font-size:1.4rem; font-weight:700; margin-bottom:6px; color:var(--text);">
+    {{ 'Edit Document' if is_edit else 'Add Wealth Document' }}
+  </h1>
+  <p style="color:var(--muted); font-size:0.875rem; margin-bottom:28px;">
+    {% if is_edit %}
+      Update this document's details. The uploaded file itself cannot be changed here.
+    {% else %}
+      Fields marked <span class="wealth-required-mark">*</span> are required. Documents are stored securely and are only ever visible to you.
+    {% endif %}
+  </p>
+
+  <form method="POST"
+        action="{{ url_for('wealth.edit_document', document_id=document.id) if is_edit else url_for('wealth.add_document') }}"
+        {{ 'enctype="multipart/form-data"' | safe if not is_edit }}
+        id="documentForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Document Details</span></div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="category">Document Category <span class="wealth-required-mark">*</span></label>
+          <select name="category" id="category" class="wealth-select" required onchange="applyDocCategory()">
+            <option value="">— Select category —</option>
+            {% for cat in categories %}
+              <option value="{{ cat }}" {{ 'selected' if values.category == cat }}>{{ cat }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="document_type">Document Type <span class="wealth-required-mark">*</span></label>
+          <select name="document_type" id="document_type" class="wealth-select" required>
+            <option value="">— Select category first —</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="title">Document Title (optional)</label>
+        <input type="text" name="title" id="title" placeholder="e.g. House Sale Deed - Bangalore"
+               value="{{ values.title or '' }}" />
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description / Notes (optional)</label>
+        <input type="text" name="description" id="description" placeholder="e.g. Original registered sale deed for family residence."
+               value="{{ values.description or '' }}" />
+      </div>
+
+      {% if not is_edit %}
+      <div class="form-group">
+        <label for="document">Choose File <span class="wealth-required-mark">*</span></label>
+        <input type="file" name="document" id="document" required
+               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+               onchange="showDocFileInfo(this)" />
+        <div id="docFileInfo" style="font-size:0.78rem; color:var(--muted); margin-top:6px;"></div>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted2); margin-bottom:6px;">
+        Allowed: PDF, JPG, JPEG, PNG, DOC, DOCX, XLS, XLSX · Max size: 25 MB
+      </div>
+      {% else %}
+      <div class="form-group">
+        <label>Uploaded File</label>
+        <div style="font-size:0.88rem; color:var(--text2); background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 14px;">
+          {{ document.original_name }} ({{ document.file_size_display }})
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Related To (optional)</span></div>
+      <p style="font-size:0.8rem; color:var(--muted); margin-bottom:14px;">
+        A document doesn't have to belong to a specific Asset or Liability — leave both blank for a standalone document like a Will.
+      </p>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="asset_id">Related Asset</label>
+          <select name="asset_id" id="asset_id" class="wealth-select">
+            <option value="">— None —</option>
+            {% for a in assets %}
+              <option value="{{ a.id }}" {{ 'selected' if preselect_asset_id == a.id }}>{{ a.name }} ({{ a.category }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="liability_id">Related Liability</label>
+          <select name="liability_id" id="liability_id" class="wealth-select">
+            <option value="">— None —</option>
+            {% for l in liabilities %}
+              <option value="{{ l.id }}" {{ 'selected' if preselect_liability_id == l.id }}>{{ l.name }} ({{ l.category }})</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:20px;">
+      <button type="submit" class="wealth-btn-primary">{{ 'Save Changes' if is_edit else 'Upload Document' }}</button>
+      <a href="{{ url_for('wealth.document_detail', document_id=document.id) if is_edit else url_for('wealth.documents_vault') }}" class="wealth-btn-cancel">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<style>
+  .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 18px; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+  .wealth-breadcrumb-sep { color: var(--muted2); margin: 0 6px; }
+  .wealth-breadcrumb-current { color: var(--text); font-weight: 700; }
+
+  .wealth-required-mark { color: var(--down); font-weight: 700; }
+
+  .wealth-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+  }
+  .wealth-card-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .wealth-card-num {
+    width: 24px; height: 24px; border-radius: 50%; background: var(--accent2);
+    color: #fff; font-size: 0.78rem; font-weight: 700; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .wealth-card-title { font-size: 0.95rem; font-weight: 700; color: var(--text); }
+
+  .wealth-select {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 11px 14px; color: var(--text);
+    font-family: 'Inter', sans-serif; font-size: 0.9rem; outline: none;
+  }
+  .wealth-select:focus { border-color: var(--accent); }
+
+  .wealth-btn-primary {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 10px 20px; font-size: 0.85rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; cursor: pointer; transition: opacity 0.2s;
+  }
+  .wealth-btn-primary:hover { opacity: 0.88; }
+  .wealth-btn-cancel {
+    display: inline-flex; align-items: center; padding: 10px 20px;
+    color: var(--text); background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; text-decoration: none; font-size: 0.9rem; font-weight: 600;
+    transition: border-color 0.2s;
+  }
+  .wealth-btn-cancel:hover { border-color: var(--muted2); }
+
+  @media (max-width: 640px) {
+    .wealth-card > div[style*="grid-template-columns:1fr 1fr"] {
+      grid-template-columns: 1fr !important;
+    }
+  }
+</style>
+
+<script>
+  const DOC_TYPES_BY_CATEGORY = {{ document_types_by_category | tojson }};
+  const CURRENT_DOC_TYPE = {{ (values.document_type or '') | tojson }};
+
+  function applyDocCategory() {
+    const catSelect = document.getElementById('category');
+    const category = catSelect.value;
+    const typeSelect = document.getElementById('document_type');
+
+    typeSelect.innerHTML = '';
+    if (!category) {
+      typeSelect.innerHTML = '<option value="">— Select category first —</option>';
+    } else {
+      const opt0 = document.createElement('option');
+      opt0.value = ''; opt0.textContent = '— Select type —';
+      typeSelect.appendChild(opt0);
+      const types = DOC_TYPES_BY_CATEGORY[category] || [];
+      types.forEach(function (t) {
+        const opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        if (t === CURRENT_DOC_TYPE) opt.selected = true;
+        typeSelect.appendChild(opt);
+      });
+    }
+  }
+
+  function showDocFileInfo(input) {
+    const info = document.getElementById('docFileInfo');
+    if (input.files && input.files[0]) {
+      const f = input.files[0];
+      const sizeMB = (f.size / (1024 * 1024)).toFixed(2);
+      info.textContent = f.name + ' — ' + sizeMB + ' MB';
+      if (f.size > 25 * 1024 * 1024) {
+        info.style.color = 'var(--down)';
+        info.textContent += ' (exceeds 25MB limit)';
+      } else {
+        info.style.color = 'var(--muted)';
+      }
+    } else {
+      info.textContent = '';
+    }
+  }
+
+  // Populate the Document Type dropdown on load (covers both a
+  // pre-selected category on Edit, and a validation-error redisplay
+  // on Add where the category the user picked should be preserved).
+  document.addEventListener('DOMContentLoaded', function () {
+    if (document.getElementById('category').value) {
+      applyDocCategory();
+    }
+  });
+</script>
+{% endblock %}
