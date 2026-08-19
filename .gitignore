@@ -1,0 +1,38 @@
+# MyWealthLens — .gitignore
+# Added as part of Phase I prep after discovering instance/ (database +
+# uploaded documents) had been committed to a public repo. See Phase I
+# final report for full context.
+
+# ── Instance folder: database + all uploaded user documents ──
+# This is exactly where real financial data and uploaded files
+# (insurance policies, retirement documents, wealth documents) live.
+# None of it belongs in version control.
+instance/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# ── Virtual environment ──
+.venv/
+venv/
+env/
+
+# ── Editor / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Logs ──
+*.log
+
+# ── Local scratch / audit output (not meant for version control) ──
+audit_report.txt
