@@ -5,10 +5,12 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import bcrypt, pdfplumber, io, re, yfinance as yf
 from datetime import datetime as dt, timedelta
-from models import db, User, Asset, MutualFund, Stock, Goal, UserProfile, Loan, NetWorthHistory, Family, FamilyMember, FamilyInvite
+from models import db, User, MutualFund, Stock, Goal, UserProfile, NetWorthHistory, Family, FamilyMember, FamilyInvite
 from insurance_centre import insurance_bp
 from retirement_centre import retirement_bp
 from wealth import wealth_bp
+from wealth.services import WealthStatisticsService
+from wealth.models import WealthAssetCategory
 from insurance_centre.models import (
     InsurancePolicy, InsuranceNominee, InsuranceMember,
     InsuranceAddon, InsuranceDocument, InsuranceTimeline,
@@ -131,8 +133,27 @@ def forgot_password():
         return redirect(url_for('forgot_password'))
     return render_template('forgot_password.html')
 
-def _save_snapshot(user_id, assets, mfs, stocks, loans):
-    """Save one net worth snapshot per day."""
+def _save_snapshot(user_id, cat_totals, mfs, stocks, liabilities_total):
+    """
+    Save one net worth snapshot per day.
+
+    Phase H: previously sourced its per-category figures from the
+    legacy Asset model (now retired) and its liability figure from
+    the Loan model (which had no CRUD UI and was always empty — so
+    liabilities never actually reduced this total). Now sourced from
+    WealthAsset (via WealthStatisticsService.category_breakdown(),
+    passed in as cat_totals) and WealthLiability, the two authoritative
+    Wealth tables. The NetWorthHistory table/columns themselves are
+    untouched — existing historical rows remain exactly as stored
+    (Section 14 of the Phase H spec: historical snapshots are
+    immutable). Going forward, the existing category columns hold the
+    closest equivalent under the new Wealth taxonomy:
+      gold        -> Precious Metals
+      realestate  -> Real Estate
+      debt        -> Bank & Deposits + Investments (fixed-income-like)
+      cash        -> not distinguished under the new taxonomy; kept at 0
+      other       -> Vehicles + Business + Other
+    """
     from datetime import date as _date
     today = _date.today()
     existing = NetWorthHistory.query.filter_by(
@@ -140,14 +161,15 @@ def _save_snapshot(user_id, assets, mfs, stocks, loans):
     if existing:
         return
     equity = sum(m.value for m in mfs) + sum(s.value for s in stocks)
-    debt   = sum(a.value for a in assets if a.category in ["ppf","vpf","ssy","fd","nps"])
-    gold   = sum(a.value for a in assets if a.category in ["gold","silver"])
-    re_val = sum(a.value for a in assets if a.category.startswith("real_estate"))
-    cash   = sum(a.value for a in assets if a.category == "cash")
-    other  = sum(a.value for a in assets
-                 if a.category not in ["ppf","vpf","ssy","fd","nps","gold","silver","cash"]
-                 and not a.category.startswith("real_estate"))
-    liab   = sum(l.outstanding for l in loans)
+    gold   = cat_totals.get(WealthAssetCategory.PRECIOUS_METALS, 0)
+    re_val = cat_totals.get(WealthAssetCategory.REAL_ESTATE, 0)
+    debt   = (cat_totals.get(WealthAssetCategory.BANK_DEPOSITS, 0)
+              + cat_totals.get(WealthAssetCategory.INVESTMENTS, 0))
+    cash   = 0
+    other  = (cat_totals.get(WealthAssetCategory.VEHICLES, 0)
+              + cat_totals.get(WealthAssetCategory.BUSINESS, 0)
+              + cat_totals.get(WealthAssetCategory.OTHER, 0))
+    liab   = liabilities_total
     total  = equity + debt + gold + re_val + cash + other - liab
     snap   = NetWorthHistory(
         user_id=user_id, snapshot_date=today, total=total,
@@ -159,27 +181,40 @@ def _save_snapshot(user_id, assets, mfs, stocks, loans):
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    assets = Asset.query.filter_by(user_id=current_user.id).all()
+    # Phase H: asset totals now come exclusively from WealthAsset via
+    # WealthStatisticsService — the same authoritative service the
+    # Wealth Net Worth page uses — instead of the retired legacy
+    # Asset model. MutualFund/Stock (CAS-imported holdings) are a
+    # separate, unrelated feature and are untouched.
     mfs    = MutualFund.query.filter_by(user_id=current_user.id).all()
     stocks = Stock.query.filter_by(user_id=current_user.id).all()
-    loans  = Loan.query.filter_by(user_id=current_user.id).all()
 
-    gold_value   = sum(a.value for a in assets if a.category == 'gold')
-    silver_value = sum(a.value for a in assets if a.category == 'silver')
-    realty_value = sum(a.value for a in assets if a.category.startswith('real_estate'))
-    govt_value   = sum(a.value for a in assets if a.category in ['ppf', 'vpf', 'ssy', 'nps'])
-    fd_value     = sum(a.value for a in assets if a.category == 'fd')
-    cash_value   = sum(a.value for a in assets if a.category == 'cash')
-    other_value  = sum(a.value for a in assets if a.category == 'other')
-    mf_value     = sum(m.value for m in mfs)
-    stock_value  = sum(s.value for s in stocks)
-    physical_value = gold_value + silver_value + realty_value
-    total_value  = physical_value + govt_value + fd_value + cash_value + other_value + mf_value + stock_value
-    asset_count  = len(assets) + len(mfs) + len(stocks)
+    wstats = WealthStatisticsService(current_user.id)
+    cat_totals = {b['category']: b['total'] for b in wstats.category_breakdown()}
 
-    # Auto daily snapshot
+    real_estate_value     = cat_totals.get(WealthAssetCategory.REAL_ESTATE, 0)
+    precious_metals_value = cat_totals.get(WealthAssetCategory.PRECIOUS_METALS, 0)
+    vehicles_value        = cat_totals.get(WealthAssetCategory.VEHICLES, 0)
+    bank_deposits_value   = cat_totals.get(WealthAssetCategory.BANK_DEPOSITS, 0)
+    investments_value     = cat_totals.get(WealthAssetCategory.INVESTMENTS, 0)
+    business_value        = cat_totals.get(WealthAssetCategory.BUSINESS, 0)
+    other_value            = cat_totals.get(WealthAssetCategory.OTHER, 0)
+
+    mf_value    = sum(m.value for m in mfs)
+    stock_value = sum(s.value for s in stocks)
+
+    # Matches the old dashboard's "Total" exactly in spirit: sum of all
+    # holdings, no liability subtraction here (the old dashboard never
+    # subtracted liabilities from this hero figure either — see the
+    # Wealth Net Worth page for the liability-adjusted figure).
+    wealth_assets_total = wstats.total_assets()
+    total_value  = wealth_assets_total + mf_value + stock_value
+    asset_count  = wstats.asset_count() + len(mfs) + len(stocks)
+
+    # Auto daily snapshot — now sourced from WealthAsset + WealthLiability
     if total_value > 0:
-        _save_snapshot(current_user.id, assets, mfs, stocks, loans)
+        _save_snapshot(current_user.id, cat_totals, mfs, stocks,
+                       wstats.total_liabilities())
 
     # History for stacked area chart
     history = NetWorthHistory.query.filter_by(user_id=current_user.id)\
@@ -196,9 +231,10 @@ def dashboard():
     } for h in history]
 
     return render_template('dashboard.html',
-        user=current_user, total=total_value, physical=physical_value,
-        gold=gold_value, silver=silver_value, realty=realty_value,
-        govt=govt_value, fd=fd_value, cash=cash_value, other=other_value,
+        user=current_user, total=total_value,
+        real_estate=real_estate_value, precious_metals=precious_metals_value,
+        vehicles=vehicles_value, bank_deposits=bank_deposits_value,
+        investments=investments_value, business=business_value, other=other_value,
         mf=mf_value, stocks=stock_value, mf_count=len(mfs),
         stock_count=len(stocks), mutual_funds=mfs, stock_list=stocks,
         asset_count=asset_count, history_data=history_data)
@@ -206,8 +242,10 @@ def dashboard():
 @app.route('/assets')
 @login_required
 def assets():
-    all_assets = Asset.query.filter_by(user_id=current_user.id).order_by(Asset.created_at.desc()).all()
-    return render_template('assets.html', assets=all_assets, mcx={'gold': None, 'silver': None})
+    # Phase H: the standalone legacy Assets module has been retired.
+    # Wealth Assets (/wealth/assets) is now the sole authoritative
+    # Assets system. This redirect protects any existing bookmarks.
+    return redirect(url_for('wealth.assets_listing'))
 
 @app.route('/preferences')
 @login_required
@@ -240,104 +278,6 @@ def account():
 def settings():
     return redirect(url_for('preferences'))
 
-@app.route('/api/mcx-prices')
-@login_required
-def api_mcx_prices():
-    return jsonify({'gold': None, 'silver': None})
-@app.route('/assets/add', methods=['POST'])
-@login_required
-def add_asset():
-    category = request.form.get('category', '').strip()
-    if not category:
-        flash('Please select an asset type.', 'error')
-        return redirect(url_for('assets'))
-    asset = Asset(user_id=current_user.id, category=category)
-    if category == 'gold':
-        grams = safe_float(request.form.get('gold_grams'))
-        price_per_gram = safe_float(request.form.get('gold_price_per_gram'))
-        if grams <= 0:
-            flash('Please enter a valid weight for gold.', 'error')
-            return redirect(url_for('assets'))
-        asset.grams = grams
-        asset.price_per_gram = price_per_gram
-        asset.value = round(grams * price_per_gram, 2)
-        asset.name = 'Gold'
-    elif category == 'silver':
-        grams = safe_float(request.form.get('silver_grams'))
-        price_per_gram = safe_float(request.form.get('silver_price_per_gram'))
-        if grams <= 0:
-            flash('Please enter a valid weight for silver.', 'error')
-            return redirect(url_for('assets'))
-        asset.grams = grams
-        asset.price_per_gram = price_per_gram
-        asset.value = round(grams * price_per_gram, 2)
-        asset.name = 'Silver'
-    elif category in ['real_estate_house', 'real_estate_plot', 'real_estate_farm']:
-        name = request.form.get('realty_name', '').strip()
-        sq_ft = safe_float(request.form.get('realty_sqft'))
-        value = safe_float(request.form.get('realty_value'))
-        if not name or value <= 0:
-            flash('Please enter property name and value.', 'error')
-            return redirect(url_for('assets'))
-        asset.name = name
-        asset.sq_ft = sq_ft if sq_ft > 0 else None
-        asset.value = value
-    elif category in ['ppf', 'vpf', 'ssy']:
-        institution = request.form.get('govt_institution', '').strip()
-        value = safe_float(request.form.get('govt_value'))
-        if value <= 0:
-            flash('Please enter a valid balance.', 'error')
-            return redirect(url_for('assets'))
-        asset.institution = institution if institution else None
-        asset.value = value
-        asset.name = category.upper()
-    elif category == 'fd':
-        institution = request.form.get('fd_institution', '').strip()
-        value = safe_float(request.form.get('fd_value'))
-        if value <= 0:
-            flash('Please enter a valid FD amount.', 'error')
-            return redirect(url_for('assets'))
-        asset.institution = institution if institution else None
-        asset.value = value
-        asset.name = f'FD - {institution}' if institution else 'Fixed Deposit'
-    elif category == 'cash':
-        value = safe_float(request.form.get('cash_value'))
-        if value <= 0:
-            flash('Please enter a valid amount.', 'error')
-            return redirect(url_for('assets'))
-        asset.value = value
-        asset.name = 'Cash & Savings'
-    elif category == 'other':
-        other_count = Asset.query.filter_by(user_id=current_user.id, category='other').count()
-        if other_count >= 15:
-            flash('You can add up to 15 custom assets.', 'error')
-            return redirect(url_for('assets'))
-        name = request.form.get('other_name', '').strip()
-        value = safe_float(request.form.get('other_value'))
-        if not name or value <= 0:
-            flash('Please enter a name and value.', 'error')
-            return redirect(url_for('assets'))
-        asset.name = name
-        asset.value = value
-    else:
-        flash('Unknown asset type.', 'error')
-        return redirect(url_for('assets'))
-    db.session.add(asset)
-    db.session.commit()
-    flash('Asset added successfully!', 'success')
-    return redirect(url_for('assets'))
-
-@app.route('/assets/delete/<int:asset_id>', methods=['POST'])
-@login_required
-def delete_asset(asset_id):
-    asset = Asset.query.get_or_404(asset_id)
-    if asset.user_id != current_user.id:
-        flash('You do not have permission to delete this asset.', 'error')
-        return redirect(url_for('assets'))
-    db.session.delete(asset)
-    db.session.commit()
-    flash('Asset deleted.', 'success')
-    return redirect(url_for('assets'))
 def extract_pdf_text(file_bytes, password=None):
     try:
         pdf_file = io.BytesIO(file_bytes)
@@ -814,17 +754,24 @@ def _sip_projection(target_amt, target_year, current_savings, monthly_sip, annua
 @login_required
 def export_pdf():
     # ── gather data ──
-    assets  = Asset.query.filter_by(user_id=current_user.id).all()
+    # Phase H: asset figures now come from WealthAsset (via
+    # WealthStatisticsService), the authoritative Wealth source,
+    # instead of the retired legacy Asset model.
+    wstats  = WealthStatisticsService(current_user.id)
+    assets_by_cat = wstats.assets_by_category()
     mfs     = MutualFund.query.filter_by(user_id=current_user.id).all()
     stocks  = Stock.query.filter_by(user_id=current_user.id).all()
     goals   = Goal.query.filter_by(user_id=current_user.id).order_by(Goal.target_year).all()
 
     equity_val     = sum(m.value for m in mfs) + sum(s.value for s in stocks)
-    debt_val       = sum(a.value for a in assets if a.category in ['ppf','vpf','ssy','fd'])
-    gold_val       = sum(a.value for a in assets if a.category in ['gold','silver'])
-    realestate_val = sum(a.value for a in assets if a.category.startswith('real_estate'))
-    cash_val       = sum(a.value for a in assets if a.category == 'cash')
-    other_val      = sum(a.value for a in assets if a.category == 'other')
+    debt_val       = (sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.BANK_DEPOSITS, []))
+                       + sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.INVESTMENTS, [])))
+    gold_val       = sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.PRECIOUS_METALS, []))
+    realestate_val = sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.REAL_ESTATE, []))
+    other_val      = (sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.VEHICLES, []))
+                       + sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.BUSINESS, []))
+                       + sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.OTHER, [])))
+    cash_val       = 0
     total          = equity_val + debt_val + gold_val + realestate_val + cash_val + other_val
 
     # ── build PDF ──
@@ -931,32 +878,26 @@ def export_pdf():
         skt.setStyle(_tbl_style())
         story += [skt, Spacer(1, 3*mm)]
 
-    # Physical assets
-    cats = {
-        'gold':        ('Gold', '🥇'),
-        'silver':      ('Silver', '🥈'),
-        'real_estate': ('Real Estate', '🏠'),
-        'ppf':         ('PPF', '🏛️'),
-        'vpf':         ('VPF', '🏛️'),
-        'ssy':         ('Sukanya Samriddhi Yojana', '🏛️'),
-        'fd':          ('Fixed Deposits', '🏦'),
-        'cash':        ('Cash & Savings', '💵'),
-        'other':       ('Other Assets', '📦'),
+    # Physical / other assets — itemized by Wealth Asset category
+    cat_icons = {
+        WealthAssetCategory.REAL_ESTATE:     '🏠',
+        WealthAssetCategory.PRECIOUS_METALS: '🥇',
+        WealthAssetCategory.VEHICLES:        '🚗',
+        WealthAssetCategory.BANK_DEPOSITS:   '🏦',
+        WealthAssetCategory.INVESTMENTS:     '📈',
+        WealthAssetCategory.BUSINESS:        '🏢',
+        WealthAssetCategory.OTHER:           '📦',
     }
-    grouped = {}
-    for a in assets:
-        key = a.category if a.category in cats else ('real_estate' if a.category.startswith('real_estate') else 'other')
-        grouped.setdefault(key, []).append(a)
 
-    for key, (label, icon) in cats.items():
-        items = grouped.get(key, [])
+    for cat in WealthAssetCategory.ALL:
+        items = assets_by_cat.get(cat, [])
         if not items:
             continue
-        story.append(Paragraph(f"{icon} {label}", S['h3']))
+        story.append(Paragraph(f"{cat_icons.get(cat, '📦')} {cat}", S['h3']))
         ph_data = [['Name', 'Value (₹)']]
         for a in items:
-            ph_data.append([a.name or label, _fmt(a.value)])
-        ph_data.append(['Subtotal', _fmt(sum(a.value for a in items))])
+            ph_data.append([a.name or cat, _fmt(a.current_value)])
+        ph_data.append(['Subtotal', _fmt(sum(a.current_value for a in items))])
         pht = Table(ph_data, colWidths=[W*0.70, W*0.30])
         pht.setStyle(_tbl_style())
         pht.setStyle(TableStyle([
@@ -1052,17 +993,24 @@ def export_pdf():
 @app.route('/export/excel')
 @login_required
 def export_excel():
-    assets  = Asset.query.filter_by(user_id=current_user.id).all()
+    # Phase H: sourced from WealthAsset (authoritative), not the
+    # retired legacy Asset model.
+    wstats  = WealthStatisticsService(current_user.id)
+    assets_by_cat = wstats.assets_by_category()
+    all_assets_flat = [a for items in assets_by_cat.values() for a in items]
     mfs     = MutualFund.query.filter_by(user_id=current_user.id).all()
     stocks  = Stock.query.filter_by(user_id=current_user.id).all()
     goals   = Goal.query.filter_by(user_id=current_user.id).order_by(Goal.target_year).all()
 
     equity_val     = sum(m.value for m in mfs) + sum(s.value for s in stocks)
-    debt_val       = sum(a.value for a in assets if a.category in ['ppf','vpf','ssy','fd'])
-    gold_val       = sum(a.value for a in assets if a.category in ['gold','silver'])
-    realestate_val = sum(a.value for a in assets if a.category.startswith('real_estate'))
-    cash_val       = sum(a.value for a in assets if a.category == 'cash')
-    other_val      = sum(a.value for a in assets if a.category == 'other')
+    debt_val       = (sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.BANK_DEPOSITS, []))
+                       + sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.INVESTMENTS, [])))
+    gold_val       = sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.PRECIOUS_METALS, []))
+    realestate_val = sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.REAL_ESTATE, []))
+    other_val      = (sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.VEHICLES, []))
+                       + sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.BUSINESS, []))
+                       + sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.OTHER, [])))
+    cash_val       = 0
     total          = equity_val + debt_val + gold_val + realestate_val + cash_val + other_val
 
     wb = openpyxl.Workbook()
@@ -1197,8 +1145,8 @@ def export_excel():
     for s in stocks:
         all_rows.append(['Stock', s.name or '—', getattr(s, 'isin', '') or '',
                          getattr(s, 'quantity', '') or '', getattr(s, 'price', '') or '', s.value])
-    for a in assets:
-        all_rows.append([a.category.replace('_',' ').title(), a.name or '—', '', '', '', a.value])
+    for a in all_assets_flat:
+        all_rows.append([a.category, a.name or '—', a.asset_type or '', '', '', a.current_value])
 
     for i, row_data in enumerate(all_rows):
         _data_row(ws2, r2, row_data, alt=i%2==1)

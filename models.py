@@ -3,14 +3,19 @@ models.py — Database Models
 ============================
 Tables:
   1. User             — registered users
-  2. Asset            — manual assets (gold, silver, real estate etc.)
-  3. MutualFund       — parsed from CAMS/KFintech CAS PDF
-  4. Stock            — parsed from CDSL/NSDL CAS PDF
-  5. Goal             — financial goals
-  6. UserProfile      — life stage profile
-  7. Loan             — loans and liabilities
-  8. Insurance        — insurance policies
-  9. NetWorthHistory  — daily net worth snapshots
+  2. MutualFund       — parsed from CAMS/KFintech CAS PDF
+  3. Stock            — parsed from CDSL/NSDL CAS PDF
+  4. Goal             — financial goals
+  5. UserProfile      — life stage profile
+  6. Loan             — loans and liabilities (legacy, no active CRUD —
+                          superseded in practice by wealth.WealthLiability;
+                          retained as-is, out of scope for Phase H)
+  7. Insurance        — insurance policies
+  8. NetWorthHistory  — daily net worth snapshots
+
+Note (Phase H): the legacy Asset model/table has been retired. The
+authoritative Assets system is wealth.models.WealthAsset. See the
+Phase H final report for the full audit and migration decision.
 """
 
 from flask_sqlalchemy import SQLAlchemy
@@ -26,27 +31,11 @@ class User(UserMixin, db.Model):
     name     = db.Column(db.String(150), nullable=False)
     email    = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(256), nullable=False)
-    assets       = db.relationship("Asset",      backref="owner", lazy=True, cascade="all, delete-orphan")
     mutual_funds = db.relationship("MutualFund", backref="owner", lazy=True, cascade="all, delete-orphan")
     stocks       = db.relationship("Stock",      backref="owner", lazy=True, cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User {self.email}>"
-
-
-class Asset(db.Model):
-    __tablename__ = "asset"
-    id             = db.Column(db.Integer, primary_key=True)
-    user_id        = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    category       = db.Column(db.String(50), nullable=False)
-    name           = db.Column(db.String(200), nullable=True)
-    grams          = db.Column(db.Float, nullable=True)
-    price_per_gram = db.Column(db.Float, nullable=True)
-    sq_ft          = db.Column(db.Float, nullable=True)
-    institution    = db.Column(db.String(200), nullable=True)
-    value          = db.Column(db.Float, nullable=False, default=0)
-    created_at     = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at     = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class MutualFund(db.Model):
