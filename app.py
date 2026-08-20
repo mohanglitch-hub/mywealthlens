@@ -3,7 +3,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import bcrypt, pdfplumber, io, re, yfinance as yf
+import bcrypt, pdfplumber, io, re, os, secrets, yfinance as yf
 from datetime import datetime as dt, timedelta
 from models import db, User, MutualFund, Stock, Goal, UserProfile, NetWorthHistory, Family, FamilyMember, FamilyInvite
 from insurance_centre import insurance_bp
@@ -19,7 +19,41 @@ from insurance_centre.models import (
 )
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "mywealthlens-dev-secret-change-in-production"
+
+def _get_or_create_secret_key():
+    """
+    Loads SECRET_KEY from instance/secret_key.txt, generating a new
+    random one on first run if the file doesn't exist yet.
+
+    Why this approach: the previous SECRET_KEY was a hardcoded literal
+    string ("mywealthlens-dev-secret-change-in-production") that had
+    been sitting in this repo's git history during every window it
+    was made public — meaning anyone who saw the repo during those
+    windows could forge a valid session cookie or CSRF token for ANY
+    user, no password needed. That key is retired for good, not
+    reused here.
+
+    instance/ is already excluded from git (see .gitignore, added
+    after the Phase H database-exposure cleanup), so a file stored
+    there never gets committed — this generates itself automatically
+    on first run and then persists across restarts, with no manual
+    environment-variable setup required on a self-hosted single
+    Windows machine.
+    """
+    os.makedirs(app.instance_path, exist_ok=True)
+    key_path = os.path.join(app.instance_path, "secret_key.txt")
+    if os.path.exists(key_path):
+        with open(key_path, "r") as f:
+            key = f.read().strip()
+            if key:
+                return key
+    # First run, or file was empty/corrupted — generate a fresh one.
+    key = secrets.token_hex(32)
+    with open(key_path, "w") as f:
+        f.write(key)
+    return key
+
+app.config["SECRET_KEY"] = _get_or_create_secret_key()
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///mywealthlens.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB upload limit
