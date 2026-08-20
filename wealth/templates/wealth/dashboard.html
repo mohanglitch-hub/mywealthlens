@@ -208,6 +208,30 @@
   </div>
   {% endif %}
 
+  <!-- ── Historical Valuation Analytics (Phase K, Section 39) ── -->
+  <!-- Hidden entirely (never shown as an empty 0/0 card) until at
+       least one Asset has recorded value change — same hide-below-
+       threshold pattern as the two cards above. -->
+  {% if analytics_summary %}
+  <div class="wealth-section-card">
+    <div class="wealth-section-header" style="margin-bottom:0;">
+      <div class="wealth-section-title" style="margin-bottom:0;">Assets Up / Down</div>
+    </div>
+    <div class="wealth-stat-value" style="font-size:1.15rem; margin-top:2px;">
+      {{ analytics_summary.up_count }} Up · {{ analytics_summary.down_count }} Down
+    </div>
+    {% if analytics_summary.top_gainer %}
+    <div class="wealth-section-count">
+      Top gainer: {{ analytics_summary.top_gainer.entity.name }} +{{ format_inr(analytics_summary.top_gainer.absolute_change) }}
+    </div>
+    {% endif %}
+    <div class="wealth-section-desc">
+      Based on your recorded Asset value changes since they were first tracked.
+    </div>
+    <a href="{{ url_for('wealth.value_analytics') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Value Analytics →</a>
+  </div>
+  {% endif %}
+
 </div>
 
 <style>

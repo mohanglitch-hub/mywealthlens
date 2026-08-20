@@ -115,6 +115,48 @@
     <a href="{{ url_for('wealth.add_document', liability_id=liability.id) }}" class="wealth-btn-primary-outline" style="margin-top:14px; display:inline-block;">+ Add Document</a>
   </div>
 
+  <!-- ── Balance Performance (Phase K) ── -->
+  {% if analytics.has_history %}
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Balance Performance</div>
+    {% if analytics.consistency_warning %}
+    <div style="font-size:0.78rem; color:var(--down); background:rgba(220,38,38,0.08); border:1px solid var(--down); border-radius:8px; padding:10px 14px; margin-bottom:14px;">
+      ⚠ {{ analytics.consistency_warning }}
+    </div>
+    {% endif %}
+    <div class="wealth-perf-grid">
+      <div class="wealth-perf-item">
+        <span class="wealth-perf-label">Current Balance</span>
+        <span class="wealth-perf-value">{{ format_inr(analytics.current_value) }}</span>
+      </div>
+      <div class="wealth-perf-item">
+        <span class="wealth-perf-label">Initial Balance</span>
+        <span class="wealth-perf-value">{{ format_inr(analytics.initial_value) }}</span>
+      </div>
+      <div class="wealth-perf-item">
+        <span class="wealth-perf-label">Balance Change</span>
+        {# A DECREASE is a good outcome for a liability (Section 62/63) —
+           positive visual treatment for negative change, and vice versa,
+           the inverse of how Asset changes are colored. #}
+        <span class="wealth-perf-value {{ 'wealth-negative' if analytics.absolute_change > 0 }}">{{ '+' if analytics.absolute_change > 0 }}{{ format_inr(analytics.absolute_change) }}</span>
+      </div>
+      <div class="wealth-perf-item">
+        <span class="wealth-perf-label">Balance Change %</span>
+        {% if analytics.percentage_change is not none %}
+        <span class="wealth-perf-value {{ 'wealth-negative' if analytics.percentage_change > 0 }}">{{ '+' if analytics.percentage_change > 0 }}{{ '%.2f'|format(analytics.percentage_change) }}%</span>
+        {% else %}
+        <span class="wealth-perf-value" style="color:var(--muted);">N/A</span>
+        {% endif %}
+      </div>
+    </div>
+    <div style="font-size:0.72rem; color:var(--muted); margin-top:10px;">
+      {% if analytics.absolute_change < 0 %}This liability has reduced by {{ format_inr(-analytics.absolute_change) }} since it was first recorded.
+      {% elif analytics.absolute_change > 0 %}This liability has increased by {{ format_inr(analytics.absolute_change) }} since it was first recorded.
+      {% else %}No change since it was first recorded.{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ── Value History (Phase J) ── -->
   <div class="wealth-card">
     <div class="wealth-card-heading-plain">Balance History ({{ value_history|length }})</div>
@@ -243,6 +285,12 @@
   .wealth-history-mini-row:last-child { border-bottom: none; }
   .wealth-history-mini-date { color: var(--muted); min-width: 90px; }
   .wealth-history-mini-value { font-family: 'Roboto Mono', monospace; font-weight: 600; color: var(--text); flex: 1; }
+
+  .wealth-perf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 16px; }
+  .wealth-perf-item { display: flex; flex-direction: column; gap: 4px; }
+  .wealth-perf-label { font-size: 0.68rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .wealth-perf-value { font-family: 'Roboto Mono', monospace; font-weight: 700; font-size: 1.05rem; color: var(--accent); }
+  .wealth-perf-value.wealth-negative { color: var(--down); }
 
   @media (max-width: 600px) {
     .wealth-detail-grid { grid-template-columns: 1fr; }
