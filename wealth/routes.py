@@ -19,6 +19,7 @@ from . import validators
 from . import history_service
 from . import document_service
 from . import value_history_service
+from . import analytics_service
 from .models import (
     WealthAsset, WealthAssetCategory, ASSET_TYPES_BY_CATEGORY,
     FIELD_GROUPS_BY_CATEGORY, OwnershipType, SourceType, WealthStatus,
@@ -76,11 +77,20 @@ def dashboard():
     # exact same call the Vault page itself would use for its totals.
     document_summary = document_service.dashboard_summary(current_user.id)
 
+    # Section 39 of Phase K spec — compact card only, hidden entirely
+    # if there's nothing meaningful to show (mirrors history_trend/
+    # document_summary's own hide-below-threshold pattern above).
+    assets_for_analytics = WealthAsset.query.filter_by(
+        user_id=current_user.id, is_archived=False).all()
+    analytics_summary = analytics_service.dashboard_summary(
+        current_user.id, assets_for_analytics)
+
     return render_template(
         "wealth/dashboard.html",
         data=data,
         history_trend=history_trend,
         document_summary=document_summary,
+        analytics_summary=analytics_summary,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -259,12 +269,14 @@ def asset_detail(asset_id):
     documents = document_service.get_documents_for_asset(asset.id, current_user.id)
     value_history = value_history_service.get_value_history(
         current_user.id, value_history_service.ENTITY_ASSET, asset.id)
+    analytics = analytics_service.asset_value_analytics(current_user.id, asset)
 
     return render_template(
         "wealth/asset_detail.html",
         asset=asset,
         documents=documents,
         value_history=value_history,
+        analytics=analytics,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -465,12 +477,14 @@ def liability_detail(liability_id):
     documents = document_service.get_documents_for_liability(liability.id, current_user.id)
     value_history = value_history_service.get_value_history(
         current_user.id, value_history_service.ENTITY_LIABILITY, liability.id)
+    analytics = analytics_service.liability_value_analytics(current_user.id, liability)
 
     return render_template(
         "wealth/liability_detail.html",
         liability=liability,
         documents=documents,
         value_history=value_history,
+        analytics=analytics,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -528,6 +542,47 @@ def net_worth():
         "wealth/net_worth.html",
         data=data,
         format_inr=format_inr,
+    )
+
+
+@wealth_bp.route("/analytics")
+@login_required
+def value_analytics():
+    """
+    Historical Valuation Analytics (Phase K). Read-only — calculates
+    entirely from existing WealthValueSnapshot + current WealthAsset/
+    WealthLiability data, no new tables (Section 3/4 of spec).
+
+    Active (non-archived) entities only, for category/top-mover
+    summaries — matches how every other Wealth listing page already
+    scopes itself, and keeps category-percentage math from being
+    skewed by items the user has already archived (Section 60 note:
+    archived entities' OWN detail-page analytics still work, via
+    asset_value_analytics()/liability_value_analytics() directly —
+    this page's aggregate views are the only place archived items
+    are excluded).
+    """
+    assets = WealthAsset.query.filter_by(
+        user_id=current_user.id, is_archived=False).all()
+    liabilities = WealthLiability.query.filter_by(
+        user_id=current_user.id, is_archived=False).all()
+
+    assets_by_category = {}
+    for a in assets:
+        assets_by_category.setdefault(a.category, []).append(a)
+
+    category_summaries = analytics_service.all_category_summaries(
+        current_user.id, value_history_service.ENTITY_ASSET,
+        WealthAssetCategory.ALL, assets_by_category)
+
+    gainers, decliners = analytics_service.top_asset_movers(current_user.id, assets)
+    reductions = analytics_service.liability_reductions(current_user.id, liabilities)
+
+    return render_template(
+        "wealth/analytics.html",
+        category_summaries=category_summaries,
+        gainers=gainers, decliners=decliners, reductions=reductions,
+        format_inr=format_inr, format_date=format_date,
     )
 
 

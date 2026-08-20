@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}Value Analytics — Wealth Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="wealth-wrap">
+
+  <div class="wealth-breadcrumb">
+    <a href="{{ url_for('wealth.dashboard') }}">← Wealth Centre</a>
+  </div>
+
+  <div class="wealth-header">
+    <h1>Value Analytics</h1>
+    <p>How your Assets and Liabilities have changed since they were first recorded. Based on your own tracked valuations, not market data.</p>
+  </div>
+
+  <!-- ── Category Summaries (Section 28/29/30) ── -->
+  <div class="wealth-list-card">
+    <div class="wealth-section-label">Category Trends</div>
+    {% if category_summaries %}
+    <div class="wealth-breakdown-list">
+      {% for c in category_summaries %}
+      <div class="wealth-breakdown-row" style="cursor:default;">
+        <span class="wealth-breakdown-category">{{ c.category }}</span>
+        <div class="wealth-breakdown-values">
+          {% if c.has_data %}
+          <span class="wealth-breakdown-total {{ 'wealth-negative' if c.absolute_change < 0 }}">
+            {{ '+' if c.absolute_change > 0 }}{{ format_inr(c.absolute_change) }}
+            {% if c.percentage_change is not none %}
+              ({{ '+' if c.percentage_change > 0 }}{{ '%.2f'|format(c.percentage_change) }}%)
+            {% else %}
+              (N/A)
+            {% endif %}
+          </span>
+          <span class="wealth-breakdown-attributable">Your {{ c.category }} holdings, {{ c.contributing_count }} of {{ c.entity_count }} with history</span>
+          {% else %}
+          <span class="wealth-breakdown-attributable">No valuation history yet</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    <div style="font-size:0.72rem; color:var(--muted); margin-top:14px; line-height:1.5;">
+      Each category total compares every active item's own first recorded value against its current value — items don't all share one start date, so this reflects the combined change across items with different tracking histories.
+    </div>
+    {% else %}
+    <div class="wealth-empty-state">
+      <div class="wealth-empty-title">No category trends yet</div>
+      <div class="wealth-empty-sub">Once your Assets have more than one recorded value, category trends will appear here.</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Top Gainers / Decliners (Section 34/35) ── -->
+  {% if gainers or decliners %}
+  <div class="wealth-summary-grid wealth-summary-grid-2">
+    <div class="wealth-list-card">
+      <div class="wealth-section-label">Largest Increases</div>
+      {% if gainers %}
+      <div class="wealth-breakdown-list">
+        {% for g in gainers %}
+        <a href="{{ url_for('wealth.asset_detail', asset_id=g.entity.id) }}" class="wealth-breakdown-row">
+          <span class="wealth-breakdown-category">{{ g.entity.name }}</span>
+          <div class="wealth-breakdown-values">
+            <span class="wealth-breakdown-total">+{{ format_inr(g.absolute_change) }}</span>
+            {% if g.percentage_change is not none %}
+            <span class="wealth-breakdown-attributable">+{{ '%.2f'|format(g.percentage_change) }}%</span>
+            {% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div style="font-size:0.85rem; color:var(--muted);">No increases recorded yet.</div>
+      {% endif %}
+    </div>
+
+    <div class="wealth-list-card">
+      <div class="wealth-section-label">Largest Decreases</div>
+      {% if decliners %}
+      <div class="wealth-breakdown-list">
+        {% for d in decliners %}
+        <a href="{{ url_for('wealth.asset_detail', asset_id=d.entity.id) }}" class="wealth-breakdown-row">
+          <span class="wealth-breakdown-category">{{ d.entity.name }}</span>
+          <div class="wealth-breakdown-values">
+            <span class="wealth-breakdown-total wealth-negative">{{ format_inr(d.absolute_change) }}</span>
+            {% if d.percentage_change is not none %}
+            <span class="wealth-breakdown-attributable">{{ '%.2f'|format(d.percentage_change) }}%</span>
+            {% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div style="font-size:0.85rem; color:var(--muted);">No decreases recorded yet.</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Liability Reductions (Section 36) ── -->
+  <div class="wealth-list-card">
+    <div class="wealth-section-label">Liability Reductions</div>
+    {% if reductions %}
+    <div class="wealth-breakdown-list">
+      {% for r in reductions %}
+      <a href="{{ url_for('wealth.liability_detail', liability_id=r.entity.id) }}" class="wealth-breakdown-row">
+        <span class="wealth-breakdown-category">{{ r.entity.name }}</span>
+        <div class="wealth-breakdown-values">
+          <span class="wealth-breakdown-total">-{{ format_inr(r.reduction) }} reduced</span>
+          {% if r.percentage_change is not none %}
+          <span class="wealth-breakdown-attributable">{{ '%.2f'|format(r.percentage_change) }}% balance change</span>
+          {% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="font-size:0.85rem; color:var(--muted);">No liability reductions recorded yet.</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<style>
+  .wealth-wrap { max-width: 1100px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+  .wealth-breadcrumb { font-size: 0.95rem; }
+  .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
+  .wealth-breadcrumb a:hover { color: var(--accent); }
+
+  .wealth-header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+  .wealth-header p { color: var(--muted); font-size: 0.875rem; }
+
+  .wealth-summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .wealth-summary-grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+  .wealth-list-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
+  .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; }
+
+  .wealth-breakdown-list { display: flex; flex-direction: column; gap: 2px; }
+  .wealth-breakdown-row {
+    display: flex; justify-content: space-between; align-items: center; padding: 12px 10px;
+    border-bottom: 1px solid var(--border); text-decoration: none; color: inherit; border-radius: 6px; transition: background 0.2s;
+  }
+  .wealth-breakdown-row:last-child { border-bottom: none; }
+  a.wealth-breakdown-row:hover { background: var(--surface2); }
+  .wealth-breakdown-category { font-size: 0.88rem; font-weight: 600; color: var(--text); }
+  .wealth-breakdown-values { text-align: right; display: flex; flex-direction: column; gap: 2px; }
+  .wealth-breakdown-total { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); }
+  .wealth-breakdown-total.wealth-negative { color: var(--down); }
+  .wealth-breakdown-attributable { font-size: 0.72rem; color: var(--muted); }
+
+  .wealth-empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .wealth-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
+  .wealth-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
+
+  @media (max-width: 700px) {
+    .wealth-summary-grid, .wealth-summary-grid-2 { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
