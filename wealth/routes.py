@@ -18,6 +18,7 @@ from . import services
 from . import validators
 from . import history_service
 from . import document_service
+from . import value_history_service
 from .models import (
     WealthAsset, WealthAssetCategory, ASSET_TYPES_BY_CATEGORY,
     FIELD_GROUPS_BY_CATEGORY, OwnershipType, SourceType, WealthStatus,
@@ -256,11 +257,14 @@ def asset_detail(asset_id):
         abort(404)
 
     documents = document_service.get_documents_for_asset(asset.id, current_user.id)
+    value_history = value_history_service.get_value_history(
+        current_user.id, value_history_service.ENTITY_ASSET, asset.id)
 
     return render_template(
         "wealth/asset_detail.html",
         asset=asset,
         documents=documents,
+        value_history=value_history,
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -459,11 +463,14 @@ def liability_detail(liability_id):
         abort(404)
 
     documents = document_service.get_documents_for_liability(liability.id, current_user.id)
+    value_history = value_history_service.get_value_history(
+        current_user.id, value_history_service.ENTITY_LIABILITY, liability.id)
 
     return render_template(
         "wealth/liability_detail.html",
         liability=liability,
         documents=documents,
+        value_history=value_history,
         format_inr=format_inr,
         format_date=format_date,
     )

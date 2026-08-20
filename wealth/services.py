@@ -18,6 +18,7 @@ from .models import (
     WealthAsset, WealthLiability, WealthStatus, SourceType,
     WealthAssetCategory, OwnershipType,
 )
+from . import value_history_service as vhs
 
 
 # ── Form Parsing Helpers ──────────────────────────────────────────────────────
@@ -108,6 +109,16 @@ def create_asset(db, user_id, form):
 
     asset = WealthAsset(user_id=user_id, **fields)
     db.session.add(asset)
+    db.session.flush()  # assigns asset.id, needed for the history row below
+
+    # Phase J: initial value-history point (Section 9/17). Same
+    # transaction as the asset itself (Section 21) — flush() above
+    # gets the id without committing, so if anything below fails,
+    # the whole insert (asset + history) rolls back together.
+    vhs.record_wealth_value_change(
+        db, user_id, vhs.ENTITY_ASSET, asset.id,
+        asset.current_value, is_initial=True)
+
     db.session.commit()
     return asset, None
 
@@ -117,6 +128,8 @@ def update_asset(db, asset, user_id, form):
     if asset.user_id != user_id:
         return None, "You do not have permission to edit this asset."
 
+    old_value = asset.current_value
+
     fields = _asset_fields_from_form(form)
     if fields["ownership_percentage"] is None:
         fields["ownership_percentage"] = 100.0
@@ -124,6 +137,14 @@ def update_asset(db, asset, user_id, form):
     for key, value in fields.items():
         setattr(asset, key, value)
     asset.updated_at = datetime.utcnow()
+
+    # Phase J: only creates a record if current_value actually
+    # changed (Section 6/7/8) — metadata-only edits (name, category,
+    # notes, etc.) never touch this (Section 5/38/39/40). Same
+    # transaction as the asset update itself (Section 21).
+    if vhs.values_differ(old_value, asset.current_value):
+        vhs.record_wealth_value_change(
+            db, user_id, vhs.ENTITY_ASSET, asset.id, asset.current_value)
 
     db.session.commit()
     return asset, None
@@ -167,6 +188,15 @@ def delete_asset_permanent(db, asset, user_id):
         return False, "You do not have permission to delete this asset."
     if not asset.is_archived:
         return False, "Only archived assets can be permanently deleted."
+
+    # Phase J: entity_id has no formal database-level FK/cascade on
+    # wealth_value_snapshot (by design — it's shared across two
+    # possible parent tables), so once this asset is genuinely gone,
+    # its value-history rows would otherwise be orphaned forever,
+    # referencing an entity_id that no longer exists (Section 34/35 —
+    # explicitly not acceptable). Same transaction as the delete
+    # itself.
+    vhs.delete_value_history_for_entity(db, user_id, vhs.ENTITY_ASSET, asset.id)
 
     db.session.delete(asset)
     db.session.commit()
@@ -575,6 +605,16 @@ def create_liability(db, user_id, form):
 
     liability = WealthLiability(user_id=user_id, **fields)
     db.session.add(liability)
+    db.session.flush()  # assigns liability.id, needed for the history row below
+
+    # Phase J: initial value-history point, tracking outstanding_amount
+    # — the balance actually owed right now — not original_amount,
+    # which is a fixed historical fact set once at creation and never
+    # meaningfully "changes" the way a running balance does.
+    vhs.record_wealth_value_change(
+        db, user_id, vhs.ENTITY_LIABILITY, liability.id,
+        liability.outstanding_amount, is_initial=True)
+
     db.session.commit()
     return liability, None
 
@@ -584,6 +624,8 @@ def update_liability(db, liability, user_id, form):
     if liability.user_id != user_id:
         return None, "You do not have permission to edit this liability."
 
+    old_value = liability.outstanding_amount
+
     fields = _liability_fields_from_form(form)
     if fields["ownership_percentage"] is None:
         fields["ownership_percentage"] = 100.0
@@ -591,6 +633,11 @@ def update_liability(db, liability, user_id, form):
     for key, value in fields.items():
         setattr(liability, key, value)
     liability.updated_at = datetime.utcnow()
+
+    if vhs.values_differ(old_value, liability.outstanding_amount):
+        vhs.record_wealth_value_change(
+            db, user_id, vhs.ENTITY_LIABILITY, liability.id,
+            liability.outstanding_amount)
 
     db.session.commit()
     return liability, None
@@ -634,6 +681,8 @@ def delete_liability_permanent(db, liability, user_id):
         return False, "You do not have permission to delete this liability."
     if not liability.is_archived:
         return False, "Only archived liabilities can be permanently deleted."
+
+    vhs.delete_value_history_for_entity(db, user_id, vhs.ENTITY_LIABILITY, liability.id)
 
     db.session.delete(liability)
     db.session.commit()
