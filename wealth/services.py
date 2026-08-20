@@ -296,6 +296,21 @@ class WealthStatisticsService:
         breakdown.sort(key=lambda b: b["total"], reverse=True)
         return breakdown
 
+    def assets_by_category(self):
+        """
+        Active assets grouped by category, preserving insertion order
+        of WealthAssetCategory.ALL. Added in Phase H so the main app
+        dashboard and the PDF/Excel exports can build itemized
+        per-category tables from WealthAsset — the single authoritative
+        source — instead of querying the legacy Asset model directly.
+        """
+        assets = self._active_assets_query().order_by(
+            WealthAsset.category, WealthAsset.name).all()
+        grouped = {}
+        for a in assets:
+            grouped.setdefault(a.category, []).append(a)
+        return grouped
+
     def recent_assets(self, limit=5):
         """Most recently added/updated active assets (Section 23 of
         spec)."""
