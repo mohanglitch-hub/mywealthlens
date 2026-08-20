@@ -134,6 +134,7 @@
             <span role="columnheader">Assets</span>
             <span role="columnheader">Liabilities</span>
             <span role="columnheader">Net Worth</span>
+            <span role="columnheader">Source</span>
           </div>
           {% for s in snapshots %}
           <a href="{{ url_for('wealth.snapshot_detail', snapshot_id=s.id) }}" class="wealth-history-row" role="row">
@@ -141,6 +142,7 @@
             <span role="cell">{{ format_inr(s.total_asset_value) }}</span>
             <span role="cell">{{ format_inr(s.total_liability_value) }}</span>
             <span role="cell" class="{{ 'wealth-negative' if s.net_worth < 0 }}">{{ format_inr(s.net_worth) }}</span>
+            <span role="cell"><span class="wealth-badge wealth-badge-muted">{{ 'Automatic' if s.source == 'automatic' else 'Manual' }}</span></span>
           </a>
           {% endfor %}
         </div>
@@ -228,6 +230,8 @@
 
   .wealth-list-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm); }
   .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 16px; }
+  .wealth-badge { display: inline-block; font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .wealth-badge-muted { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
 
   .wealth-current-card { border-color: var(--accent); border-width: 1.5px; }
   .wealth-current-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 20px; }
@@ -286,7 +290,7 @@
 
   .wealth-history-table { display: flex; flex-direction: column; }
   .wealth-history-row {
-    display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr; gap: 10px;
+    display: grid; grid-template-columns: 1.2fr 1fr 1fr 1fr 0.8fr; gap: 10px;
     padding: 12px 10px; border-bottom: 1px solid var(--border);
     text-decoration: none; color: inherit; border-radius: 6px; transition: background 0.2s;
     font-size: 0.85rem;

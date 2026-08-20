@@ -24,6 +24,7 @@ from .models import (
     AreaUnit, WeightUnit,
     WealthLiability, WealthLiabilityCategory, LIABILITY_TYPES_BY_CATEGORY,
     WealthDocumentCategory, DOCUMENT_TYPES_BY_CATEGORY,
+    SnapshotSource,
 )
 from . import utils
 from .utils import format_inr, format_date
@@ -644,7 +645,8 @@ def create_wealth_snapshot():
         return redirect(url_for("wealth.wealth_history"))
 
     snapshot, error, needs_confirmation = history_service.create_snapshot(
-        _db(), current_user.id, snapshot_date, confirm_replace=confirm_replace)
+        _db(), current_user.id, snapshot_date, confirm_replace=confirm_replace,
+        source=SnapshotSource.MANUAL)
 
     if needs_confirmation:
         # Nothing was written. Redirect back with the pending date so

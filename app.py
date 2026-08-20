@@ -1256,5 +1256,13 @@ app.register_blueprint(insurance_bp)
 app.register_blueprint(retirement_bp)
 app.register_blueprint(wealth_bp)
 
+# Phase I — Automatic Wealth Snapshots. Registers `flask wealth
+# snapshot`, invoked by Windows Task Scheduler (see the Phase I
+# final report for setup). Kept as a separate module rather than
+# defined inline here, matching this project's existing pattern of
+# routes.py/services.py living inside each module's own folder.
+from wealth.cli import register_cli
+register_cli(app)
+
 if __name__ == '__main__': 
      app.run(debug=True, port=5000, host='0.0.0.0')

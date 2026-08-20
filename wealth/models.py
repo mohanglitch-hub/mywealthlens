@@ -430,6 +430,20 @@ class WealthValueSnapshot(db.Model):
         return f"<WealthValueSnapshot {self.entity_type}={self.entity_id} value={self.value}>"
 
 
+class SnapshotSource:
+    """
+    Phase I — distinguishes how a snapshot was created. Added because
+    the History UI benefits from showing this (Section 34/79 of the
+    Phase I spec), not because the snapshot's financial meaning
+    changes at all — a manual and an automatic snapshot for the same
+    date represent identically-structured Wealth data.
+    """
+    MANUAL    = "manual"
+    AUTOMATIC = "automatic"
+
+    ALL = [MANUAL, AUTOMATIC]
+
+
 class WealthSnapshot(db.Model):
     """
     Phase F — Wealth History. An aggregate, point-in-time record of
@@ -481,6 +495,76 @@ class WealthSnapshot(db.Model):
     #   an explicit column (rather than relying on row-existence
     #   alone) purely so a future phase could soft-delete without a
     #   schema change — never read as ARCHIVED anywhere in Phase F.
+
+    source = db.Column(db.String(20), nullable=False,
+                       default=SnapshotSource.MANUAL,
+                       server_default=SnapshotSource.MANUAL)
+    # ^ Phase I. server_default ensures the migration backfills every
+    #   pre-existing row as "manual" (Section 54/55 — historical
+    #   snapshots were all created through the manual route; it would
+    #   be factually wrong to relabel them "automatic" after the
+    #   fact). New rows explicitly pass source= at creation time
+    #   (Section 79 — no arbitrary strings; only SnapshotSource.ALL
+    #   values are ever written).
+
+
+class WealthSnapshotLog(db.Model):
+    """
+    Phase I — operational log of automatic snapshot CLI runs
+    (Section 28/29). Deliberately separate from WealthSnapshot: this
+    table records what the SCHEDULER did (including SKIPPED/FAILED
+    outcomes that never produce a WealthSnapshot row at all), not
+    Wealth financial data. Never contains asset values, account
+    details, or any other private figure (Section 30) — status and a
+    short operational message only.
+
+    One row per user per CLI run attempt (not one row per CLI
+    invocation) so a single run touching 10 users produces 10 log
+    rows, each independently showing that user's outcome — this is
+    what lets one user's FAILED not obscure another user's SUCCESS
+    (Section 25/58) in the log table itself, not just in memory
+    during the run.
+    """
+    __tablename__ = "wealth_snapshot_log"
+
+    STATUS_SUCCESS = "SUCCESS"
+    STATUS_SKIPPED = "SKIPPED"
+    STATUS_FAILED  = "FAILED"
+    ALL_STATUSES = [STATUS_SUCCESS, STATUS_SKIPPED, STATUS_FAILED]
+
+    id      = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer,
+                        db.ForeignKey("user.id", ondelete="CASCADE"),
+                        nullable=False)
+
+    snapshot_date = db.Column(db.Date, nullable=False)
+    # ^ the IST calendar date this run attempt was FOR — always
+    #   "today" at the moment the CLI executed (Section 43), never
+    #   backfilled or derived from a missed schedule's original time.
+
+    run_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    # ^ wall-clock time the log row was written, distinct from
+    #   snapshot_date (Section 12) — this can differ from
+    #   snapshot_date's "midnight IST" framing since a run can happen
+    #   at any time of day (manual test runs, retries, etc).
+
+    status  = db.Column(db.String(10), nullable=False)
+    message = db.Column(db.String(300), nullable=True)
+    # ^ short operational text only, e.g. "snapshot created" /
+    #   "snapshot already exists" / "calculation error" — never a
+    #   financial figure or exception's raw args (Section 30).
+
+    snapshot_id = db.Column(db.Integer,
+                            db.ForeignKey("wealth_snapshot.id", ondelete="SET NULL"),
+                            nullable=True)
+    # ^ set only on SUCCESS, so a log row can link to the snapshot it
+    #   produced; SET NULL rather than CASCADE so deleting a snapshot
+    #   later (Section 29 of Phase F) never deletes its own log
+    #   history — the log is a record that the run happened, which
+    #   remains true regardless of what happens to the snapshot after.
+
+    def __repr__(self):
+        return f"<WealthSnapshotLog user={self.user_id} {self.snapshot_date} {self.status}>"
 class WealthDocumentCategory:
     """
     Top-level document categories (Section 10 of Phase G spec).
