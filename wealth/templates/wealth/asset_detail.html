@@ -161,6 +161,29 @@
     <a href="{{ url_for('wealth.add_document', asset_id=asset.id) }}" class="wealth-btn-primary-outline" style="margin-top:14px; display:inline-block;">+ Add Document</a>
   </div>
 
+  <!-- ── Value History (Phase J) ── -->
+  <div class="wealth-card">
+    <div class="wealth-card-heading-plain">Value History ({{ value_history|length }})</div>
+    {% if value_history %}
+      {% if value_history|length > 1 %}
+      <div style="height:180px; margin-bottom:16px;">
+        <canvas id="valueHistoryChart"></canvas>
+      </div>
+      {% endif %}
+    <div class="wealth-history-mini-list">
+      {% for v in value_history %}
+      <div class="wealth-history-mini-row">
+        <span class="wealth-history-mini-date">{{ format_date(v.snapshot_date) }}</span>
+        <span class="wealth-history-mini-value {{ 'wealth-negative' if v.value < 0 }}">{{ format_inr(v.value) }}</span>
+        <span class="wealth-badge wealth-badge-muted">{{ v.note }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="font-size:0.85rem; color:var(--muted);">No value history yet.</div>
+    {% endif %}
+  </div>
+
   {% if asset.notes %}
   <div class="wealth-card">
     <div class="wealth-card-heading-plain">Notes</div>
@@ -169,6 +192,35 @@
   {% endif %}
 
 </div>
+
+{% if value_history|length > 1 %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  (function() {
+    const points = {{ value_history|map(attribute='value')|list|reverse|list|tojson }};
+    const labels = {{ value_history|map(attribute='snapshot_date')|map('string')|list|reverse|list|tojson }};
+    const inrTick = v => v >= 10000000 ? '₹' + (v/10000000).toFixed(1) + 'Cr'
+                      : v >= 100000    ? '₹' + (v/100000).toFixed(1) + 'L'
+                      : '₹' + (v/1000).toFixed(0) + 'K';
+    new Chart(document.getElementById('valueHistoryChart'), {
+      type: 'line',
+      data: { labels: labels, datasets: [{
+        data: points, borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.15)',
+        fill: true, tension: 0.3, pointRadius: 3,
+      }]},
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ' ₹' + ctx.parsed.y.toLocaleString('en-IN') } } },
+        scales: {
+          x: { ticks: { font: { size: 9 } } },
+          y: { ticks: { callback: inrTick } }
+        }
+      }
+    });
+  })();
+</script>
+{% endif %}
 
 <style>
   .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 14px; }
@@ -235,6 +287,15 @@
   .wealth-doc-mini-row:hover .wealth-doc-mini-name { color: var(--accent); }
   .wealth-doc-mini-name { font-weight: 600; color: var(--text); }
   .wealth-doc-mini-type { font-size: 0.75rem; color: var(--muted); }
+
+  .wealth-history-mini-list { display: flex; flex-direction: column; gap: 2px; }
+  .wealth-history-mini-row {
+    display: flex; align-items: center; gap: 12px; padding: 9px 4px;
+    border-bottom: 1px solid var(--border); font-size: 0.85rem;
+  }
+  .wealth-history-mini-row:last-child { border-bottom: none; }
+  .wealth-history-mini-date { color: var(--muted); min-width: 90px; }
+  .wealth-history-mini-value { font-family: 'Roboto Mono', monospace; font-weight: 600; color: var(--text); flex: 1; }
 
   @media (max-width: 600px) {
     .wealth-detail-grid { grid-template-columns: 1fr; }
