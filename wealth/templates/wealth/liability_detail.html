@@ -55,6 +55,7 @@
     <div class="wealth-detail-grid">
       <div class="wealth-field"><span class="wealth-field-label">Original Amount</span><span class="wealth-field-value">{{ format_inr(liability.original_amount) if liability.original_amount else '—' }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Outstanding Liability</span><span class="wealth-field-value wealth-accent">{{ format_inr(liability.outstanding_amount) }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Balance As Of</span><span class="wealth-field-value">{{ format_date(liability.balance_as_of) if liability.balance_as_of else '—' }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Interest Rate</span><span class="wealth-field-value">{{ (liability.interest_rate ~ '%') if liability.interest_rate is not none else '—' }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Start Date</span><span class="wealth-field-value">{{ format_date(liability.start_date) }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Maturity / End Date</span><span class="wealth-field-value">{{ format_date(liability.expected_end_date) }}</span></div>

@@ -16,7 +16,7 @@ from sqlalchemy import or_
 
 from .models import (
     WealthAsset, WealthLiability, WealthStatus, SourceType,
-    WealthAssetCategory, OwnershipType,
+    WealthAssetCategory, WealthDocument, OwnershipType,
 )
 from . import value_history_service as vhs
 from .timezone_utils import today_ist
@@ -254,6 +254,24 @@ def delete_asset_permanent(db, asset, user_id):
     # explicitly not acceptable). Same transaction as the delete
     # itself.
     vhs.delete_value_history_for_entity(db, user_id, vhs.ENTITY_ASSET, asset.id)
+
+    # Phase M integration audit (Section 32/47 of spec) — discovered
+    # that WealthDocument.asset_id declares ondelete="SET NULL" in
+    # the model, but this app never enables SQLite's foreign-key
+    # enforcement (PRAGMA foreign_keys=ON is not set anywhere) and
+    # there's no ORM-level relationship() providing an equivalent
+    # cascade — so that SET NULL was purely decorative and never
+    # actually fired. Verified directly: permanently deleting an
+    # asset left its documents' asset_id pointing at a row that no
+    # longer existed. Fixed the same way Phase J's history cleanup
+    # above already does it — explicit application-level cleanup in
+    # the same transaction, rather than relying on a DB-level
+    # constraint that doesn't function in this deployment. Documents
+    # themselves are intentionally NOT deleted (Phase G's documented
+    # design: they survive for the user's own record-keeping) — only
+    # the now-dangling asset_id reference is cleared.
+    WealthDocument.query.filter_by(user_id=user_id, asset_id=asset.id) \
+        .update({"asset_id": None})
 
     db.session.delete(asset)
     db.session.commit()
@@ -782,6 +800,11 @@ def delete_liability_permanent(db, liability, user_id):
         return False, "Only archived liabilities can be permanently deleted."
 
     vhs.delete_value_history_for_entity(db, user_id, vhs.ENTITY_LIABILITY, liability.id)
+
+    # Phase M integration audit — same orphaned-reference fix as
+    # delete_asset_permanent above, for the liability side.
+    WealthDocument.query.filter_by(user_id=user_id, liability_id=liability.id) \
+        .update({"liability_id": None})
 
     db.session.delete(liability)
     db.session.commit()
