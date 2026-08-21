@@ -79,7 +79,36 @@
           <label for="interest_rate">Interest Rate (%) — informational only</label>
           <input type="number" name="interest_rate" id="interest_rate" step="0.01" min="0" max="100" value="{{ values.interest_rate }}" />
         </div>
+        <div class="form-group">
+          <label for="balance_as_of" id="balanceAsOfLabel">Balance As Of</label>
+          <input type="date" name="balance_as_of" id="balance_as_of" value="{{ values.balance_as_of }}"
+                 max="{{ today_ist }}" />
+        </div>
       </div>
+      {% if is_edit %}
+      <div id="backdatedNotice" class="wealth-backdated-notice" style="display:none;">
+        ⓘ This will be recorded as a historical balance for the selected date. Your current outstanding amount will not change.
+      </div>
+      {% endif %}
+
+    <script>
+      (function() {
+        var dateInput = document.getElementById('balance_as_of');
+        var notice = document.getElementById('backdatedNotice');
+        var labelEl = document.querySelector('label[for="outstanding_amount"]');
+        var isEdit = {{ 'true' if is_edit else 'false' }};
+        var today = '{{ today_ist }}';
+        if (!dateInput || !isEdit) return;
+
+        function updateForBackdating() {
+          var isBackdated = dateInput.value && dateInput.value < today;
+          if (notice) notice.style.display = isBackdated ? 'block' : 'none';
+          if (labelEl) labelEl.innerHTML = (isBackdated ? 'Historical Balance (\u20b9)' : 'Outstanding Amount (\u20b9)') + ' <span class="wealth-required-mark">*</span>';
+        }
+        dateInput.addEventListener('change', updateForBackdating);
+        updateForBackdating();
+      })();
+    </script>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
           <label for="start_date">Start Date</label>
@@ -165,6 +194,11 @@
 </div>
 
 <style>
+  .wealth-backdated-notice {
+    margin-top: 14px; font-size: 0.82rem; color: var(--text2);
+    background: var(--accent-bg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 10px 14px; line-height: 1.5;
+  }
   .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 18px; }
   .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
   .wealth-breadcrumb a:hover { color: var(--accent); }
