@@ -13,9 +13,18 @@
     <div>
       <h1>Snapshot — {{ format_date(snapshot.snapshot_date) }} <span class="wealth-badge wealth-badge-muted">{{ 'Automatic' if snapshot.source == 'automatic' else 'Manual' }}</span></h1>
       <p>
+        {# Phase N (Section 11): removed a "Created: {{ snapshot.created_at }}"
+           line here — WealthSnapshot has never had a created_at column
+           (confirmed by direct model inspection), so this always
+           silently rendered as "—". Not fixed by adding a column:
+           unlike WealthValueSnapshot, WealthSnapshot never supports
+           backdating, so snapshot_date already IS the only meaningful
+           date this record has — a separate "recorded at" timestamp
+           would carry no real information beyond what the Source
+           badge above already conveys (a manual snapshot is always
+           created same-day; an automatic one always runs same-day
+           too, per Phase I's no-backfill rule). #}
         Snapshot Date: {{ format_date(snapshot.snapshot_date) }}
-        &nbsp;·&nbsp;
-        Created: {{ format_date(snapshot.created_at, "%d %b %Y, %I:%M %p") }}
       </p>
     </div>
     <form method="POST" action="{{ url_for('wealth.delete_wealth_snapshot', snapshot_id=snapshot.id) }}">
