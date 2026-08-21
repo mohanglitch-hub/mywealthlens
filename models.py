@@ -5,17 +5,23 @@ Tables:
   1. User             — registered users
   2. MutualFund       — parsed from CAMS/KFintech CAS PDF
   3. Stock            — parsed from CDSL/NSDL CAS PDF
-  4. Goal             — financial goals
+  4. Goal              — financial goals
   5. UserProfile      — life stage profile
-  6. Loan             — loans and liabilities (legacy, no active CRUD —
-                          superseded in practice by wealth.WealthLiability;
-                          retained as-is, out of scope for Phase H)
-  7. Insurance        — insurance policies
-  8. NetWorthHistory  — daily net worth snapshots
+  6. Insurance        — insurance policies
+  7. NetWorthHistory  — daily net worth snapshots (see its own class
+                          docstring for why this coexists with
+                          wealth.models.WealthSnapshot — Phase N)
 
 Note (Phase H): the legacy Asset model/table has been retired. The
 authoritative Assets system is wealth.models.WealthAsset. See the
 Phase H final report for the full audit and migration decision.
+
+Note (Phase N): the legacy Loan model/table has also been retired —
+confirmed unused (no imports, no FKs, no live queries anywhere in
+the codebase) and confirmed empty (0 rows on both real user accounts
+at time of removal). The authoritative Liabilities system is
+wealth.models.WealthLiability. See wealth/migrate_phase_n.py for the
+table-drop migration and the Phase N final report for the full audit.
 """
 
 from flask_sqlalchemy import SQLAlchemy
@@ -102,24 +108,43 @@ class UserProfile(db.Model):
     updated_at     = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
 
 
-class Loan(db.Model):
-    __tablename__ = "loan"
-    id            = db.Column(db.Integer, primary_key=True)
-    user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    loan_type     = db.Column(db.String(30), nullable=False)
-    lender        = db.Column(db.String(200), nullable=False)
-    principal     = db.Column(db.Float, nullable=False)
-    outstanding   = db.Column(db.Float, nullable=False)
-    emi           = db.Column(db.Float, nullable=True)
-    interest_rate = db.Column(db.Float, nullable=True)
-    tenure_months = db.Column(db.Integer, nullable=True)
-    start_date    = db.Column(db.Date, nullable=True)
-    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at    = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<Loan {self.loan_type} {self.lender}>"
 class NetWorthHistory(db.Model):
+    """
+    Phase N architectural decision (Sections 7/8 of the Phase N spec):
+    this table and wealth.models.WealthSnapshot both track "net worth
+    over time" and have been repeatedly flagged as a possible
+    accidental duplicate architecture across Phases H, I, and M.
+
+    Investigated with evidence, not assumption. Conclusion: KEEP BOTH
+    — they have materially distinct, non-overlapping responsibilities
+    (spec's Option C), not a legacy-vs-current split:
+
+      NetWorthHistory  — powers the MAIN APP dashboard's (/dashboard)
+                          trend chart. Scope INCLUDES MutualFund/Stock
+                          (CAS-imported broker holdings — a feature
+                          entirely outside the Wealth Centre) alongside
+                          WealthAsset/WealthLiability category totals.
+                          Written on page-load (deduped per calendar
+                          day) by _save_snapshot() in app.py.
+
+      WealthSnapshot   — powers the WEALTH CENTRE's own History page
+                          (/wealth/history). Scope is STRICTLY
+                          WealthAsset + WealthLiability — deliberately
+                          excludes MutualFund/Stock (Phase D's
+                          established Wealth-Centre boundary). Written
+                          only by explicit user action or the Phase I
+                          scheduled CLI, never by a page visit.
+
+    Because NetWorthHistory's scope genuinely includes non-Wealth-
+    Centre data (CAS investment holdings), merging it into
+    WealthSnapshot would either silently change what WealthSnapshot
+    has always meant (Phase F's explicit scope), or require dropping
+    CAS holdings from the main dashboard's trend chart — a real,
+    working, independent feature, not legacy debt. Neither is an
+    acceptable side effect of an internal architecture cleanup.
+    Kept as two deliberately separate systems, now documented as such
+    on both classes.
+    """
     __tablename__ = "net_worth_history"
     id            = db.Column(db.Integer, primary_key=True)
     user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)

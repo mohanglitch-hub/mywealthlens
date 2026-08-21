@@ -23,6 +23,17 @@
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <a href="{{ url_for('wealth.edit_asset', asset_id=asset.id) }}" class="wealth-btn-primary-outline">Edit</a>
+      {% if not asset.is_archived %}
+      <!-- Phase N (Section 12): a second, clearly-labeled entry point
+           into the SAME edit route/service (no new logic, no
+           duplicated code) — purely a discoverability improvement.
+           The edit form itself already correctly distinguishes a
+           current-value update from a backdated historical entry
+           based on the date the user selects (Phase L); this link
+           just makes the "record a historical valuation" intent
+           explicit before the user even opens the form. -->
+      <a href="{{ url_for('wealth.edit_asset', asset_id=asset.id) }}#value_as_of" class="wealth-btn-neutral-outline">Record Historical Valuation</a>
+      {% endif %}
       {% if asset.is_archived %}
         <form method="POST" action="{{ url_for('wealth.restore_asset', asset_id=asset.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />

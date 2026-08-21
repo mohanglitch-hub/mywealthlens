@@ -23,6 +23,9 @@
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       <a href="{{ url_for('wealth.edit_liability', liability_id=liability.id) }}" class="wealth-btn-primary-outline">Edit</a>
+      {% if not liability.is_archived %}
+      <a href="{{ url_for('wealth.edit_liability', liability_id=liability.id) }}#balance_as_of" class="wealth-btn-neutral-outline">Record Historical Balance</a>
+      {% endif %}
       {% if liability.is_archived %}
         <form method="POST" action="{{ url_for('wealth.restore_liability', liability_id=liability.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
