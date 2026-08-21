@@ -53,7 +53,7 @@
     <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Financial Information</span></div>
     <div class="wealth-detail-grid">
       <div class="wealth-field"><span class="wealth-field-label">Current Value</span><span class="wealth-field-value wealth-accent">{{ format_inr(asset.current_value) }}</span></div>
-      <div class="wealth-field"><span class="wealth-field-label">Value As Of</span><span class="wealth-field-value">{{ format_date(asset.value_as_of) }}</span></div>
+      <div class="wealth-field"><span class="wealth-field-label">Valuation Date</span><span class="wealth-field-value">{{ format_date(asset.value_as_of) }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Acquisition Value</span><span class="wealth-field-value">{{ format_inr(asset.acquisition_value) if asset.acquisition_value is not none else '—' }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Acquisition Date</span><span class="wealth-field-value">{{ format_date(asset.acquisition_date) }}</span></div>
     </div>

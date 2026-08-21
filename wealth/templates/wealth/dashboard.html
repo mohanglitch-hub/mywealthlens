@@ -9,6 +9,19 @@
     <p>Track what you own, what you owe, and your overall net worth in one place.</p>
   </div>
 
+  <!-- ── Quick Actions (Section 38 of Phase M spec) ── -->
+  <!-- Every action here already exists elsewhere (Add Asset routes
+       to the same route as the dashboard card's own "+ Add Asset"
+       link, etc.) — this is purely a discoverability shortcut, not
+       new functionality, per the spec's explicit "only include
+       actions that already exist" instruction. -->
+  <div class="wealth-quick-actions">
+    <a href="{{ url_for('wealth.add_asset') }}" class="wealth-quick-action">+ Add Asset</a>
+    <a href="{{ url_for('wealth.add_liability') }}" class="wealth-quick-action">+ Add Liability</a>
+    <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-quick-action">Create Snapshot</a>
+    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-quick-action">Upload Document</a>
+  </div>
+
   <!-- ── Overview ── -->
   <div class="wealth-summary-grid">
     <div class="wealth-stat-card">
@@ -280,6 +293,14 @@
     font-family: 'Inter', sans-serif; text-decoration: none; display: inline-block; transition: opacity 0.2s;
   }
   .wealth-btn-add:hover { opacity: 0.88; }
+
+  .wealth-quick-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
+  .wealth-quick-action {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 16px; font-size: 0.82rem; font-weight: 600; color: var(--text);
+    font-family: 'Inter', sans-serif; text-decoration: none; transition: all 0.2s;
+  }
+  .wealth-quick-action:hover { border-color: var(--accent); color: var(--accent); }
 
   .wealth-category-breakdown { display: flex; flex-direction: column; gap: 2px; }
   .wealth-category-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
