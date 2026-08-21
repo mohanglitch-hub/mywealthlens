@@ -59,19 +59,46 @@
 
     <!-- ── Current Value ── -->
     <div class="wealth-card">
-      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Current Value</span></div>
+      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title" id="valueCardTitle">Current Value</span></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
-          <label for="current_value">Current Value (₹) <span class="wealth-required-mark">*</span></label>
+          <label for="current_value" id="currentValueLabel">Current Value (₹) <span class="wealth-required-mark">*</span></label>
           <input type="number" name="current_value" id="current_value" step="0.01" min="0"
                  value="{{ values.current_value }}" required />
         </div>
         <div class="form-group">
-          <label for="value_as_of">Value As Of</label>
-          <input type="date" name="value_as_of" id="value_as_of" value="{{ values.value_as_of }}" />
+          <label for="value_as_of">Valuation Date</label>
+          <input type="date" name="value_as_of" id="value_as_of" value="{{ values.value_as_of }}"
+                 max="{{ today_ist }}" />
         </div>
       </div>
+      {% if is_edit %}
+      <div id="backdatedNotice" class="wealth-backdated-notice" style="display:none;">
+        ⓘ This will be recorded as a historical valuation for the selected date. Your current value will not change.
+      </div>
+      {% endif %}
     </div>
+
+    <script>
+      (function() {
+        var dateInput = document.getElementById('value_as_of');
+        var notice = document.getElementById('backdatedNotice');
+        var titleEl = document.getElementById('valueCardTitle');
+        var labelEl = document.getElementById('currentValueLabel');
+        var isEdit = {{ 'true' if is_edit else 'false' }};
+        var today = '{{ today_ist }}';
+        if (!dateInput || !isEdit) return;
+
+        function updateForBackdating() {
+          var isBackdated = dateInput.value && dateInput.value < today;
+          if (notice) notice.style.display = isBackdated ? 'block' : 'none';
+          if (titleEl) titleEl.textContent = isBackdated ? 'Historical Valuation' : 'Current Value';
+          if (labelEl) labelEl.innerHTML = (isBackdated ? 'Historical Value (\u20b9)' : 'Current Value (\u20b9)') + ' <span class="wealth-required-mark">*</span>';
+        }
+        dateInput.addEventListener('change', updateForBackdating);
+        updateForBackdating();
+      })();
+    </script>
 
     <!-- ── Ownership ── -->
     <div class="wealth-card">
@@ -308,6 +335,11 @@
 </div>
 
 <style>
+  .wealth-backdated-notice {
+    margin-top: 14px; font-size: 0.82rem; color: var(--text2);
+    background: var(--accent-bg); border: 1px solid var(--accent);
+    border-radius: 8px; padding: 10px 14px; line-height: 1.5;
+  }
   .wealth-breadcrumb { font-size: 0.95rem; margin-bottom: 18px; }
   .wealth-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
   .wealth-breadcrumb a:hover { color: var(--accent); }

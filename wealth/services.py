@@ -19,6 +19,7 @@ from .models import (
     WealthAssetCategory, OwnershipType,
 )
 from . import value_history_service as vhs
+from .timezone_utils import today_ist
 
 
 # ── Form Parsing Helpers ──────────────────────────────────────────────────────
@@ -101,50 +102,106 @@ def _asset_fields_from_form(form):
 # ── Asset CRUD (Phase B) ──────────────────────────────────────────────────────
 
 def create_asset(db, user_id, form):
-    """Create a new Wealth asset. Assumes the form already passed
-    validators.validate_wealth_asset()."""
+    """
+    Create a new Wealth asset. Assumes the form already passed
+    validators.validate_wealth_asset().
+
+    Phase L (Section 33/36/80): value_as_of on the CREATE form sets
+    the effective_date of the single resulting history point — there
+    is no "current vs historical" ambiguity at creation time (there's
+    no prior current_value to protect), so current_value is always
+    set from the submitted figure, same as before Phase L. If the
+    user backdates value_as_of here, current_value AND that backdated
+    history point both reflect the same submitted figure — if they
+    separately need today's true current value tracked too, that's a
+    follow-up edit (Section 80's explicit "make clear whether they
+    also need to enter current value separately, do not infer
+    silently" — the create form stays single-purpose rather than
+    trying to collect two values at once).
+    """
     fields = _asset_fields_from_form(form)
     if fields["ownership_percentage"] is None:
         fields["ownership_percentage"] = 100.0
+
+    effective_date = fields["value_as_of"]  # None -> defaults to today inside record_wealth_value_change
 
     asset = WealthAsset(user_id=user_id, **fields)
     db.session.add(asset)
     db.session.flush()  # assigns asset.id, needed for the history row below
 
-    # Phase J: initial value-history point (Section 9/17). Same
-    # transaction as the asset itself (Section 21) — flush() above
-    # gets the id without committing, so if anything below fails,
-    # the whole insert (asset + history) rolls back together.
-    vhs.record_wealth_value_change(
-        db, user_id, vhs.ENTITY_ASSET, asset.id,
-        asset.current_value, is_initial=True)
+    try:
+        vhs.record_wealth_value_change(
+            db, user_id, vhs.ENTITY_ASSET, asset.id,
+            asset.current_value, effective_date=effective_date, is_initial=True)
+    except vhs.FutureEffectiveDateError as e:
+        db.session.rollback()
+        return None, str(e)
 
     db.session.commit()
     return asset, None
 
 
 def update_asset(db, asset, user_id, form):
-    """Update an existing asset, scoped to the owning user."""
+    """
+    Update an existing asset, scoped to the owning user.
+
+    Phase L (Section 25/37-41 — "the most important behavioral
+    distinction in Phase L"): whether this submission changes the
+    LIVE current_value depends entirely on the submitted Valuation
+    Date (value_as_of):
+
+      - blank, or equal to today -> ordinary update. current_value
+        (and every other field) is applied normally, exactly as
+        Phase J always worked. History point recorded at today.
+
+      - a past date -> PURE HISTORICAL ENTRY. current_value and
+        value_as_of on the live asset are left completely untouched
+        — only a backdated WealthValueSnapshot is created, using the
+        submitted figure as that historical valuation. Every OTHER
+        field (name, category, notes, ownership, etc.) still applies
+        normally; only current_value/value_as_of are held back.
+
+      - a future date -> rejected outright, nothing is saved
+        (Section 28/62).
+    """
     if asset.user_id != user_id:
         return None, "You do not have permission to edit this asset."
-
-    old_value = asset.current_value
 
     fields = _asset_fields_from_form(form)
     if fields["ownership_percentage"] is None:
         fields["ownership_percentage"] = 100.0
 
+    submitted_effective_date = fields["value_as_of"]
+    effective_date = submitted_effective_date or today_ist()
+
+    if effective_date > today_ist():
+        return None, "Valuation date cannot be in the future."
+
+    is_backdated = effective_date < today_ist()
+
+    if is_backdated:
+        non_value_fields = {k: v for k, v in fields.items()
+                            if k not in ("current_value", "value_as_of")}
+        for key, value in non_value_fields.items():
+            setattr(asset, key, value)
+        asset.updated_at = datetime.utcnow()
+
+        vhs.record_wealth_value_change(
+            db, user_id, vhs.ENTITY_ASSET, asset.id,
+            fields["current_value"], effective_date=effective_date)
+
+        db.session.commit()
+        return asset, None
+
+    old_value = asset.current_value
     for key, value in fields.items():
         setattr(asset, key, value)
     asset.updated_at = datetime.utcnow()
 
-    # Phase J: only creates a record if current_value actually
-    # changed (Section 6/7/8) — metadata-only edits (name, category,
-    # notes, etc.) never touch this (Section 5/38/39/40). Same
-    # transaction as the asset update itself (Section 21).
     if vhs.values_differ(old_value, asset.current_value):
         vhs.record_wealth_value_change(
-            db, user_id, vhs.ENTITY_ASSET, asset.id, asset.current_value)
+            db, user_id, vhs.ENTITY_ASSET, asset.id, asset.current_value,
+            effective_date=effective_date)
 
     db.session.commit()
     return asset, None
@@ -584,6 +641,10 @@ def _liability_fields_from_form(form):
         "original_amount":    _parse_float(form.get("original_amount")) or 0,
         "outstanding_amount": _parse_float(form.get("outstanding_amount")) or 0,
         "interest_rate":       _parse_float(form.get("interest_rate")),
+        "balance_as_of":       _parse_date(form.get("balance_as_of")),
+        # ^ Phase L — the WealthLiability equivalent of WealthAsset's
+        #   value_as_of, added new in this phase (Section 34/81:
+        #   liabilities need the same backdating support assets do).
 
         "ownership_type":       form.get("ownership_type") or "Sole",
         "ownership_percentage": _parse_float(form.get("ownership_percentage")),
@@ -597,39 +658,77 @@ def _liability_fields_from_form(form):
 
 
 def create_liability(db, user_id, form):
-    """Create a new Wealth liability. Assumes the form already passed
-    validators.validate_wealth_liability()."""
+    """
+    Create a new Wealth liability. Assumes the form already passed
+    validators.validate_wealth_liability().
+
+    Phase L: mirrors create_asset's reasoning exactly — no prior
+    outstanding_amount to protect at creation time, so balance_as_of
+    just sets the effective_date of the single resulting history
+    point.
+    """
     fields = _liability_fields_from_form(form)
     if fields["ownership_percentage"] is None:
         fields["ownership_percentage"] = 100.0
+
+    effective_date = fields["balance_as_of"]
 
     liability = WealthLiability(user_id=user_id, **fields)
     db.session.add(liability)
     db.session.flush()  # assigns liability.id, needed for the history row below
 
-    # Phase J: initial value-history point, tracking outstanding_amount
-    # — the balance actually owed right now — not original_amount,
-    # which is a fixed historical fact set once at creation and never
-    # meaningfully "changes" the way a running balance does.
-    vhs.record_wealth_value_change(
-        db, user_id, vhs.ENTITY_LIABILITY, liability.id,
-        liability.outstanding_amount, is_initial=True)
+    try:
+        vhs.record_wealth_value_change(
+            db, user_id, vhs.ENTITY_LIABILITY, liability.id,
+            liability.outstanding_amount, effective_date=effective_date, is_initial=True)
+    except vhs.FutureEffectiveDateError as e:
+        db.session.rollback()
+        return None, str(e)
 
     db.session.commit()
     return liability, None
 
 
 def update_liability(db, liability, user_id, form):
-    """Update an existing liability, scoped to the owning user."""
+    """
+    Update an existing liability, scoped to the owning user.
+
+    Phase L: mirrors update_asset's "most important behavioral
+    distinction" exactly, for outstanding_amount/balance_as_of instead
+    of current_value/value_as_of. A backdated balance_as_of records a
+    pure historical balance point without touching the live
+    outstanding_amount.
+    """
     if liability.user_id != user_id:
         return None, "You do not have permission to edit this liability."
-
-    old_value = liability.outstanding_amount
 
     fields = _liability_fields_from_form(form)
     if fields["ownership_percentage"] is None:
         fields["ownership_percentage"] = 100.0
 
+    submitted_effective_date = fields["balance_as_of"]
+    effective_date = submitted_effective_date or today_ist()
+
+    if effective_date > today_ist():
+        return None, "Valuation date cannot be in the future."
+
+    is_backdated = effective_date < today_ist()
+
+    if is_backdated:
+        non_value_fields = {k: v for k, v in fields.items()
+                            if k not in ("outstanding_amount", "balance_as_of")}
+        for key, value in non_value_fields.items():
+            setattr(liability, key, value)
+        liability.updated_at = datetime.utcnow()
+
+        vhs.record_wealth_value_change(
+            db, user_id, vhs.ENTITY_LIABILITY, liability.id,
+            fields["outstanding_amount"], effective_date=effective_date)
+
+        db.session.commit()
+        return liability, None
+
+    old_value = liability.outstanding_amount
     for key, value in fields.items():
         setattr(liability, key, value)
     liability.updated_at = datetime.utcnow()
@@ -637,7 +736,7 @@ def update_liability(db, liability, user_id, form):
     if vhs.values_differ(old_value, liability.outstanding_amount):
         vhs.record_wealth_value_change(
             db, user_id, vhs.ENTITY_LIABILITY, liability.id,
-            liability.outstanding_amount)
+            liability.outstanding_amount, effective_date=effective_date)
 
     db.session.commit()
     return liability, None

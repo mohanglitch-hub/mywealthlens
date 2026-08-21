@@ -210,7 +210,7 @@
   <div class="wealth-card">
     <div class="wealth-card-heading-plain">Value History ({{ value_history|length }})</div>
     {% if value_history %}
-      {% if value_history|length > 1 %}
+      {% if analytics.chart_points|length > 1 %}
       <div style="height:180px; margin-bottom:16px;">
         <canvas id="valueHistoryChart"></canvas>
       </div>
@@ -218,7 +218,7 @@
     <div class="wealth-history-mini-list">
       {% for v in value_history %}
       <div class="wealth-history-mini-row">
-        <span class="wealth-history-mini-date">{{ format_date(v.snapshot_date) }}</span>
+        <span class="wealth-history-mini-date">{{ format_date(v.effective_date) }}</span>
         <span class="wealth-history-mini-value {{ 'wealth-negative' if v.value < 0 }}">{{ format_inr(v.value) }}</span>
         <span class="wealth-badge wealth-badge-muted">{{ v.note }}</span>
       </div>
@@ -238,12 +238,17 @@
 
 </div>
 
-{% if value_history|length > 1 %}
+{% if analytics.chart_points|length > 1 %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script>
   (function() {
-    const points = {{ value_history|map(attribute='value')|list|reverse|list|tojson }};
-    const labels = {{ value_history|map(attribute='snapshot_date')|map('string')|list|reverse|list|tojson }};
+    // Phase L: chart uses the collapsed effective-date timeline
+    // (analytics.chart_points), not the raw value_history list — a
+    // same-effective-date correction must plot as ONE point (the
+    // latest-recorded value for that date), never two contradictory
+    // points at the same x-position (Section 45).
+    const points = {{ analytics.chart_points|map(attribute='value')|list|tojson }};
+    const labels = {{ analytics.chart_points|map(attribute='date')|list|tojson }};
     const inrTick = v => v >= 10000000 ? '₹' + (v/10000000).toFixed(1) + 'Cr'
                       : v >= 100000    ? '₹' + (v/100000).toFixed(1) + 'L'
                       : '₹' + (v/1000).toFixed(0) + 'K';

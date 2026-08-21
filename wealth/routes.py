@@ -19,6 +19,7 @@ from . import validators
 from . import history_service
 from . import document_service
 from . import value_history_service
+from .timezone_utils import today_ist
 from . import analytics_service
 from .models import (
     WealthAsset, WealthAssetCategory, ASSET_TYPES_BY_CATEGORY,
@@ -150,6 +151,10 @@ def _asset_form_context(is_edit, asset, values):
         statuses=WealthStatus.ALL,
         area_units=AreaUnit.ALL,
         weight_units=WeightUnit.ALL,
+        today_ist=today_ist().isoformat(),
+        # ^ Phase L — max= attribute on the Valuation Date field
+        # (Section 28/29: future dates must be rejected client-side
+        # too, not just server-side) and the backdating-detection JS.
     )
 
 
@@ -365,6 +370,7 @@ def _liability_form_context(is_edit, liability, values):
         liability_types_by_category=LIABILITY_TYPES_BY_CATEGORY,
         ownership_types=OwnershipType.ALL,
         statuses=WealthStatus.ALL,
+        today_ist=today_ist().isoformat(),
     )
 
 

@@ -76,15 +76,19 @@ def _entity_analytics(user_id, entity_type, entity_id, current_value):
     """
     Shared core for both asset and liability analytics — the two
     public functions below differ only in field names/terminology on
-    the way out, not in how the numbers are computed (Section
-    18/19/20 apply identically to both entity types).
-    """
-    history = vhs.get_value_history(user_id, entity_type, entity_id)
-    # get_value_history returns newest-first; we need oldest for
-    # "initial" and to walk chronologically for the chart later.
-    history_oldest_first = list(reversed(history))
+    the way out, not in how the numbers are computed.
 
-    if not history_oldest_first:
+    Phase L (Section 76/78): uses get_effective_timeline() — one
+    point per distinct effective_date, financial-chronology order —
+    rather than the raw get_value_history() (which can include
+    superseded same-date corrections). CAGR/duration are computed
+    from EFFECTIVE dates, never from created_at/recorded_at (Section
+    47/97: a value entered five minutes ago but backdated three years
+    must still show a genuine 3-year CAGR, not a near-zero one).
+    """
+    timeline = vhs.get_effective_timeline(user_id, entity_type, entity_id)  # oldest first
+
+    if not timeline:
         return {
             "has_history": False,
             "initial_value": None, "initial_date": None,
@@ -95,29 +99,31 @@ def _entity_analytics(user_id, entity_type, entity_id, current_value):
             "chart_points": [],
         }
 
-    first = history_oldest_first[0]
-    latest = history_oldest_first[-1]
+    first = timeline[0]
+    latest = timeline[-1]
 
     initial_value = first.value
-    initial_date = first.snapshot_date
+    initial_date = first.effective_date
     latest_history_value = latest.value
-    latest_date = latest.snapshot_date
+    latest_date = latest.effective_date
 
     absolute_change = current_value - initial_value
     percentage_change = _percentage_change(initial_value, current_value)
 
     years_held = _elapsed_years(
-        datetime.combine(first.created_at.date(), first.created_at.time()),
-        datetime.combine(latest.created_at.date(), latest.created_at.time()),
-    ) if len(history_oldest_first) > 1 else 0.0
+        datetime.combine(first.effective_date, datetime.min.time()),
+        datetime.combine(latest.effective_date, datetime.min.time()),
+    ) if len(timeline) > 1 else 0.0
     cagr = _cagr(initial_value, current_value, years_held)
 
-    # Section 21: verify (don't assume) the latest history record
-    # matches the current entity value. In normal operation these
-    # always match — Phase J's atomic create/update wiring guarantees
-    # it — so a mismatch here would indicate a genuine data
-    # inconsistency (e.g. manual DB edit bypassing the app). Report
-    # it; never silently "fix" historical data to match.
+    # Verify (don't assume) the latest EFFECTIVE-date record matches
+    # the current entity value. Under Phase L's rules this should
+    # always hold: only a today-effective_date update ever changes
+    # current_value, and today is always >= every other effective
+    # date, so the timeline's own latest point is always the one that
+    # last legitimately set current_value. A mismatch here means a
+    # genuine data inconsistency (e.g. manual DB edit bypassing the
+    # app) — report it, never silently "fix" historical data.
     consistency_warning = None
     if vhs.values_differ(latest_history_value, current_value):
         consistency_warning = (
@@ -127,8 +133,8 @@ def _entity_analytics(user_id, entity_type, entity_id, current_value):
         )
 
     chart_points = [
-        {"date": h.snapshot_date.isoformat(), "value": h.value}
-        for h in history_oldest_first
+        {"date": h.effective_date.isoformat(), "value": h.value}
+        for h in timeline
     ]
 
     return {
@@ -205,8 +211,8 @@ def category_summary(user_id, entity_type, category, entities):
     for e in entities:
         current_value = (e.current_value if entity_type == vhs.ENTITY_ASSET
                          else e.outstanding_amount)
-        latest = vhs.latest_value_record(user_id, entity_type, e.id)
-        first_record = (vhs.get_value_history(user_id, entity_type, e.id) or [None])[-1]
+        timeline = vhs.get_effective_timeline(user_id, entity_type, e.id)  # oldest first
+        first_record = timeline[0] if timeline else None
         if first_record is None:
             continue
         total_initial += first_record.value

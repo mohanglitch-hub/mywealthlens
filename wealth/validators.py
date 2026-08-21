@@ -8,6 +8,8 @@ alone (Section 20 of spec).
 
 from datetime import date, datetime
 
+from .timezone_utils import today_ist
+
 from .models import (
     OwnershipType, SourceType, WealthStatus, WealthAssetCategory,
     WealthDocumentCategory, DOCUMENT_TYPES_BY_CATEGORY,
@@ -66,6 +68,21 @@ def validate_wealth_asset(form):
         errors.append("Current value is required.")
     elif current_value < 0:
         errors.append("Current value cannot be negative.")
+
+    value_as_of_raw = (form.get("value_as_of") or "").strip()
+    if value_as_of_raw:
+        try:
+            parsed_date = datetime.strptime(value_as_of_raw, "%Y-%m-%d").date()
+            if parsed_date > today_ist():
+                errors.append("Valuation date cannot be in the future.")
+        except ValueError:
+            errors.append("Please enter a valid valuation date.")
+    # Phase L (Section 62/109): this client-visible, field-error-list
+    # check is in ADDITION to (not instead of) the authoritative
+    # server-side check inside services.update_asset()/create_asset()
+    # — this one gives a nicer redisplay-the-form experience matching
+    # every other validation error here; that one is what actually
+    # protects the data even if this layer were ever bypassed.
 
     ownership_type = form.get("ownership_type") or OwnershipType.SOLE
     if ownership_type not in OwnershipType.ALL:
@@ -255,6 +272,15 @@ def validate_wealth_liability(form):
             and outstanding_amount is not None
             and outstanding_amount > original_amount):
         errors.append("Outstanding amount cannot exceed the original amount.")
+
+    balance_as_of_raw = (form.get("balance_as_of") or "").strip()
+    if balance_as_of_raw:
+        try:
+            parsed_date = datetime.strptime(balance_as_of_raw, "%Y-%m-%d").date()
+            if parsed_date > today_ist():
+                errors.append("Valuation date cannot be in the future.")
+        except ValueError:
+            errors.append("Please enter a valid valuation date.")
 
     interest_rate = _parse_float(form.get("interest_rate"))
     if interest_rate is not None and (interest_rate < 0 or interest_rate > 100):

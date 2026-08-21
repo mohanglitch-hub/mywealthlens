@@ -357,6 +357,14 @@ class WealthLiability(db.Model):
     interest_rate       = db.Column(db.Float, nullable=True)
     # ^ informational only — never drives any calculation (Section 37)
 
+    balance_as_of = db.Column(db.Date, nullable=True)
+    # ^ Phase L. WealthAsset already had this exact field (as
+    #   value_as_of) since Phase A, just dormant until now —
+    #   WealthLiability never had an equivalent, so this is a new
+    #   column. Same role: the effective date for the current
+    #   outstanding_amount figure, and the default effective_date
+    #   passed to record_wealth_value_change() when this changes.
+
     ownership_type       = db.Column(db.String(30), nullable=False,
                                      default=OwnershipType.SOLE)
     ownership_percentage = db.Column(db.Float, nullable=False, default=100.0)
@@ -395,13 +403,26 @@ class WealthLiability(db.Model):
 
 class WealthValueSnapshot(db.Model):
     """
-    Foundation for future historical values (Section 13). Deliberately
-    minimal — a polymorphic-lite design (entity_type + entity_id)
-    rather than two separate nullable FK columns, so ONE snapshot
-    table can serve both assets and liabilities without a schema
-    change later. Nothing writes to this table in Phase A; it exists
-    purely so the History phase doesn't require redesigning
-    WealthAsset/WealthLiability to add snapshot support.
+    Item-level valuation history for WealthAsset/WealthLiability.
+    Activated in Phase J (this table existed since Phase A but was
+    dormant until then); given explicit temporal semantics in Phase L.
+
+    Phase L (Section 2/3): every row distinguishes two dates —
+      effective_date — the date the VALUE financially applies to
+                       (user-controlled, may be backdated, never future)
+      created_at     — when MyWealthLens actually received/recorded
+                       this row (application-controlled, immutable,
+                       never user-editable)
+
+    Migration note: this column was named `snapshot_date` prior to
+    Phase L. For every row created under Phase J, that value was
+    always `datetime.utcnow().date()` at the moment of recording —
+    i.e. it always equaled the same date `created_at` would give you.
+    Renaming the column (Section 71: "effective_date = existing
+    recorded timestamp/date is the safest default") is therefore a
+    pure metadata change with zero data loss and zero invented
+    values — every pre-Phase-L row's effective_date is exactly what
+    it was already, just now correctly named for what it represents.
     """
     __tablename__ = "wealth_value_snapshot"
     __table_args__ = (
@@ -421,10 +442,18 @@ class WealthValueSnapshot(db.Model):
     # validating entity_id against the right table.
 
     value          = db.Column(db.Float, nullable=False)
-    snapshot_date  = db.Column(db.Date, nullable=False)
+    effective_date = db.Column(db.Date, nullable=False)
+    # ^ Phase L: the date this VALUE financially applies to. Never a
+    #   future date (Section 28/29). May be backdated relative to
+    #   created_at (that's the entire point of this phase). Was
+    #   named `snapshot_date` prior to Phase L — see class docstring.
     note           = db.Column(db.String(300), nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # ^ Phase L's "recorded_at" (Section 11) — kept the existing
+    #   column name rather than adding a duplicate field, since this
+    #   already fulfilled that exact role since Phase J: application-
+    #   generated, immutable after creation, never user-editable.
 
     def __repr__(self):
         return f"<WealthValueSnapshot {self.entity_type}={self.entity_id} value={self.value}>"
