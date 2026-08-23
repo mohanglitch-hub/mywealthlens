@@ -37,8 +37,6 @@ immutable). See record_wealth_value_change() for the full
 same-effective-date/correction/future-date rules.
 """
 
-from datetime import datetime
-
 from .models import WealthValueSnapshot
 from .timezone_utils import today_ist
 
@@ -83,23 +81,6 @@ class FutureEffectiveDateError(ValueError):
     """
     pass
 
-
-def latest_value_record(user_id, entity_type, entity_id):
-    """
-    The record that represents the most recent point on this
-    entity's FINANCIAL timeline (Section 18/42) — ordered by
-    effective_date first, created_at as the tie-breaker for same-date
-    corrections. This is deliberately NOT "most recently entered"
-    (that would be created_at DESC alone) — a backdated entry never
-    becomes the "latest" value just because it was typed in most
-    recently; only a later effective_date can do that.
-    """
-    return (WealthValueSnapshot.query
-            .filter_by(user_id=user_id, entity_type=entity_type, entity_id=entity_id)
-            .order_by(WealthValueSnapshot.effective_date.desc(),
-                     WealthValueSnapshot.created_at.desc(),
-                     WealthValueSnapshot.id.desc())
-            .first())
 
 
 def record_for_effective_date(user_id, entity_type, entity_id, effective_date):

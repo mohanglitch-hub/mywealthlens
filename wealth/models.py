@@ -493,6 +493,17 @@ class WealthSnapshot(db.Model):
     ₹1,30,00,000 that gross totals would give). This mirrors
     WealthStatisticsService.attributable_net_worth() exactly — no
     competing formula (Section 15/74).
+
+    Phase N (Sections 7/8): also NOT the same thing as the root
+    models.py NetWorthHistory table, despite both tracking "net
+    worth over time" — investigated with evidence and deliberately
+    kept as two separate systems. NetWorthHistory's scope includes
+    MutualFund/Stock (CAS-imported holdings, outside the Wealth
+    Centre entirely) and powers the main app dashboard's own trend
+    chart; this table's scope is strictly Assets + Liabilities and
+    powers the Wealth Centre's own History page. See the full
+    rationale on NetWorthHistory's own class docstring in root
+    models.py.
     """
     __tablename__ = "wealth_snapshot"
     __table_args__ = (

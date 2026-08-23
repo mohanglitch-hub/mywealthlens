@@ -162,13 +162,6 @@ def get_documents_for_liability(liability_id, user_id):
             .all())
 
 
-def document_count_for_asset(asset_id, user_id):
-    """Efficient COUNT(*), not len(query.all()) (Section 34)."""
-    return WealthDocument.query.filter_by(user_id=user_id, asset_id=asset_id).count()
-
-
-def document_count_for_liability(liability_id, user_id):
-    return WealthDocument.query.filter_by(user_id=user_id, liability_id=liability_id).count()
 
 
 def vault_summary(user_id):

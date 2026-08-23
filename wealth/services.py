@@ -16,7 +16,7 @@ from sqlalchemy import or_
 
 from .models import (
     WealthAsset, WealthLiability, WealthStatus, SourceType,
-    WealthAssetCategory, WealthDocument, OwnershipType,
+    WealthDocument,
 )
 from . import value_history_service as vhs
 from .timezone_utils import today_ist
@@ -276,12 +276,6 @@ def delete_asset_permanent(db, asset, user_id):
     db.session.delete(asset)
     db.session.commit()
     return True, None
-
-
-def get_asset_or_none(asset_id, user_id):
-    """Fetch a single asset, scoped to the owning user. None if not
-    found or not owned — routes turn this into a 404."""
-    return WealthAsset.query.filter_by(id=asset_id, user_id=user_id).first()
 
 
 def get_assets_for_listing(user_id, q=None, category=None, status_filter="active",
@@ -809,12 +803,6 @@ def delete_liability_permanent(db, liability, user_id):
     db.session.delete(liability)
     db.session.commit()
     return True, None
-
-
-def get_liability_or_none(liability_id, user_id):
-    """Fetch a single liability, scoped to the owning user. None if
-    not found or not owned — routes turn this into a 404."""
-    return WealthLiability.query.filter_by(id=liability_id, user_id=user_id).first()
 
 
 def get_liabilities_for_listing(user_id, q=None, category=None, status_filter="active",
