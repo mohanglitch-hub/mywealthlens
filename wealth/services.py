@@ -409,7 +409,7 @@ class WealthStatisticsService:
             grouped.setdefault(a.category, []).append(a)
         return grouped
 
-    def recent_assets(self, limit=5):
+    def recent_assets(self, limit=3):
         """Most recently added/updated active assets (Section 23 of
         spec)."""
         return (self._active_assets_query()
@@ -593,7 +593,7 @@ class WealthStatisticsService:
         breakdown.sort(key=lambda b: b["total"], reverse=True)
         return breakdown
 
-    def recent_liabilities(self, limit=5):
+    def recent_liabilities(self, limit=3):
         """Most recently added/updated ACTIVE liabilities only
         (Section 43 of spec — never shows archived ones)."""
         return (self._active_liabilities_query()
@@ -846,3 +846,90 @@ def get_liabilities_for_listing(user_id, q=None, category=None, status_filter="a
     query = query.order_by(sort_map.get(sort_by, WealthLiability.created_at.desc()))
 
     return query.all()
+
+
+def get_recent_activity(user_id, limit=7):
+    """
+    A read-only "recent activity" feed derived entirely from EXISTING
+    timestamped data — Asset/Liability creation, valuation changes,
+    document uploads, and manual snapshot creation. Deliberately does
+    NOT introduce any new audit-event table (Phase M spec Section 36/
+    37, reaffirmed in Phase N Section 130: "do not build the Advanced
+    Audit Trail just to support Recent Activity... ONLY implement if
+    existing data makes it straightforward"). Every source here
+    already existed for its own reason before this function; this
+    just merges and sorts them.
+
+    Deliberate exclusions, both for signal quality, not laziness:
+      - Asset/Liability "updated_at" is NOT used as an event source.
+        It's bumped on every edit, including trivial metadata changes
+        (fixing a typo in a description) that aren't meaningful
+        "activity" in the sense a user would want highlighted. Actual
+        value changes ARE captured, via WealthValueSnapshot below —
+        that's the genuinely meaningful subset of "something changed".
+      - Automatic (Phase I scheduler) snapshots are excluded. They
+        happen every single night by design — including them would
+        mean the last 7 days almost always show nothing but "Snapshot
+        created" and crowd out anything a user actually did. Manual
+        snapshot creation, a deliberate user action, is included.
+
+    Returns a list of dicts: {event_type, description, timestamp,
+    icon, badge_class} — newest first, capped at `limit`. Never
+    includes financial figures in the description (matching the
+    same privacy discipline as Phase I's WealthSnapshotLog).
+    """
+    from wealth.models import WealthValueSnapshot, WealthDocument, WealthSnapshot, SnapshotSource
+
+    events = []
+
+    for a in (WealthAsset.query.filter_by(user_id=user_id)
+             .order_by(WealthAsset.created_at.desc()).limit(limit).all()):
+        events.append({
+            "event_type": "Asset Added", "icon": "🟢", "badge_class": "wa-badge-created",
+            "description": f"Added \"{a.name}\" ({a.category})",
+            "timestamp": a.created_at,
+        })
+
+    for l in (WealthLiability.query.filter_by(user_id=user_id)
+             .order_by(WealthLiability.created_at.desc()).limit(limit).all()):
+        events.append({
+            "event_type": "Liability Added", "icon": "🟢", "badge_class": "wa-badge-created",
+            "description": f"Added \"{l.name}\" ({l.category})",
+            "timestamp": l.created_at,
+        })
+
+    for v in (WealthValueSnapshot.query.filter_by(user_id=user_id)
+             .order_by(WealthValueSnapshot.created_at.desc()).limit(limit).all()):
+        entity_name = None
+        if v.entity_type == "asset":
+            entity = WealthAsset.query.filter_by(id=v.entity_id, user_id=user_id).first()
+            entity_name = entity.name if entity else None
+        else:
+            entity = WealthLiability.query.filter_by(id=v.entity_id, user_id=user_id).first()
+            entity_name = entity.name if entity else None
+        if not entity_name:
+            continue  # entity permanently deleted since — skip, don't show a broken reference
+        events.append({
+            "event_type": "Valuation Recorded", "icon": "✏️", "badge_class": "wa-badge-updated",
+            "description": f"Recorded a{'n initial' if v.note == 'Initial Value' else ' new'} valuation for \"{entity_name}\"",
+            "timestamp": v.created_at,
+        })
+
+    for d in (WealthDocument.query.filter_by(user_id=user_id)
+             .order_by(WealthDocument.uploaded_at.desc()).limit(limit).all()):
+        events.append({
+            "event_type": "Document Uploaded", "icon": "📄", "badge_class": "wa-badge-document",
+            "description": f"Uploaded \"{d.original_name}\"",
+            "timestamp": d.uploaded_at,
+        })
+
+    for s in (WealthSnapshot.query.filter_by(user_id=user_id, source=SnapshotSource.MANUAL)
+             .order_by(WealthSnapshot.snapshot_date.desc()).limit(limit).all()):
+        events.append({
+            "event_type": "Snapshot Created", "icon": "📸", "badge_class": "wa-badge-snapshot",
+            "description": "Saved a Wealth Snapshot",
+            "timestamp": datetime.combine(s.snapshot_date, datetime.min.time()),
+        })
+
+    events.sort(key=lambda e: e["timestamp"], reverse=True)
+    return events[:limit]

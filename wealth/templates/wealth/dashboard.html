@@ -156,6 +156,7 @@
       <div class="wealth-asset-list">
         {% for asset in data.recent_assets %}
         <a href="{{ url_for('wealth.asset_detail', asset_id=asset.id) }}" class="wealth-asset-row">
+          <div class="wealth-asset-icon">{{ asset_category_icons.get(asset.category, '📦') }}</div>
           <div class="wealth-asset-main">
             <div class="wealth-asset-name">{{ asset.name }}</div>
             <div class="wealth-asset-meta"><span>{{ asset.category }}{% if asset.asset_type %} · {{ asset.asset_type }}{% endif %}</span></div>
@@ -199,6 +200,7 @@
       <div class="wealth-asset-list">
         {% for liability in data.recent_liabilities %}
         <a href="{{ url_for('wealth.liability_detail', liability_id=liability.id) }}" class="wealth-asset-row">
+          <div class="wealth-asset-icon">{{ liability_category_icons.get(liability.category, '📉') }}</div>
           <div class="wealth-asset-main">
             <div class="wealth-asset-name">{{ liability.name }}</div>
             <div class="wealth-asset-meta"><span>{{ liability.category }}{% if liability.liability_type %} · {{ liability.liability_type }}{% endif %}</span></div>
@@ -213,6 +215,38 @@
         <div class="wealth-empty-sub">Add your loans, credit card balances and other outstanding obligations to build a complete picture of your financial position.</div>
         <a href="{{ url_for('wealth.add_liability') }}" class="wealth-btn-add" style="margin-top:16px;">+ Add Liability</a>
       </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Recent Activity ── -->
+  <!-- Derived from existing timestamps only (Asset/Liability creation,
+       valuation changes, document uploads, manual snapshots) — no new
+       audit-event table, matching Insurance Centre's own pattern's
+       shape (icons, badges, "last 7 activities") without adopting its
+       dedicated InsuranceTimeline model, which Wealth deliberately
+       doesn't have. See services.get_recent_activity() docstring. -->
+  <div class="wealth-list-card">
+    <div class="wealth-section-header">
+      <div class="wealth-list-card-title"><span class="wealth-list-card-icon">🕒</span>Recent Activity <span style="font-size:0.72rem; font-weight:400; color:var(--muted);">— last 7 activities</span></div>
+    </div>
+    {% if recent_activity %}
+    <div class="wa-activity-list">
+      {% for event in recent_activity %}
+      <div class="wa-activity-row">
+        <div class="wa-activity-badge {{ event.badge_class }}">{{ event.icon }}</div>
+        <div class="wa-activity-content">
+          <div class="wa-activity-label {{ event.badge_class }}">{{ event.event_type }}</div>
+          <div class="wa-activity-desc">{{ event.description }}</div>
+          <div class="wa-activity-time">{{ format_date(event.timestamp) }}</div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="wealth-empty-state">
+      <div class="wealth-empty-title">No recent activity</div>
+      <div class="wealth-empty-sub">Adding an Asset, Liability, valuation, document or Snapshot will show up here.</div>
+    </div>
     {% endif %}
   </div>
 
@@ -342,12 +376,34 @@
   .wealth-asset-row {
     display: flex; justify-content: space-between; align-items: center;
     padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; gap: 12px; text-decoration: none; color: inherit; transition: border-color 0.2s;
+    border-radius: 8px; gap: 12px; text-decoration: none; color: inherit;
+    transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
   }
-  .wealth-asset-row:hover { border-color: var(--accent); }
+  .wealth-asset-row:hover { border-color: var(--accent); transform: translateX(3px); box-shadow: var(--shadow-sm); }
+  .wealth-asset-icon {
+    width: 32px; height: 32px; border-radius: 8px; background: var(--accent-bg);
+    display: flex; align-items: center; justify-content: center; font-size: 1rem; flex-shrink: 0;
+  }
   .wealth-asset-name { font-weight: 600; font-size: 0.9rem; color: var(--text); }
   .wealth-asset-meta span { font-size: 0.76rem; color: var(--muted); }
   .wealth-asset-value { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); }
+
+  /* ── Recent Activity (matching insurance_centre's activity-list pattern) ── */
+  .wa-activity-list { display: flex; flex-direction: column; gap: 0; }
+  .wa-activity-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+  .wa-activity-row:last-child { border-bottom: none; }
+  .wa-activity-badge {
+    width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-size: 0.9rem; flex-shrink: 0; margin-top: 2px;
+  }
+  .wa-activity-content { flex: 1; }
+  .wa-activity-label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 3px; }
+  .wa-activity-desc { font-size: 0.875rem; color: var(--text); line-height: 1.4; }
+  .wa-activity-time { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+  .wa-badge-created { background: var(--up-bg); color: var(--up); }
+  .wa-badge-updated { background: var(--accent-bg); color: var(--accent); }
+  .wa-badge-document { background: #EFF6FF; color: #3B82F6; }
+  .wa-badge-snapshot { background: #FDF4FF; color: #A855F7; }
 
   .wealth-empty-state { text-align: center; padding: 32px 20px; color: var(--muted); }
   .wealth-empty-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 6px; color: var(--text); }

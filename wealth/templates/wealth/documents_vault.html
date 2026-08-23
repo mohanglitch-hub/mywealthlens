@@ -72,44 +72,60 @@
       {% endif %}
     </form>
 
-    <!-- ── Document List ── -->
-    <div class="wealth-list-card">
-      <div class="wealth-section-label">{{ documents|length }} Document{{ 's' if documents|length != 1 }}</div>
-
-      {% if documents %}
-      <div class="wealth-doc-table" role="table" aria-label="Wealth Documents">
-        <div class="wealth-doc-row wealth-doc-head" role="row">
-          <span role="columnheader">Document</span>
-          <span role="columnheader">Type</span>
-          <span role="columnheader">Related To</span>
-          <span role="columnheader">Uploaded</span>
-          <span role="columnheader">Actions</span>
+    <!-- ── Documents, grouped by Category (matching retirement_centre's
+         document_vault.html pattern) ── -->
+    {% if grouped_documents %}
+      {% for group in grouped_documents %}
+      {% set cat_theme = {
+        'Property':               ('🏠', 'blue'),
+        'Banking & Deposits':     ('🏦', 'teal'),
+        'Investments':            ('📈', 'purple'),
+        'Loans':                  ('📉', 'pink'),
+        'Retirement':             ('🧓', 'amber'),
+        'Gold & Precious Assets': ('🥇', 'gold'),
+        'Vehicle':                ('🚗', 'blue'),
+        'Family & Estate':        ('👪', 'purple'),
+        'Tax':                    ('🧾', 'teal'),
+        'Other':                  ('📋', 'amber'),
+      }.get(group.category, ('📋', 'teal')) %}
+      <div class="wa-doc-category-block wa-cat-{{ cat_theme[1] }}">
+        <div class="wa-doc-category-heading">
+          <span class="wa-doc-category-icon">{{ cat_theme[0] }}</span>
+          <span>{{ group.category }}</span>
         </div>
-        {% for doc in documents %}
-        <div class="wealth-doc-row" role="row">
-          <span role="cell">
-            <a href="{{ url_for('wealth.document_detail', document_id=doc.id) }}" class="wealth-doc-name">{{ doc.display_name }}</a>
-            <span class="wealth-doc-sub">{{ doc.original_name }} · {{ doc.file_size_display }}</span>
-          </span>
-          <span role="cell">{{ doc.document_type }}</span>
-          <span role="cell">
-            {% if doc.asset_id %}Asset{% elif doc.liability_id %}Liability{% else %}—{% endif %}
-          </span>
-          <span role="cell">{{ format_date(doc.uploaded_at) }}</span>
-          <span role="cell" class="wealth-doc-actions">
-            <a href="{{ url_for('wealth.document_detail', document_id=doc.id) }}" class="wealth-link-btn wealth-link-btn-primary">View →</a>
-          </span>
+        <div class="wa-doc-list">
+          {% for d in group.documents %}
+          <div class="wa-doc-list-row">
+            <div>
+              <span class="wa-doc-list-primary">{{ d.display_name }}</span>
+              <span class="wa-doc-list-secondary">
+                {{ d.document_type }} · {{ format_date(d.uploaded_at) }} · {{ d.file_size_display }}
+                {% if d.asset_id %} · Linked to an Asset
+                {% elif d.liability_id %} · Linked to a Liability{% endif %}
+              </span>
+            </div>
+            <div class="wa-doc-list-actions">
+              <a href="{{ url_for('wealth.preview_document', document_id=d.id) }}" target="_blank" class="wa-link-btn">View</a>
+              <a href="{{ url_for('wealth.download_document', document_id=d.id) }}" class="wa-link-btn">Download</a>
+              <form method="POST" action="{{ url_for('wealth.delete_document', document_id=d.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button type="button" class="wa-link-btn wa-link-danger"
+                        onclick="confirmAction(this.form, 'Delete Document?', 'This document will be permanently removed from your local MyWealthLens storage.', 'Delete Document')">Delete</button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
         </div>
-        {% endfor %}
       </div>
-      {% else %}
-        <!-- ── Filtered Empty State (Section 36 — distinct from "no documents exist") ── -->
+      {% endfor %}
+    {% else %}
+      <div class="wealth-list-card">
         <div class="wealth-empty-state">
           <div class="wealth-empty-title">No Documents Found</div>
           <div class="wealth-empty-sub">Try changing your search or filter.</div>
         </div>
-      {% endif %}
-    </div>
+      </div>
+    {% endif %}
 
   {% endif %}
 </div>
@@ -164,23 +180,35 @@
   .wealth-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
   .wealth-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
 
-  .wealth-doc-table { display: flex; flex-direction: column; }
-  .wealth-doc-row {
-    display: grid; grid-template-columns: 2fr 1.3fr 1fr 1fr 0.8fr; gap: 10px; align-items: center;
-    padding: 12px 10px; border-bottom: 1px solid var(--border); font-size: 0.85rem;
+  /* ── Category-grouped document blocks (pulled from
+       retirement_centre's document_vault.html pattern exactly) ── */
+  .wa-doc-category-block {
+    border-radius: 14px; padding: 20px; margin-bottom: 16px; border: 1px solid;
   }
-  .wealth-doc-row:last-child { border-bottom: none; }
-  .wealth-doc-head { font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-  .wealth-doc-name { font-weight: 600; color: var(--text); text-decoration: none; display: block; }
-  .wealth-doc-name:hover { color: var(--accent); }
-  .wealth-doc-sub { display: block; font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
-  .wealth-doc-actions { display: flex; gap: 10px; }
-  .wealth-link-btn { font-size: 0.8rem; font-weight: 700; color: var(--muted); text-decoration: none; }
-  .wealth-link-btn-primary { color: var(--accent); }
+  .wa-cat-blue   { background: #EFF6FF; border-color: #BFDBFE; }
+  .wa-cat-teal   { background: var(--accent-bg); border-color: #99F6E4; }
+  .wa-cat-purple { background: #F5F3FF; border-color: #DDD6FE; }
+  .wa-cat-pink   { background: #FDF2F8; border-color: #FBCFE8; }
+  .wa-cat-amber  { background: #FFFBEB; border-color: #FDE68A; }
+  .wa-cat-gold   { background: #FFFDF0; border-color: #FDE047; }
+  .wa-doc-category-heading {
+    display: flex; align-items: center; gap: 10px; font-size: 1.05rem; font-weight: 700;
+    color: var(--text); margin-bottom: 16px;
+  }
+  .wa-doc-category-icon { font-size: 1.3rem; }
+  .wa-doc-list { display: flex; flex-direction: column; gap: 2px; }
+  .wa-doc-list-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+  .wa-doc-list-row:last-child { border-bottom: none; }
+  .wa-doc-list-primary { font-weight: 600; color: var(--text); font-size: 0.9rem; }
+  .wa-doc-list-secondary { display: block; font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+  .wa-doc-list-actions { display: flex; gap: 12px; align-items: center; }
+  .wa-link-btn { background: none; border: none; color: var(--accent); font-size: 0.8rem; font-weight: 700; cursor: pointer; font-family: 'Inter', sans-serif; padding: 0; text-decoration: none; }
+  .wa-link-btn:hover { text-decoration: underline; }
+  .wa-link-btn.wa-link-danger { color: var(--down); }
 
   @media (max-width: 700px) {
     .wealth-filter-bar { flex-direction: column; align-items: stretch; }
-    .wealth-doc-row { grid-template-columns: 1fr 1fr; row-gap: 6px; }
+    .wa-doc-list-row { flex-direction: column; align-items: flex-start; }
   }
 </style>
 

@@ -86,12 +86,20 @@ def dashboard():
     analytics_summary = analytics_service.dashboard_summary(
         current_user.id, assets_for_analytics)
 
+    # Recent Activity — derived from existing timestamps only, see
+    # services.get_recent_activity() docstring for the full rationale
+    # on why this doesn't need a new audit-event table.
+    recent_activity = services.get_recent_activity(current_user.id, limit=7)
+
     return render_template(
         "wealth/dashboard.html",
         data=data,
         history_trend=history_trend,
         document_summary=document_summary,
         analytics_summary=analytics_summary,
+        recent_activity=recent_activity,
+        asset_category_icons=_asset_category_icons(),
+        liability_category_icons=_liability_category_icons(),
         format_inr=format_inr,
         format_date=format_date,
     )
@@ -824,6 +832,15 @@ def _document_upload_options(user_id):
 @wealth_bp.route("/documents")
 @login_required
 def documents_vault():
+    """
+    Document Vault — lists every Wealth document, grouped by category
+    into colored blocks (matching retirement_centre's document_vault
+    pattern exactly, per explicit request). Wealth has no equivalent
+    to Retirement's mandatory "scheme" concept, so grouping is a
+    single level (category only) rather than category -> scheme;
+    each document's own "Related To" (Asset/Liability/general) is
+    still shown per-row rather than as a second grouping tier.
+    """
     q             = request.args.get("q", "").strip()
     category      = request.args.get("category", "")
     document_type = request.args.get("document_type", "")
@@ -835,9 +852,22 @@ def documents_vault():
     )
     summary = document_service.vault_summary(current_user.id)
 
+    # Group by category, in the fixed WealthDocumentCategory.ALL order
+    # (Section 59 of Phase K's own convention, reused here: skip
+    # categories with zero documents entirely rather than showing an
+    # empty card for them).
+    by_category = {}
+    for d in documents:
+        by_category.setdefault(d.category, []).append(d)
+    grouped_documents = [
+        {"category": cat, "documents": by_category[cat]}
+        for cat in WealthDocumentCategory.ALL if cat in by_category
+    ]
+
     return render_template(
         "wealth/documents_vault.html",
         documents=documents,
+        grouped_documents=grouped_documents,
         summary=summary,
         categories=WealthDocumentCategory.ALL,
         document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
