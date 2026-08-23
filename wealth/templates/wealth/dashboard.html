@@ -9,37 +9,36 @@
     <p>Track what you own, what you owe, and your overall net worth in one place.</p>
   </div>
 
-  <!-- ── Quick Actions (Section 38 of Phase M spec) ── -->
-  <!-- Every action here already exists elsewhere (Add Asset routes
-       to the same route as the dashboard card's own "+ Add Asset"
-       link, etc.) — this is purely a discoverability shortcut, not
-       new functionality, per the spec's explicit "only include
-       actions that already exist" instruction. -->
+  <!-- ── Quick Access ── -->
   <div class="wealth-quick-actions">
+    <span class="wealth-quick-access-label">Quick Access</span>
     <a href="{{ url_for('wealth.add_asset') }}" class="wealth-quick-action">+ Add Asset</a>
     <a href="{{ url_for('wealth.add_liability') }}" class="wealth-quick-action">+ Add Liability</a>
     <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-quick-action">Create Snapshot</a>
-    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-quick-action">Upload Document</a>
   </div>
 
   <!-- ── Overview ── -->
   <div class="wealth-summary-grid">
-    <div class="wealth-stat-card">
+    <a href="{{ url_for('wealth.assets_listing') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="View all Assets">
+      <div class="wealth-stat-icon">💰</div>
       <div class="wealth-stat-label">Total Assets</div>
       <div class="wealth-stat-value">{{ format_inr(data.total_assets) }}</div>
       <div class="wealth-stat-helper">
         {% if data.asset_count == 0 %}No assets tracked yet
         {% else %}Across {{ data.asset_count }} asset{{ 's' if data.asset_count != 1 }}{% endif %}
       </div>
-    </div>
-    <div class="wealth-stat-card">
+      <div class="wealth-stat-hint">View assets →</div>
+    </a>
+    <a href="{{ url_for('wealth.liabilities_listing') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="View all Liabilities">
+      <div class="wealth-stat-icon">📉</div>
       <div class="wealth-stat-label">Total Liabilities</div>
       <div class="wealth-stat-value">{{ format_inr(data.total_liabilities) }}</div>
       <div class="wealth-stat-helper">
         {% if data.liability_count == 0 %}No liabilities tracked yet
         {% else %}Across {{ data.liability_count }} liabilit{{ 'y' if data.liability_count == 1 else 'ies' }}{% endif %}
       </div>
-    </div>
+      <div class="wealth-stat-hint">View liabilities →</div>
+    </a>
     <!--
       Restored in Phase D — this card was hidden during Phase C
       (Section 69 there explicitly forbade it), now correctly
@@ -48,21 +47,93 @@
       service... connect it if appropriate"). Same summary_dict()
       call as /wealth/net-worth uses — cannot diverge (Section 24).
     -->
-    <div class="wealth-stat-card wealth-stat-primary">
+    <a href="{{ url_for('wealth.net_worth') }}" class="wealth-stat-card wealth-stat-card--link wealth-stat-primary" tabindex="0" title="View Net Worth details">
+      <div class="wealth-stat-icon">📊</div>
       <div class="wealth-stat-label">Net Worth</div>
       <div class="wealth-stat-value {{ 'wealth-negative' if data.net_worth < 0 }}">{{ format_inr(data.net_worth) }}</div>
       <div class="wealth-stat-helper">
         {% if data.has_wealth_data %}My Attributable: {{ format_inr(data.attributable_net_worth) }}
         {% else %}No assets or liabilities tracked yet{% endif %}
       </div>
-      <a href="{{ url_for('wealth.net_worth') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Details →</a>
-    </div>
+      <div class="wealth-stat-hint">View details →</div>
+    </a>
   </div>
+
+  <!-- ── Family & Inherited Wealth, Net Worth Trend, Wealth Documents ── -->
+  <!-- Moved directly below the Overview stat cards, ahead of the more
+       detailed Assets/Liabilities list sections — these three are
+       quick-glance summary cards, so they read naturally right after
+       the top-line totals rather than after the longer lists below.
+       Sized identically to the stat-card grid above (same grid, same
+       card class) so all six top cards form one visually consistent
+       row-pair, per explicit request. -->
+  <div class="wealth-summary-grid">
+    <a href="{{ url_for('wealth.family_wealth') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="View Family &amp; Inherited Wealth">
+      <div class="wealth-stat-icon">👪</div>
+      <div class="wealth-stat-label">Family &amp; Inherited Wealth</div>
+      {% if data.family_asset_count > 0 %}
+        <div class="wealth-stat-value" style="font-size:1.15rem;">{{ format_inr(data.total_family_value) }}</div>
+        <div class="wealth-stat-helper">{{ data.family_asset_count }} Asset{{ 's' if data.family_asset_count != 1 }}</div>
+      {% else %}
+        <div class="wealth-stat-value" style="font-size:1.15rem;">—</div>
+        <div class="wealth-stat-helper">No family or inherited wealth recorded yet</div>
+      {% endif %}
+      <div class="wealth-stat-hint">View Family Wealth →</div>
+    </a>
+
+    <!-- ── Wealth History Trend (Phase F, Section 42) ── -->
+    <!-- Only rendered with >=2 snapshots (Section 42: "Only show change
+         information if at least two snapshots exist") — consumes the
+         exact same history_service call /wealth/history uses, so this
+         card can never diverge from the History page (Section 43). -->
+    {% if history_trend %}
+    <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="View Net Worth Trend">
+      <div class="wealth-stat-icon">📈</div>
+      <div class="wealth-stat-label">Net Worth Trend</div>
+      <div class="wealth-stat-value {{ 'wealth-negative' if history_trend.change.absolute < 0 }}" style="font-size:1.15rem;">{{ format_inr(history_trend.latest.net_worth) }}</div>
+      <div class="wealth-stat-helper {{ 'wealth-negative' if history_trend.change.absolute < 0 }}">
+        {{ '+' if history_trend.change.absolute >= 0 }}{{ format_inr(history_trend.change.absolute) }} since last snapshot
+      </div>
+      <div class="wealth-stat-hint">View Wealth History →</div>
+    </a>
+    {% else %}
+    <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="Create a Snapshot">
+      <div class="wealth-stat-icon">📈</div>
+      <div class="wealth-stat-label">Wealth History</div>
+      <div class="wealth-stat-value" style="font-size:1.15rem;">—</div>
+      <div class="wealth-stat-helper">Track how your Net Worth changes over time</div>
+      <div class="wealth-stat-hint">Create a Snapshot →</div>
+    </a>
+    {% endif %}
+
+    <!-- ── Wealth Document Vault (Phase G) ── -->
+    {% if document_summary %}
+    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="View Document Vault">
+      <div class="wealth-stat-icon">📁</div>
+      <div class="wealth-stat-label">Wealth Documents</div>
+      <div class="wealth-stat-value" style="font-size:1.15rem;">{{ document_summary.total }}</div>
+      <div class="wealth-stat-helper">
+        Document{{ 's' if document_summary.total != 1 }} stored
+        {% if document_summary.recent %} · Recent: {{ document_summary.recent | map(attribute='display_name') | join(', ') }}{% endif %}
+      </div>
+      <div class="wealth-stat-hint">View Document Vault →</div>
+    </a>
+    {% else %}
+    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="Add Your First Document">
+      <div class="wealth-stat-icon">📁</div>
+      <div class="wealth-stat-label">Wealth Documents</div>
+      <div class="wealth-stat-value" style="font-size:1.15rem;">—</div>
+      <div class="wealth-stat-helper">Keep important Wealth documents in one secure place</div>
+      <div class="wealth-stat-hint">Add Your First Document →</div>
+    </a>
+    {% endif %}
+  </div>
+
 
   <!-- ── Assets Section (real, Phase B) ── -->
   <div class="wealth-list-card">
     <div class="wealth-section-header">
-      <div class="wealth-section-label">Assets</div>
+      <div class="wealth-list-card-title"><span class="wealth-list-card-icon">💰</span>Assets</div>
       <div style="display:flex; gap:14px; align-items:center;">
         <a href="{{ url_for('wealth.assets_listing') }}" class="wealth-view-all-link">View All →</a>
         <a href="{{ url_for('wealth.add_asset') }}" class="wealth-btn-add">+ Add Asset</a>
@@ -105,7 +176,7 @@
   <!-- ── Liabilities Section (real, Phase C) ── -->
   <div class="wealth-list-card">
     <div class="wealth-section-header">
-      <div class="wealth-section-label">Liabilities</div>
+      <div class="wealth-list-card-title"><span class="wealth-list-card-icon">📉</span>Liabilities</div>
       <div style="display:flex; gap:14px; align-items:center;">
         <a href="{{ url_for('wealth.liabilities_listing') }}" class="wealth-view-all-link">View All →</a>
         <a href="{{ url_for('wealth.add_liability') }}" class="wealth-btn-add">+ Add Liability</a>
@@ -144,82 +215,6 @@
       </div>
     {% endif %}
   </div>
-
-  <!-- ── Family & Inherited Wealth (real, Phase E) ── -->
-  <div class="wealth-section-card">
-    <div class="wealth-section-header" style="margin-bottom:0;">
-      <div class="wealth-section-title" style="margin-bottom:0;">Family &amp; Inherited Wealth</div>
-    </div>
-    {% if data.family_asset_count > 0 %}
-      <div class="wealth-section-count">{{ data.family_asset_count }} Asset{{ 's' if data.family_asset_count != 1 }}</div>
-      <div class="wealth-stat-value" style="font-size:1.15rem; margin-top:2px;">{{ format_inr(data.total_family_value) }}</div>
-    {% else %}
-      <div class="wealth-section-count">No family or inherited wealth recorded yet</div>
-    {% endif %}
-    <div class="wealth-section-desc">
-      A dedicated view of assets you've inherited, received as gifts, or hold jointly with family — built on top of your existing Assets, not a separate copy of them.
-    </div>
-    <a href="{{ url_for('wealth.family_wealth') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Family Wealth →</a>
-  </div>
-
-  <!-- ── Wealth History Trend (Phase F, Section 42) ── -->
-  <!-- Only rendered with >=2 snapshots (Section 42: "Only show change
-       information if at least two snapshots exist") — consumes the
-       exact same history_service call /wealth/history uses, so this
-       card can never diverge from the History page (Section 43). -->
-  {% if history_trend %}
-  <div class="wealth-section-card">
-    <div class="wealth-section-header" style="margin-bottom:0;">
-      <div class="wealth-section-title" style="margin-bottom:0;">Net Worth Trend</div>
-    </div>
-    <div class="wealth-stat-value" style="font-size:1.15rem; margin-top:2px;">{{ format_inr(history_trend.latest.net_worth) }}</div>
-    <div class="wealth-section-count {{ 'wealth-negative' if history_trend.change.absolute < 0 }}">
-      {{ '+' if history_trend.change.absolute >= 0 }}{{ format_inr(history_trend.change.absolute) }} since last snapshot
-    </div>
-    <div class="wealth-section-desc">
-      Based on your saved Wealth snapshots — as of {{ format_date(history_trend.latest.snapshot_date) }}.
-    </div>
-    <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Wealth History →</a>
-  </div>
-  {% else %}
-  <div class="wealth-section-card">
-    <div class="wealth-section-header" style="margin-bottom:0;">
-      <div class="wealth-section-title" style="margin-bottom:0;">Wealth History</div>
-    </div>
-    <div class="wealth-section-count">Track how your Net Worth changes over time</div>
-    <div class="wealth-section-desc">
-      Save periodic snapshots of your Wealth position to see trends and changes over time.
-    </div>
-    <a href="{{ url_for('wealth.wealth_history') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">Create a Snapshot →</a>
-  </div>
-  {% endif %}
-
-  <!-- ── Wealth Document Vault (Phase G) ── -->
-  {% if document_summary %}
-  <div class="wealth-section-card">
-    <div class="wealth-section-header" style="margin-bottom:0;">
-      <div class="wealth-section-title" style="margin-bottom:0;">Wealth Documents</div>
-    </div>
-    <div class="wealth-stat-value" style="font-size:1.15rem; margin-top:2px;">{{ document_summary.total }} Document{{ 's' if document_summary.total != 1 }} Stored</div>
-    {% if document_summary.recent %}
-    <div class="wealth-section-desc">
-      Recent: {{ document_summary.recent | map(attribute='display_name') | join(', ') }}
-    </div>
-    {% endif %}
-    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">View Document Vault →</a>
-  </div>
-  {% else %}
-  <div class="wealth-section-card">
-    <div class="wealth-section-header" style="margin-bottom:0;">
-      <div class="wealth-section-title" style="margin-bottom:0;">Wealth Documents</div>
-    </div>
-    <div class="wealth-section-count">Keep important Wealth documents in one secure place</div>
-    <div class="wealth-section-desc">
-      Property papers, loan agreements, statements and more.
-    </div>
-    <a href="{{ url_for('wealth.documents_vault') }}" class="wealth-view-all-link" style="margin-top:8px; display:inline-block;">Add Your First Document →</a>
-  </div>
-  {% endif %}
 
   <!-- ── Historical Valuation Analytics (Phase K, Section 39) ── -->
   <!-- Hidden entirely (never shown as an empty 0/0 card) until at
@@ -265,7 +260,20 @@
   .wealth-stat-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; padding: 22px; box-shadow: var(--shadow-sm);
+    display: block; text-decoration: none;
+    transition: box-shadow 0.2s, transform 0.15s, border-color 0.2s;
   }
+  .wealth-stat-icon { font-size: 1.4rem; margin-bottom: 10px; }
+  .wealth-stat-card--link { cursor: pointer; }
+  .wealth-stat-card--link:hover {
+    box-shadow: var(--shadow-md); transform: translateY(-3px); border-color: var(--accent);
+  }
+  .wealth-stat-card--link:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .wealth-stat-hint {
+    font-size: 0.7rem; color: var(--accent); margin-top: 8px; font-weight: 600;
+    opacity: 0; transition: opacity 0.2s;
+  }
+  .wealth-stat-card--link:hover .wealth-stat-hint { opacity: 1; }
   .wealth-stat-networth { border-color: var(--accent); }
   .wealth-stat-primary { border-color: var(--accent); border-width: 1.5px; }
   .wealth-stat-label {
@@ -282,11 +290,24 @@
   .wealth-list-card {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 12px; padding: 24px; box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.2s;
   }
+  .wealth-list-card:hover { box-shadow: var(--shadow-md); }
   .wealth-section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
   .wealth-section-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
-  .wealth-view-all-link { font-size: 0.82rem; font-weight: 600; color: var(--accent); text-decoration: none; }
-  .wealth-view-all-link:hover { text-decoration: underline; }
+  .wealth-list-card-title {
+    font-size: 1.15rem; font-weight: 800; color: var(--text);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .wealth-list-card-icon { font-size: 1.3rem; }
+  .wealth-view-all-link {
+    font-size: 0.8rem; font-weight: 700; color: var(--accent);
+    text-decoration: none; padding: 6px 14px; border-radius: 20px;
+    border: 1px solid var(--accent); transition: all 0.2s;
+  }
+  .wealth-view-all-link:hover {
+    background: var(--accent); color: #fff; transform: translateY(-1px); box-shadow: var(--shadow-sm);
+  }
   .wealth-btn-add {
     background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
     padding: 8px 16px; font-size: 0.82rem; font-weight: 700; color: #fff;
@@ -294,16 +315,26 @@
   }
   .wealth-btn-add:hover { opacity: 0.88; }
 
-  .wealth-quick-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 4px; }
-  .wealth-quick-action {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-    padding: 9px 16px; font-size: 0.82rem; font-weight: 600; color: var(--text);
-    font-family: 'Inter', sans-serif; text-decoration: none; transition: all 0.2s;
+  .wealth-quick-access-label {
+    font-size: 0.85rem; font-weight: 400; color: #4a4a4a;
+    font-family: 'Inter', sans-serif; margin-right: 4px;
   }
-  .wealth-quick-action:hover { border-color: var(--accent); color: var(--accent); }
+  .wealth-quick-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .wealth-quick-action {
+    background: var(--accent); border: 1px solid var(--accent); border-radius: 8px;
+    padding: 9px 18px; font-size: 0.82rem; font-weight: 700; color: #fff;
+    font-family: 'Inter', sans-serif; text-decoration: none;
+    transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
+  }
+  .wealth-quick-action:hover { opacity: 0.88; transform: translateY(-2px); box-shadow: var(--shadow-md); }
 
   .wealth-category-breakdown { display: flex; flex-direction: column; gap: 2px; }
-  .wealth-category-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  .wealth-category-row {
+    display: flex; justify-content: space-between; padding: 8px 6px; margin: 0 -6px;
+    border-bottom: 1px solid var(--border); font-size: 0.85rem; border-radius: 6px;
+    transition: background 0.15s;
+  }
+  .wealth-category-row:hover { background: var(--surface2); }
   .wealth-category-row:last-child { border-bottom: none; }
   .wealth-category-total { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); }
 
