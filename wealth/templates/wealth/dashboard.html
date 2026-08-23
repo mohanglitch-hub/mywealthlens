@@ -19,7 +19,7 @@
 
   <!-- ── Overview ── -->
   <div class="wealth-summary-grid">
-    <a href="{{ url_for('wealth.assets_listing') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="View all Assets">
+    <a href="{{ url_for('wealth.assets_listing', browse=1) }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="Search and filter all Assets">
       <div class="wealth-stat-icon">💰</div>
       <div class="wealth-stat-label">Total Assets</div>
       <div class="wealth-stat-value">{{ format_inr(data.total_assets) }}</div>
@@ -29,7 +29,7 @@
       </div>
       <div class="wealth-stat-hint">View assets →</div>
     </a>
-    <a href="{{ url_for('wealth.liabilities_listing') }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="View all Liabilities">
+    <a href="{{ url_for('wealth.liabilities_listing', browse=1) }}" class="wealth-stat-card wealth-stat-card--link" tabindex="0" title="Search and filter all Liabilities">
       <div class="wealth-stat-icon">📉</div>
       <div class="wealth-stat-label">Total Liabilities</div>
       <div class="wealth-stat-value">{{ format_inr(data.total_liabilities) }}</div>

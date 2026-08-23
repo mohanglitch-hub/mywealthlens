@@ -23,7 +23,7 @@ from .timezone_utils import today_ist
 from . import analytics_service
 from .models import (
     WealthAsset, WealthAssetCategory, ASSET_TYPES_BY_CATEGORY,
-    FIELD_GROUPS_BY_CATEGORY, OwnershipType, SourceType, WealthStatus,
+    FIELD_GROUPS_BY_CATEGORY, OwnershipType, SourceType,
     AreaUnit, WeightUnit,
     WealthLiability, WealthLiabilityCategory, LIABILITY_TYPES_BY_CATEGORY,
     WealthDocumentCategory, DOCUMENT_TYPES_BY_CATEGORY,
@@ -103,13 +103,23 @@ def dashboard():
 @login_required
 def assets_listing():
     """Assets listing with search, filter, and sort — all applied at
-    the database level (Section 15/16 of spec)."""
+    the database level (Section 15/16 of spec).
+
+    browse=1: shows the search/filter bar — reached only via the
+    Dashboard's "Total Assets" stat card. Without it (e.g. via the
+    Assets section's "View All" link), the exact same page/data
+    renders without the filter UI, per explicit request to keep that
+    entry point uncluttered. Both paths use identical filtering logic
+    underneath — browse only controls whether the FORM is shown, not
+    whether q/category/etc. are honored, so a direct URL with query
+    params still works correctly either way."""
     q             = request.args.get("q", "").strip()
     category      = request.args.get("category", "")
     status_filter = request.args.get("status", "active")
     ownership     = request.args.get("ownership", "")
     source        = request.args.get("source", "")
     sort_by       = request.args.get("sort", "newest")
+    browse        = request.args.get("browse", "")
 
     assets = services.get_assets_for_listing(
         current_user.id, q=q or None, category=category or None,
@@ -127,13 +137,33 @@ def assets_listing():
         categories=WealthAssetCategory.ALL,
         ownership_types=OwnershipType.ALL,
         source_types=SourceType.ALL,
+        category_icons=_asset_category_icons(),
         q=q, category=category, status_filter=status_filter,
         ownership=ownership, source=source, sort_by=sort_by,
+        browse=browse,
         format_inr=format_inr, format_date=format_date,
     )
 
 
 # ── Add / Edit Asset (shared form) ────────────────────────────────────────────
+
+def _asset_category_icons():
+    """Category -> emoji map for the Assets card grid, matching
+    insurance_centre's own _category_icons() convention exactly."""
+    return {
+        "Real Estate": "🏠", "Precious Metals": "🥇", "Vehicles": "🚗",
+        "Bank & Deposits": "🏦", "Investments": "📈", "Business": "🏢",
+        "Other": "📦",
+    }
+
+
+def _liability_category_icons():
+    """Category -> emoji map for the Liabilities card grid."""
+    return {
+        "Loans": "🏦", "Vehicle Finance": "🚗", "Credit": "💳",
+        "Family / Informal Debt": "🤝", "Other": "📉",
+    }
+
 
 def _asset_form_context(is_edit, asset, values):
     """Shared kwargs for rendering wealth_asset_form.html in either
@@ -148,7 +178,6 @@ def _asset_form_context(is_edit, asset, values):
         field_groups=FIELD_GROUPS_BY_CATEGORY,
         ownership_types=OwnershipType.ALL,
         source_types=SourceType.ALL,
-        statuses=WealthStatus.ALL,
         area_units=AreaUnit.ALL,
         weight_units=WeightUnit.ALL,
         today_ist=today_ist().isoformat(),
@@ -328,12 +357,16 @@ def delete_asset_permanent(asset_id):
 @login_required
 def liabilities_listing():
     """Liabilities listing with search, filter, and sort — all applied
-    at the database level (Section 32/34 of spec)."""
+    at the database level (Section 32/34 of spec).
+
+    browse=1: same convention as assets_listing() — see its
+    docstring for the full rationale."""
     q             = request.args.get("q", "").strip()
     category      = request.args.get("category", "")
     status_filter = request.args.get("status", "active")
     ownership     = request.args.get("ownership", "")
     sort_by       = request.args.get("sort", "newest")
+    browse        = request.args.get("browse", "")
 
     liabilities = services.get_liabilities_for_listing(
         current_user.id, q=q or None, category=category or None,
@@ -350,8 +383,10 @@ def liabilities_listing():
         summary=summary,
         categories=WealthLiabilityCategory.ALL,
         ownership_types=OwnershipType.ALL,
+        category_icons=_liability_category_icons(),
         q=q, category=category, status_filter=status_filter,
         ownership=ownership, sort_by=sort_by,
+        browse=browse,
         format_inr=format_inr, format_date=format_date,
     )
 
@@ -369,7 +404,6 @@ def _liability_form_context(is_edit, liability, values):
         categories=WealthLiabilityCategory.ALL,
         liability_types_by_category=LIABILITY_TYPES_BY_CATEGORY,
         ownership_types=OwnershipType.ALL,
-        statuses=WealthStatus.ALL,
         today_ist=today_ist().isoformat(),
     )
 

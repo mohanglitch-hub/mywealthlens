@@ -94,7 +94,6 @@ def _asset_fields_from_form(form):
         "maturity_date":        _parse_date(form.get("maturity_date")),
         "investment_type":      (form.get("investment_type") or "").strip() or None,
 
-        "status": form.get("status") or WealthStatus.ACTIVE,
         "notes":  (form.get("notes") or "").strip() or None,
     }
 
@@ -664,7 +663,6 @@ def _liability_fields_from_form(form):
         "start_date":         _parse_date(form.get("start_date")),
         "expected_end_date":  _parse_date(form.get("expected_end_date")),
 
-        "status": form.get("status") or WealthStatus.ACTIVE,
         "notes":  (form.get("notes") or "").strip() or None,
     }
 
