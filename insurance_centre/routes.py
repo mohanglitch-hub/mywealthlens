@@ -315,12 +315,24 @@ def delete_policy_permanent(policy_id):
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=policy_id))
 
-    # Delete all related documents from disk
+    # Delete all related documents' PHYSICAL FILES from disk.
     from .utils import delete_document_file
     for doc in policy.documents.all():
         delete_document_file(doc.file_path)
 
-    # Delete policy (cascades to nominees, members, addons, timeline, documents)
+    # Explicitly null the now-dangling policy_id reference on each
+    # document ROW (Section: confirmed real orphan bug — the model's
+    # own comment already documented this intent — "SET NULL... stays
+    # for audit purposes. Clean up separately" — but this "clean up
+    # separately" step was never actually implemented, so the row
+    # survived the physical-file deletion above while still pointing
+    # at a policy_id that was about to stop existing). Same fix
+    # pattern already applied to Wealth's equivalent bug.
+    InsuranceDocument.query.filter_by(policy_id=policy.id).update({"policy_id": None})
+
+    # Delete policy (cascades to nominees, members, addons, timeline —
+    # documents are intentionally NOT cascaded, per the model's own
+    # passive_deletes=True + the explicit cleanup just above).
     _db().session.delete(policy)
     _db().session.commit()
 
