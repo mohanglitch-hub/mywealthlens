@@ -244,9 +244,23 @@
         <label for="status">Status</label>
         <select name="status" id="status" class="ret-select">
           {% for s in statuses %}
+            {% if s != 'Archived' %}
             <option value="{{ s }}" {{ 'selected' if values.status == s }}>{{ s }}</option>
+            {% endif %}
           {% endfor %}
         </select>
+        <!-- Confirmed real bug, verified empirically: selecting
+             "Archived" here previously updated the display label
+             only — is_archived (the field every dashboard total
+             actually filters on) never changed, so an "archived"
+             scheme kept counting toward Total Corpus. Same class of
+             bug as Wealth's original Status-dropdown desync.
+             insurance_centre's equivalent form already excluded
+             "Archived" from this list for exactly this reason —
+             this brings Retirement in line with that same,
+             already-correct pattern. Archiving now only happens
+             through the dedicated Archive/Restore buttons, which
+             correctly update is_archived and status together. -->
       </div>
       <div class="form-group">
         <label for="notes">Notes</label>
