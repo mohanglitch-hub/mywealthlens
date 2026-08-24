@@ -2,6 +2,47 @@
 {% block title %}{{ 'Edit' if is_edit else 'Add' }} Retirement Scheme — MyWealthLens{% endblock %}
 
 {% block content %}
+<!-- ── Scheme-type-change confirmation (Section: replaces a raw
+     browser-native confirm() with the app's own modal styling —
+     this is a genuine confirm/cancel decision with a "revert the
+     dropdown on cancel" callback, not a form submission, so it needs
+     its own small, self-contained modal rather than reusing
+     _confirm_modal.html's form-submit-specific confirmAction(). ── -->
+<div id="typeChangeModalOverlay" class="ret-modal-overlay" style="display:none;">
+  <div class="ret-modal">
+    <div class="ret-modal-title">Change Scheme Type?</div>
+    <div class="ret-modal-message">Changing the scheme type may hide previously entered scheme-specific information (it will not be deleted, just hidden). Continue?</div>
+    <div class="ret-modal-actions">
+      <button type="button" class="ret-modal-cancel" id="typeChangeModalCancel">Cancel</button>
+      <button type="button" class="ret-modal-confirm" id="typeChangeModalConfirm">Continue</button>
+    </div>
+  </div>
+</div>
+<style>
+  .ret-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 500;
+    padding: 20px;
+  }
+  .ret-modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; max-width: 380px; width: 100%;
+    box-shadow: var(--shadow-lg);
+  }
+  .ret-modal-title { font-weight: 700; font-size: 1rem; color: var(--text); margin-bottom: 8px; }
+  .ret-modal-message { font-size: 0.88rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; white-space: pre-line; }
+  .ret-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .ret-modal-cancel {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: var(--text2); cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .ret-modal-confirm {
+    background: var(--accent); border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: #fff; font-weight: 600;
+    cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+</style>
+
 <div style="max-width:960px; margin:0 auto;">
 
   <div class="ret-breadcrumb">
@@ -361,10 +402,29 @@
   function confirmTypeChange(select) {
     const prev = select.dataset.prev;
     if (prev && prev !== select.value && prev !== '') {
-      const ok = confirm('Changing the scheme type may hide previously entered scheme-specific information (it will not be deleted, just hidden). Continue?');
-      if (!ok) {
-        select.value = prev;
+      const pendingValue = select.value;
+      select.value = prev;  // hold the change until the user actually confirms
+      document.getElementById('typeChangeModalOverlay').style.display = 'flex';
+
+      const confirmBtn = document.getElementById('typeChangeModalConfirm');
+      const cancelBtn = document.getElementById('typeChangeModalCancel');
+
+      function onConfirm() {
+        select.value = pendingValue;
+        select.dataset.prev = pendingValue;
+        applySchemeType();
+        cleanup();
       }
+      function onCancel() {
+        cleanup();
+      }
+      function cleanup() {
+        document.getElementById('typeChangeModalOverlay').style.display = 'none';
+        confirmBtn.removeEventListener('click', onConfirm);
+        cancelBtn.removeEventListener('click', onCancel);
+      }
+      confirmBtn.addEventListener('click', onConfirm);
+      cancelBtn.addEventListener('click', onCancel);
     }
   }
 
