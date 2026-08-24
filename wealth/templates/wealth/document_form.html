@@ -18,6 +18,8 @@
   <p style="color:var(--muted); font-size:0.875rem; margin-bottom:28px;">
     {% if is_edit %}
       Update this document's details. The uploaded file itself cannot be changed here.
+    {% elif scoped_context %}
+      Fields marked <span class="wealth-required-mark">*</span> are required. Documents are stored securely and are only ever visible to you.
     {% else %}
       Fields marked <span class="wealth-required-mark">*</span> are required. Documents are stored securely and are only ever visible to you.
     {% endif %}
@@ -29,25 +31,115 @@
         id="documentForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 
-    <div class="wealth-card">
-      <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Document Details</span></div>
+    {% if not is_edit and scoped_context %}
+    <!-- ── Scoped upload (Section: matching insurance_centre's
+         policy_detail.html upload form) — arrived from a specific
+         Asset/Liability's own page. Category and Related-To are
+         KNOWN, not asked — sent as hidden fields, never shown as
+         editable dropdowns the user has to look at and confirm. ── -->
+    <input type="hidden" name="category" value="{{ scoped_context.category }}" />
+    <input type="hidden" name="related_id" value="{{ scoped_context.related_id }}" />
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-        <div class="form-group">
-          <label for="category">Document Category <span class="wealth-required-mark">*</span></label>
-          <select name="category" id="category" class="wealth-select" required onchange="applyDocCategory()">
-            <option value="">— Select category —</option>
-            {% for cat in categories %}
-              <option value="{{ cat }}" {{ 'selected' if values.category == cat }}>{{ cat }}</option>
+    <div class="wealth-scoped-banner">
+      📎 Uploading for <strong>{{ scoped_context.label }}</strong>
+      <a href="{{ url_for('wealth.add_document') }}" class="wealth-scoped-change-link">Not this? Upload a general document instead</a>
+    </div>
+
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Document Type</span></div>
+      <div class="form-group">
+        <label for="document_type">Document Type <span class="wealth-required-mark">*</span></label>
+        <select name="document_type" id="document_type" class="wealth-select" required>
+          <option value="">— Select type —</option>
+          {% for t in document_types_by_category.get(scoped_context.category, []) %}
+            <option value="{{ t }}" {{ 'selected' if values.document_type == t }}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="title">Document Title (optional)</label>
+        <input type="text" name="title" id="title" placeholder="e.g. House Sale Deed - Bangalore"
+               value="{{ values.title or '' }}" />
+      </div>
+
+      <div class="form-group">
+        <label for="description">Description / Notes (optional)</label>
+        <input type="text" name="description" id="description" placeholder="e.g. Original registered sale deed for family residence."
+               value="{{ values.description or '' }}" />
+      </div>
+
+      <div class="form-group">
+        <label for="document">Choose File <span class="wealth-required-mark">*</span></label>
+        <input type="file" name="document" id="document" required
+               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx"
+               onchange="showDocFileInfo(this)" />
+        <div id="docFileInfo" style="font-size:0.78rem; color:var(--muted); margin-top:6px;"></div>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted2);">
+        Allowed: PDF, JPG, JPEG, PNG, DOC, DOCX, XLS, XLSX · Max size: 25 MB
+      </div>
+    </div>
+
+    {% else %}
+    <!-- ── General upload (Documents Vault entry point, or Edit) —
+         no known context — but per explicit request, this still
+         leads with "which existing Asset/Liability", exactly
+         matching insurance_centre's own Vault-level form leading
+         with "which existing Policy" (Image 1 in the request) rather
+         than an abstract category list (the old Image 2 problem).
+         Document Category is DERIVED from that choice automatically,
+         same rule as the scoped path above — it only becomes a real,
+         user-facing choice for a genuinely standalone document
+         (Will, Trust deed) with no Asset/Liability at all. ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">1</span><span class="wealth-card-title">Related To</span></div>
+      <p style="font-size:0.8rem; color:var(--muted); margin-bottom:14px;">
+        Pick the Asset or Liability this document belongs to — Document Type will be scoped to match. Choose "standalone document" only for something like a Will that isn't tied to a specific item.
+      </p>
+
+      <div class="form-group">
+        <label for="related_id">Related Asset or Liability <span class="wealth-required-mark">*</span></label>
+        <select name="related_id" id="related_id" class="wealth-select" required onchange="applyRelatedTo()">
+          <option value="">— Select Asset or Liability —</option>
+          {% if assets %}
+          <optgroup label="Assets">
+            {% for a in assets %}
+              <option value="asset:{{ a.id }}" {{ 'selected' if preselect_asset_id == a.id }}>{{ a.name }} ({{ a.category }})</option>
             {% endfor %}
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="document_type">Document Type <span class="wealth-required-mark">*</span></label>
-          <select name="document_type" id="document_type" class="wealth-select" required>
-            <option value="">— Select category first —</option>
-          </select>
-        </div>
+          </optgroup>
+          {% endif %}
+          {% if liabilities %}
+          <optgroup label="Liabilities">
+            {% for l in liabilities %}
+              <option value="liability:{{ l.id }}" {{ 'selected' if preselect_liability_id == l.id }}>{{ l.name }} ({{ l.category }})</option>
+            {% endfor %}
+          </optgroup>
+          {% endif %}
+          <option value="standalone" {{ 'selected' if values.related_id == 'standalone' }}>— Standalone document (Will, Trust, etc.) —</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Document Type</span></div>
+
+      <div id="standaloneCategoryField" style="display:none;" class="form-group">
+        <label for="category">Document Category <span class="wealth-required-mark">*</span></label>
+        <select name="category" id="category" class="wealth-select" onchange="applyDocCategory()">
+          <option value="">— Select category —</option>
+          {% for cat in categories %}
+            <option value="{{ cat }}" {{ 'selected' if values.category == cat }}>{{ cat }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <input type="hidden" name="derived_category" id="derived_category" value="" />
+
+      <div class="form-group">
+        <label for="document_type">Document Type <span class="wealth-required-mark">*</span></label>
+        <select name="document_type" id="document_type" class="wealth-select" required>
+          <option value="">— Select an Asset or Liability first —</option>
+        </select>
       </div>
 
       <div class="form-group">
@@ -82,34 +174,7 @@
       </div>
       {% endif %}
     </div>
-
-    <div class="wealth-card">
-      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Related To (optional)</span></div>
-      <p style="font-size:0.8rem; color:var(--muted); margin-bottom:14px;">
-        A document doesn't have to belong to a specific Asset or Liability — leave both blank for a standalone document like a Will.
-      </p>
-
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-        <div class="form-group">
-          <label for="asset_id">Related Asset</label>
-          <select name="asset_id" id="asset_id" class="wealth-select">
-            <option value="">— None —</option>
-            {% for a in assets %}
-              <option value="{{ a.id }}" {{ 'selected' if preselect_asset_id == a.id }}>{{ a.name }} ({{ a.category }})</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="liability_id">Related Liability</label>
-          <select name="liability_id" id="liability_id" class="wealth-select">
-            <option value="">— None —</option>
-            {% for l in liabilities %}
-              <option value="{{ l.id }}" {{ 'selected' if preselect_liability_id == l.id }}>{{ l.name }} ({{ l.category }})</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-    </div>
+    {% endif %}
 
     <div style="display:flex; gap:10px; margin-top:20px;">
       <button type="submit" class="wealth-btn-primary">{{ 'Save Changes' if is_edit else 'Upload Document' }}</button>
@@ -126,6 +191,14 @@
   .wealth-breadcrumb-current { color: var(--text); font-weight: 700; }
 
   .wealth-required-mark { color: var(--down); font-weight: 700; }
+
+  .wealth-scoped-banner {
+    background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 10px;
+    padding: 12px 16px; font-size: 0.85rem; color: var(--text2); margin-bottom: 16px;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+  }
+  .wealth-scoped-change-link { font-size: 0.78rem; color: var(--accent); text-decoration: none; font-weight: 600; }
+  .wealth-scoped-change-link:hover { text-decoration: underline; }
 
   .wealth-card {
     background: var(--surface); border: 1px solid var(--border);
@@ -171,15 +244,14 @@
 <script>
   const DOC_TYPES_BY_CATEGORY = {{ document_types_by_category | tojson }};
   const CURRENT_DOC_TYPE = {{ (values.document_type or '') | tojson }};
+  const RELATED_TO_CATEGORY = {{ (related_to_category_map or {}) | tojson }};
 
-  function applyDocCategory() {
-    const catSelect = document.getElementById('category');
-    const category = catSelect.value;
+  function populateDocTypes(category) {
     const typeSelect = document.getElementById('document_type');
-
+    if (!typeSelect) return;
     typeSelect.innerHTML = '';
     if (!category) {
-      typeSelect.innerHTML = '<option value="">— Select category first —</option>';
+      typeSelect.innerHTML = '<option value="">— Select an Asset or Liability first —</option>';
     } else {
       const opt0 = document.createElement('option');
       opt0.value = ''; opt0.textContent = '— Select type —';
@@ -191,6 +263,47 @@
         if (t === CURRENT_DOC_TYPE) opt.selected = true;
         typeSelect.appendChild(opt);
       });
+    }
+  }
+
+  // General-form category dropdown (only visible for a standalone
+  // document — see applyRelatedTo() below).
+  function applyDocCategory() {
+    const catSelect = document.getElementById('category');
+    if (!catSelect) return;
+    populateDocTypes(catSelect.value);
+  }
+
+  // Fires when "Related Asset or Liability" changes on the general
+  // form (Section: leads with "which existing item", matching
+  // insurance_centre's Vault-level form — picking an existing Asset/
+  // Liability derives Document Type immediately, client-side, no
+  // page reload; only "standalone document" reveals a manual
+  // Category picker).
+  function applyRelatedTo() {
+    const relSelect = document.getElementById('related_id');
+    if (!relSelect) return;
+    const value = relSelect.value;
+    const standaloneField = document.getElementById('standaloneCategoryField');
+    const derivedInput = document.getElementById('derived_category');
+    const catSelect = document.getElementById('category');
+
+    if (value === 'standalone') {
+      if (standaloneField) standaloneField.style.display = 'block';
+      if (catSelect) catSelect.setAttribute('required', 'required');
+      if (derivedInput) derivedInput.value = '';
+      populateDocTypes(catSelect ? catSelect.value : '');
+    } else if (value && RELATED_TO_CATEGORY[value]) {
+      if (standaloneField) standaloneField.style.display = 'none';
+      if (catSelect) catSelect.removeAttribute('required');
+      const derived = RELATED_TO_CATEGORY[value];
+      if (derivedInput) derivedInput.value = derived;
+      populateDocTypes(derived);
+    } else {
+      if (standaloneField) standaloneField.style.display = 'none';
+      if (catSelect) catSelect.removeAttribute('required');
+      if (derivedInput) derivedInput.value = '';
+      populateDocTypes('');
     }
   }
 
@@ -211,12 +324,14 @@
     }
   }
 
-  // Populate the Document Type dropdown on load (covers both a
-  // pre-selected category on Edit, and a validation-error redisplay
-  // on Add where the category the user picked should be preserved).
+  // On load: scoped mode has no #related_id element at all (Document
+  // Type is already fully populated server-side) — no-op there.
+  // General mode (including Edit, and a validation-error redisplay
+  // on Add) initializes from whatever related_id is already selected.
   document.addEventListener('DOMContentLoaded', function () {
-    if (document.getElementById('category').value) {
-      applyDocCategory();
+    const relEl = document.getElementById('related_id');
+    if (relEl && relEl.value) {
+      applyRelatedTo();
     }
   });
 </script>

@@ -57,9 +57,48 @@
       </div>
     </div>
 
+    <!-- ── Acquisition ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title">Acquisition Value</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="acquisition_date">Acquisition Date</label>
+          <input type="date" name="acquisition_date" id="acquisition_date" value="{{ values.acquisition_date }}" />
+        </div>
+        <div class="form-group">
+          <label for="acquisition_value">Acquisition Value (₹)</label>
+          <input type="number" name="acquisition_value" id="acquisition_value" step="0.01" min="0"
+                 value="{{ values.acquisition_value }}" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Ownership ── -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading"><span class="wealth-card-num">3</span><span class="wealth-card-title">Ownership</span></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="form-group">
+          <label for="ownership_type">Ownership Type <span class="wealth-required-mark">*</span></label>
+          <select name="ownership_type" id="ownership_type" class="wealth-select" required>
+            {% for ot in ownership_types %}
+              <option value="{{ ot }}" {{ 'selected' if values.ownership_type == ot }}>{{ ot }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ownership_percentage">Ownership Percentage (%) <span class="wealth-required-mark">*</span></label>
+          <input type="number" name="ownership_percentage" id="ownership_percentage" step="0.01" min="0" max="100"
+                 value="{{ values.ownership_percentage if values.ownership_percentage != '' else 100 }}" required />
+        </div>
+      </div>
+      <div style="font-size:0.78rem; color:var(--muted);">
+        Example: a ₹1 Crore property at 50% ownership shows an attributable value of ₹50 Lakh — the original ₹1 Crore value is never changed.
+      </div>
+    </div>
+
     <!-- ── Current Value ── -->
     <div class="wealth-card">
-      <div class="wealth-card-heading"><span class="wealth-card-num">2</span><span class="wealth-card-title" id="valueCardTitle">Current Value</span></div>
+      <div class="wealth-card-heading"><span class="wealth-card-num">4</span><span class="wealth-card-title" id="valueCardTitle">Current Value</span></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
           <label for="current_value" id="currentValueLabel">Current Value (₹) <span class="wealth-required-mark">*</span></label>
@@ -99,45 +138,6 @@
         updateForBackdating();
       })();
     </script>
-
-    <!-- ── Ownership ── -->
-    <div class="wealth-card">
-      <div class="wealth-card-heading"><span class="wealth-card-num">3</span><span class="wealth-card-title">Ownership</span></div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-        <div class="form-group">
-          <label for="ownership_type">Ownership Type <span class="wealth-required-mark">*</span></label>
-          <select name="ownership_type" id="ownership_type" class="wealth-select" required>
-            {% for ot in ownership_types %}
-              <option value="{{ ot }}" {{ 'selected' if values.ownership_type == ot }}>{{ ot }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="ownership_percentage">Ownership Percentage (%) <span class="wealth-required-mark">*</span></label>
-          <input type="number" name="ownership_percentage" id="ownership_percentage" step="0.01" min="0" max="100"
-                 value="{{ values.ownership_percentage if values.ownership_percentage != '' else 100 }}" required />
-        </div>
-      </div>
-      <div style="font-size:0.78rem; color:var(--muted);">
-        Example: a ₹1 Crore property at 50% ownership shows an attributable value of ₹50 Lakh — the original ₹1 Crore value is never changed.
-      </div>
-    </div>
-
-    <!-- ── Acquisition ── -->
-    <div class="wealth-card">
-      <div class="wealth-card-heading"><span class="wealth-card-num">4</span><span class="wealth-card-title">Acquisition</span></div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-        <div class="form-group">
-          <label for="acquisition_date">Acquisition Date</label>
-          <input type="date" name="acquisition_date" id="acquisition_date" value="{{ values.acquisition_date }}" />
-        </div>
-        <div class="form-group">
-          <label for="acquisition_value">Acquisition Value (₹)</label>
-          <input type="number" name="acquisition_value" id="acquisition_value" step="0.01" min="0"
-                 value="{{ values.acquisition_value }}" />
-        </div>
-      </div>
-    </div>
 
     <!-- ── Source ── -->
     <div class="wealth-card">
