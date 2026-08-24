@@ -270,18 +270,6 @@ def build_retirement_pdf(user):
             block.append(Spacer(1, 1.5*mm))
             block.append(c_tbl)
 
-        # Balance history (last 5)
-        balances = services.get_balance_history(scheme.id)[:5]
-        if balances:
-            block.append(Spacer(1, 1.5*mm))
-            block.append(Paragraph("Recent Balance History", S["muted"]))
-            b_data = [["Date", "Balance", "Note"]]
-            for b in balances:
-                b_data.append([format_date(b.balance_date), format_inr(b.balance), (b.note or "—")[:50]])
-            b_tbl = Table(b_data, colWidths=[W*0.20, W*0.20, W*0.60])
-            b_tbl.setStyle(_table_style())
-            block.append(b_tbl)
-
         # Nominees
         nominees = scheme.nominees.all()
         block.append(Spacer(1, 1.5*mm))

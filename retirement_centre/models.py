@@ -6,8 +6,7 @@ Phase A: Foundation for the Retirement Centre database architecture.
 Tables:
   1. RetirementScheme            — core scheme record (all scheme types)
   2. RetirementContribution      — actual deposit history (one row per deposit)
-  3. RetirementBalanceSnapshot   — historical "balance was reported as X on date Y"
-  4. RetirementTimeline          — append-only audit history per scheme
+  3. RetirementTimeline          — append-only audit history per scheme
 
 Design principles (mirroring insurance_centre/models.py):
   - Single scheme table — no separate table per scheme type
@@ -16,8 +15,12 @@ Design principles (mirroring insurance_centre/models.py):
   - Soft delete via is_archived flag, same philosophy as Insurance Centre
   - Contribution history is REAL rows, never inferred from a single
     "annual contribution" field (Section 9)
-  - Balance snapshots are a historical log only — the system never
-    infers "return" from the difference between two snapshots (Section 11)
+  - No separate balance-history table — confirmed not needed for
+    Retirement (unlike Wealth's WealthValueSnapshot), since balance
+    changes and interest are both captured as real Contribution rows
+    instead. RetirementBalanceSnapshot existed briefly, was wired up,
+    then deliberately removed — see git history if the reasoning is
+    ever needed again.
 
 NOT included in Phase A (deliberately — see Section 21 of spec):
   - RetirementNominee table
@@ -352,10 +355,6 @@ class RetirementScheme(db.Model):
                                     backref="scheme",
                                     lazy="dynamic",
                                     cascade="all, delete-orphan")
-    balance_snapshots = db.relationship("RetirementBalanceSnapshot",
-                                        backref="scheme",
-                                        lazy="dynamic",
-                                        cascade="all, delete-orphan")
     nominees = db.relationship("RetirementSchemeNominee",
                                backref="scheme",
                                lazy="dynamic",
@@ -427,35 +426,6 @@ class RetirementContribution(db.Model):
 
     def __repr__(self):
         return f"<RetirementContribution scheme={self.scheme_id} amount={self.amount}>"
-
-
-class RetirementBalanceSnapshot(db.Model):
-    """
-    Historical record of reported balances: "on this date, the user
-    reported this scheme's balance was ₹X." Purely a log — the system
-    never auto-calculates "return" from the gap between two snapshots,
-    since contributions, interest, and withdrawals could all explain
-    the difference (Section 11 of spec).
-    """
-    __tablename__ = "retirement_balance_snapshot"
-    __table_args__ = (
-        db.Index("ix_ret_snapshot_scheme", "scheme_id"),
-    )
-
-    id        = db.Column(db.Integer, primary_key=True)
-    scheme_id = db.Column(db.Integer,
-                          db.ForeignKey("retirement_scheme.id",
-                                       ondelete="CASCADE"),
-                          nullable=False)
-
-    balance      = db.Column(db.Float, nullable=False)
-    balance_date = db.Column(db.Date, nullable=False)
-    note         = db.Column(db.String(300), nullable=True)
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    def __repr__(self):
-        return f"<RetirementBalanceSnapshot scheme={self.scheme_id} balance={self.balance} on={self.balance_date}>"
 
 
 class RetirementTimeline(db.Model):
