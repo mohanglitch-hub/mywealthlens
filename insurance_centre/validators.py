@@ -91,6 +91,17 @@ def validate_policy(data, user_id, existing_policy_id=None):
         if expiry_date < start_date:
             errors.append("Expiry date cannot be before start date.")
 
+    # Confirmed real gap: renewal_date was parsed but never actually
+    # validated against anything (found via a dead-code sweep — a
+    # `renewal_date` variable that was assigned but never read is
+    # exactly the kind of thing that flags a missing check, not just
+    # unused code). days_to_renewal (models.py) treats this as a
+    # forward-looking date, so the same start-date sanity check
+    # already applied to maturity_date/expiry_date belongs here too.
+    if start_date and renewal_date:
+        if renewal_date < start_date:
+            errors.append("Renewal date cannot be before start date.")
+
     # Duplicate policy number check (same user, different policy)
     policy_number = data.get("policy_number", "").strip()
     if policy_number:
