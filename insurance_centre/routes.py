@@ -580,8 +580,11 @@ def delete_document(doc_id):
         return redirect(redirect_url)
 
     delete_document_file(doc.file_path)
-    services.delete_document(_db(), doc, current_user.id)
-    flash("Document deleted.", "success")
+    ok, err = services.delete_document(_db(), doc, current_user.id)
+    if not ok:
+        flash(err, "error")
+    else:
+        flash("Document deleted.", "success")
 
     return redirect(redirect_url)
 

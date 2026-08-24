@@ -154,6 +154,15 @@ def validate_contribution(form):
         errors.append("Contribution date is required.")
     elif not _parse_date(date_raw):
         errors.append("Contribution date is invalid.")
+    else:
+        # Confirmed real gap during audit: every other date field of
+        # this shape in the app (opening_date, valuation dates,
+        # snapshot dates, girl-child DOB) already rejects a future
+        # date with this exact wording — a contribution represents
+        # money already given, so it can't logically be dated ahead
+        # of today. This field was the one omission.
+        if _parse_date(date_raw) > date.today():
+            errors.append("Contribution date cannot be in the future.")
 
     amount = _parse_float(form.get("amount"))
     if amount is None:
