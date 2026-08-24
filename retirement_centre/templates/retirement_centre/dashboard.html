@@ -208,19 +208,20 @@
     <h2 class="ret-section-title" style="margin-bottom:16px;">Recent Activity <span class="ret-activity-sub">— last {{ data.recent_activity|length }} activities</span></h2>
     <div class="ret-activity-list">
       {% for a in data.recent_activity %}
-      {% set badge_class = {
-        'Scheme Created': 'badge-created',
-        'Scheme Updated': 'badge-updated',
-        'Contribution Added': 'badge-created',
-        'Balance Updated': 'badge-updated',
-        'Document Uploaded': 'badge-document',
-        'Archived': 'badge-archived',
-        'Restored': 'badge-restored',
-      }.get(a.event_type, 'badge-default') %}
+      {% set badge_map = {
+        'Scheme Created':      ('🟢', 'badge-created'),
+        'Scheme Updated':      ('✏️', 'badge-updated'),
+        'Contribution Added':  ('💰', 'badge-created'),
+        'Balance Updated':     ('📊', 'badge-updated'),
+        'Document Uploaded':   ('📄', 'badge-document'),
+        'Archived':            ('📦', 'badge-archived'),
+        'Restored':            ('♻️', 'badge-restored'),
+      } %}
+      {% set badge = badge_map.get(a.event_type, ('📋', 'badge-default')) %}
       <div class="ret-activity-row">
-        <div class="ret-activity-dot {{ badge_class }}"></div>
+        <div class="ret-activity-badge {{ badge[1] }}">{{ badge[0] }}</div>
         <div class="ret-activity-content">
-          <div class="ret-activity-event {{ badge_class }}">{{ a.event_type|upper }}</div>
+          <div class="ret-activity-event {{ badge[1] }}">{{ a.event_type|upper }}</div>
           <div class="ret-activity-desc">{{ a.description }}</div>
           <div class="ret-activity-time">{{ format_date(a.created_at) }}</div>
         </div>
@@ -402,23 +403,20 @@
   .ret-activity-list { display: flex; flex-direction: column; }
   .ret-activity-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
   .ret-activity-row:last-child { border-bottom: none; }
-  .ret-activity-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+  .ret-activity-badge {
+    width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; font-size: 0.9rem; flex-shrink: 0; margin-top: 2px;
+  }
   .ret-activity-content { flex: 1; }
   .ret-activity-desc { font-size: 0.875rem; color: var(--text); line-height: 1.4; }
   .ret-activity-time { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
   .ret-activity-event { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
-  .badge-created  .ret-activity-event, .ret-activity-dot.badge-created  { color: var(--up); background: var(--up); }
-  .badge-updated  .ret-activity-event, .ret-activity-dot.badge-updated  { color: var(--accent); background: var(--accent); }
-  .badge-document .ret-activity-event, .ret-activity-dot.badge-document { color: #3B82F6; background: #3B82F6; }
-  .badge-archived .ret-activity-event, .ret-activity-dot.badge-archived { color: #D97706; background: #D97706; }
-  .badge-restored .ret-activity-event, .ret-activity-dot.badge-restored { color: var(--up); background: var(--up); }
-  .badge-default  .ret-activity-event, .ret-activity-dot.badge-default  { color: var(--muted); background: var(--muted); }
-  .ret-activity-dot.badge-created  { background: var(--up); }
-  .ret-activity-dot.badge-updated  { background: var(--accent); }
-  .ret-activity-dot.badge-document { background: #3B82F6; }
-  .ret-activity-dot.badge-archived { background: #D97706; }
-  .ret-activity-dot.badge-restored { background: var(--up); }
-  .ret-activity-dot.badge-default  { background: var(--muted); }
+  .badge-created  { background: var(--up-bg);     color: var(--up); }
+  .badge-updated  { background: var(--accent-bg); color: var(--accent); }
+  .badge-document { background: #EFF6FF;          color: #3B82F6; }
+  .badge-archived { background: #FEF3C7;          color: #D97706; }
+  .badge-restored { background: var(--up-bg);     color: var(--up); }
+  .badge-default  { background: var(--surface2);  color: var(--muted); }
 
   @media (max-width: 1024px) {
     .ret-category-grid { grid-template-columns: repeat(3, 1fr); }

@@ -173,6 +173,37 @@ def _liability_category_icons():
     }
 
 
+def _asset_category_to_doc_category(asset_category):
+    """
+    Sensible default Document Category when arriving at Add Document
+    from a specific Asset's own detail page — collapses what was
+    previously a two-step "figure out my own asset's category, then
+    hunt through all 10 document categories for the matching one"
+    into an immediately-scoped, ready-to-use Document Type list,
+    matching insurance_centre's behavior of landing on an
+    already-relevant form when arriving from a specific policy.
+    """
+    return {
+        "Real Estate": WealthDocumentCategory.PROPERTY,
+        "Precious Metals": WealthDocumentCategory.GOLD,
+        "Vehicles": WealthDocumentCategory.VEHICLE,
+        "Bank & Deposits": WealthDocumentCategory.BANKING,
+        "Investments": WealthDocumentCategory.INVESTMENTS,
+    }.get(asset_category, WealthDocumentCategory.OTHER)
+
+
+def _liability_category_to_doc_category(liability_category):
+    """Sensible default Document Category when arriving from a
+    specific Liability's own detail page — same rationale as
+    _asset_category_to_doc_category() above."""
+    return {
+        "Loans": WealthDocumentCategory.LOANS,
+        "Vehicle Finance": WealthDocumentCategory.VEHICLE,
+        "Credit": WealthDocumentCategory.LOANS,
+        "Family / Informal Debt": WealthDocumentCategory.FAMILY_ESTATE,
+    }.get(liability_category, WealthDocumentCategory.OTHER)
+
+
 def _asset_form_context(is_edit, asset, values):
     """Shared kwargs for rendering wealth_asset_form.html in either
     mode — single source of truth so Add and Edit templates can
@@ -876,6 +907,87 @@ def documents_vault():
     )
 
 
+def _parse_related_id(raw):
+    """
+    Parses the combined "Related To" dropdown's value (Section: merge
+    the two separate Asset/Liability dropdowns into one, matching
+    insurance_centre's single-relationship picker). Format is
+    "asset:123" / "liability:456" / "" (standalone document — still
+    fully supported, per Wealth's own document model allowing
+    documents with no Asset/Liability at all, e.g. a Will).
+    Returns (asset_id, liability_id) — exactly one is ever non-None.
+    """
+    if not raw or ":" not in raw:
+        return None, None
+    kind, _, value = raw.partition(":")
+    try:
+        entity_id = int(value)
+    except ValueError:
+        return None, None
+    if kind == "asset":
+        return entity_id, None
+    if kind == "liability":
+        return None, entity_id
+    return None, None
+
+
+def _related_to_category_map(assets, liabilities):
+    """
+    JS-consumable map of every existing Asset/Liability's combined
+    dropdown value -> its derived Document Category (Section: the
+    general form now leads with "which Asset/Liability" — picking
+    one must instantly scope Document Type client-side, the same way
+    the server-side scoped path already does, without a page reload).
+    """
+    m = {}
+    for a in assets:
+        m[f"asset:{a.id}"] = _asset_category_to_doc_category(a.category)
+    for l in liabilities:
+        m[f"liability:{l.id}"] = _liability_category_to_doc_category(l.category)
+    return m
+
+
+def _document_scoped_context(asset_id, liability_id, assets, liabilities):
+    """
+    Builds the "locked" context for the Add Document form when
+    arriving from a specific Asset/Liability's own detail page.
+
+    This is the fix for the deeper version of the original bug
+    report: pre-selecting the Category/Related-To fields (the
+    earlier fix) wasn't enough — the user still had to LOOK AT and
+    mentally confirm fields whose answer the app already knew,
+    exactly matching insurance_centre's policy_detail.html upload
+    form, which doesn't pre-select the Policy field, it REMOVES it
+    entirely (the policy ID lives in the route/URL, the form only
+    ever asks for Document Type + File + optional Title/Description).
+
+    Returns None for the general Documents Vault entry point (no
+    known context — Category and Related-To remain genuinely open
+    choices there, same as Insurance's own vault-level upload form
+    still shows a Policy dropdown when there's no specific policy
+    context). Returns a dict {label, category, related_id} when
+    scoped — the template uses this to hide the Category/Related-To
+    fields and render them as hidden inputs instead.
+    """
+    if asset_id:
+        a = next((a for a in assets if a.id == asset_id), None)
+        if a:
+            return {
+                "label": f"{a.name} ({a.category})",
+                "category": _asset_category_to_doc_category(a.category),
+                "related_id": f"asset:{a.id}",
+            }
+    elif liability_id:
+        l = next((l for l in liabilities if l.id == liability_id), None)
+        if l:
+            return {
+                "label": f"{l.name} ({l.category})",
+                "category": _liability_category_to_doc_category(l.category),
+                "related_id": f"liability:{l.id}",
+            }
+    return None
+
+
 @wealth_bp.route("/documents/add", methods=["GET", "POST"])
 @login_required
 def add_document():
@@ -883,14 +995,30 @@ def add_document():
 
     if request.method == "POST":
         file          = request.files.get("document")
-        category      = request.form.get("category", "").strip()
         document_type = request.form.get("document_type", "").strip()
         title         = request.form.get("title", "").strip()
         description   = request.form.get("description", "").strip()
-        asset_id      = request.form.get("asset_id", type=int)
-        liability_id  = request.form.get("liability_id", type=int)
+        related_raw   = request.form.get("related_id", "").strip()
+
+        # Scoped mode submits hidden category/related_id fields the
+        # user never sees; general mode now leads with "which
+        # existing Asset/Liability" (Section: matching
+        # insurance_centre's Vault-level form, which leads with
+        # "which existing Policy" rather than an abstract category
+        # list) — category is DERIVED from that choice, and only a
+        # real, user-facing field for a standalone document
+        # (related_raw == "standalone").
+        asset_id, liability_id = _parse_related_id(related_raw)
+        if related_raw == "standalone":
+            category = request.form.get("category", "").strip()
+        elif asset_id or liability_id:
+            category = request.form.get("derived_category", "").strip()
+        else:
+            category = ""
 
         errors = validators.validate_document(file, category, document_type)
+        if not related_raw:
+            errors.append("Please select which Asset or Liability this document belongs to, or choose a standalone document.")
         if errors:
             for e in errors:
                 flash(e, "error")
@@ -899,8 +1027,10 @@ def add_document():
                 assets=assets, liabilities=liabilities,
                 categories=WealthDocumentCategory.ALL,
                 document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+                related_to_category_map=_related_to_category_map(assets, liabilities),
                 values=request.form, preselect_asset_id=asset_id,
                 preselect_liability_id=liability_id,
+                scoped_context=_document_scoped_context(asset_id, liability_id, assets, liabilities),
             )
 
         try:
@@ -928,13 +1058,23 @@ def add_document():
     preselect_asset_id     = request.args.get("asset_id", type=int)
     preselect_liability_id = request.args.get("liability_id", type=int)
 
+    # Scoped context (Section: matching insurance_centre's
+    # policy_detail.html upload form, which drops the Policy field
+    # entirely rather than merely pre-selecting it — see
+    # _document_scoped_context() docstring for the full rationale).
+    scoped_context = _document_scoped_context(
+        preselect_asset_id, preselect_liability_id, assets, liabilities)
+
     return render_template(
         "wealth/document_form.html", is_edit=False, document=None,
         assets=assets, liabilities=liabilities,
         categories=WealthDocumentCategory.ALL,
         document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
-        values={}, preselect_asset_id=preselect_asset_id,
+        related_to_category_map=_related_to_category_map(assets, liabilities),
+        values={"category": scoped_context["category"]} if scoped_context else {},
+        preselect_asset_id=preselect_asset_id,
         preselect_liability_id=preselect_liability_id,
+        scoped_context=scoped_context,
     )
 
 
@@ -965,12 +1105,17 @@ def edit_document(document_id):
     assets, liabilities = _document_upload_options(current_user.id)
 
     if request.method == "POST":
-        category      = request.form.get("category", "").strip()
         document_type = request.form.get("document_type", "").strip()
         title         = request.form.get("title", "").strip()
         description   = request.form.get("description", "").strip()
-        asset_id      = request.form.get("asset_id", type=int)
-        liability_id  = request.form.get("liability_id", type=int)
+        related_raw   = request.form.get("related_id", "").strip()
+        asset_id, liability_id = _parse_related_id(related_raw)
+        if related_raw == "standalone":
+            category = request.form.get("category", "").strip()
+        elif asset_id or liability_id:
+            category = request.form.get("derived_category", "").strip()
+        else:
+            category = ""
 
         success, error = document_service.update_document_metadata(
             _db(), doc, current_user.id,
@@ -985,6 +1130,7 @@ def edit_document(document_id):
                 assets=assets, liabilities=liabilities,
                 categories=WealthDocumentCategory.ALL,
                 document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+                related_to_category_map=_related_to_category_map(assets, liabilities),
                 values=request.form,
                 preselect_asset_id=asset_id, preselect_liability_id=liability_id,
             )
@@ -992,15 +1138,24 @@ def edit_document(document_id):
         flash("Document updated successfully.", "success")
         return redirect(url_for("wealth.document_detail", document_id=doc.id))
 
+    if doc.asset_id:
+        related_id_value = f"asset:{doc.asset_id}"
+    elif doc.liability_id:
+        related_id_value = f"liability:{doc.liability_id}"
+    else:
+        related_id_value = "standalone"
+
     values = {
         "title": doc.title or "", "description": doc.description or "",
         "category": doc.category, "document_type": doc.document_type,
+        "related_id": related_id_value,
     }
     return render_template(
         "wealth/document_form.html", is_edit=True, document=doc,
         assets=assets, liabilities=liabilities,
         categories=WealthDocumentCategory.ALL,
         document_types_by_category=DOCUMENT_TYPES_BY_CATEGORY,
+        related_to_category_map=_related_to_category_map(assets, liabilities),
         values=values,
         preselect_asset_id=doc.asset_id, preselect_liability_id=doc.liability_id,
     )
