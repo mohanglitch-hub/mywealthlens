@@ -217,7 +217,17 @@ class RetirementStatisticsService:
         return sum(s.current_balance or 0 for s in schemes)
 
     def current_fy_contributions(self):
-        """Sum of contributions recorded in the current Indian FY."""
+        """
+        Sum of contributions recorded in the current Indian FY.
+
+        Filters to active (non-archived) schemes only — confirmed by
+        direct testing as a real bug: archiving a scheme with a
+        recorded contribution dropped total_corpus to 0 but left this
+        figure unchanged, showing two contradictory numbers on the
+        same dashboard for the same underlying archive action. Every
+        other method on this class already scopes to active schemes
+        via _active_schemes_query(); this one just hadn't.
+        """
         start, end = financial_year_bounds(current_financial_year())
         total = (
             RetirementContribution.query
@@ -225,6 +235,7 @@ class RetirementStatisticsService:
                   RetirementContribution.scheme_id == RetirementScheme.id)
             .filter(
                 RetirementScheme.user_id == self.user_id,
+                RetirementScheme.is_archived == False,
                 RetirementContribution.contribution_date >= start,
                 RetirementContribution.contribution_date <= end,
             )
