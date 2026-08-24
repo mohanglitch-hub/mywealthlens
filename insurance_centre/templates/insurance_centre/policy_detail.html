@@ -1,41 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ policy.display_type }} — Insurance Centre<!-- Modal system -->
-<div class="mwl-modal-overlay" id="mwlModal">
-  <div class="mwl-modal">
-    <div class="mwl-modal-brand">MyWealthLens · Insurance Centre</div>
-    <div class="mwl-modal-title" id="mwlModalTitle"></div>
-    <div class="mwl-modal-body"  id="mwlModalBody"></div>
-    <div class="mwl-modal-actions">
-      <button class="mwl-modal-cancel"  id="mwlModalCancel">Cancel</button>
-      <button class="mwl-modal-confirm" id="mwlModalConfirm">Confirm</button>
-    </div>
-  </div>
-</div>
-
-<style>
-  .mwl-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(2px);}
-  .mwl-modal-overlay.active{display:flex;}
-  .mwl-modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;max-width:440px;width:90%;box-shadow:var(--shadow-lg);}
-  .mwl-modal-brand{font-size:0.72rem;color:var(--accent);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:12px;}
-  .mwl-modal-title{font-size:1.1rem;font-weight:700;color:var(--text);margin-bottom:10px;}
-  .mwl-modal-body{font-size:0.875rem;color:var(--text2);line-height:1.6;margin-bottom:24px;}
-  .mwl-modal-actions{display:flex;gap:10px;justify-content:flex-end;}
-  .mwl-modal-cancel{background:var(--surface2);color:var(--text2);border:1px solid var(--border);border-radius:8px;padding:9px 18px;font-size:0.875rem;font-family:var(--font-ui);cursor:pointer;}
-  .mwl-modal-confirm{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:9px 18px;font-size:0.875rem;font-weight:700;font-family:var(--font-ui);cursor:pointer;}
-  .mwl-modal-confirm.danger{background:var(--down);}
-  .ic-btn-restore{background:var(--up-bg);color:var(--up);border:1px solid var(--up);border-radius:8px;padding:10px 18px;font-size:0.82rem;font-weight:600;font-family:var(--font-ui);cursor:pointer;transition:all 0.2s;}
-  .ic-btn-restore:hover{background:var(--up);color:#fff;}
-  .ic-btn-delete-perm{background:none;color:var(--down);border:1px solid var(--down);border-radius:8px;padding:10px 18px;font-size:0.82rem;font-weight:600;font-family:var(--font-ui);cursor:pointer;transition:all 0.2s;}
-  .ic-btn-delete-perm:hover{background:var(--down);color:#fff;}
-</style>
-
-
-
-
-
-
-
-{% endblock %}
+{% block title %}{{ policy.display_type }} — Insurance Centre{% endblock %}
 
 {% block content %}
 <div class="ic-wrap">

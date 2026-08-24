@@ -1,51 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{% if is_edit %}Edit Policy{% else %}Add Policy{% endif %} — Insurance Centre
-</script>
-
-<!-- ── MyWealthLens Modal ── -->
-<div class="mwl-modal-overlay" id="mwlModal">
-  <div class="mwl-modal">
-    <div class="mwl-modal-brand">MyWealthLens · Insurance Centre</div>
-    <div class="mwl-modal-title" id="mwlModalTitle"></div>
-    <div class="mwl-modal-body"  id="mwlModalBody"></div>
-    <div class="mwl-modal-actions">
-      <button class="mwl-modal-cancel"  id="mwlModalCancel">Cancel</button>
-      <button class="mwl-modal-confirm" id="mwlModalConfirm">Confirm</button>
-    </div>
-  </div>
-</div>
-
-<script>
-function showModal(title, body, onConfirm, confirmText, cancelText, isDanger) {
-  document.getElementById('mwlModalTitle').innerHTML   = title || '';
-  document.getElementById('mwlModalBody').innerHTML    = body  || '';
-  document.getElementById('mwlModalConfirm').textContent = confirmText || 'Confirm';
-  document.getElementById('mwlModalCancel').textContent  = cancelText  || 'Cancel';
-  const btn = document.getElementById('mwlModalConfirm');
-  btn.className = 'mwl-modal-confirm' + (isDanger ? ' danger' : '');
-
-  if (!onConfirm) {
-    document.getElementById('mwlModalConfirm').style.display = 'none';
-    document.getElementById('mwlModalCancel').textContent = cancelText || 'OK';
-  } else {
-    document.getElementById('mwlModalConfirm').style.display = '';
-    btn.onclick = function() {
-      closeModal();
-      onConfirm();
-    };
-  }
-
-  document.getElementById('mwlModal').classList.add('active');
-  document.getElementById('mwlModalCancel').onclick = closeModal;
-  document.getElementById('mwlModal').onclick = function(e) {
-    if (e.target === this) closeModal();
-  };
-}
-
-function closeModal() {
-  document.getElementById('mwlModal').classList.remove('active');
-}
-{% endblock %}
+{% block title %}{% if is_edit %}Edit Policy{% else %}Add Policy{% endif %} — Insurance Centre{% endblock %}
 
 {% block content %}
 <div class="ic-wrap">
@@ -764,10 +718,18 @@ function updateRemainingPercentage() {
 // ── Form submit ───────────────────────────────────────────────────
 document.getElementById('addPolicyForm').addEventListener('submit', function(e) {
   const cat = document.getElementById('categorySelect').value;
-  if (!cat) { e.preventDefault(); alert('Please select an insurance category.'); return; }
+  if (!cat) {
+    e.preventDefault();
+    showModal('Category Required', 'Please select an insurance category.', null, null, 'OK');
+    return;
+  }
 
   const type = document.getElementById('typeSelect').value;
-  if (!type) { e.preventDefault(); alert('Please select an insurance type.'); return; }
+  if (!type) {
+    e.preventDefault();
+    showModal('Type Required', 'Please select an insurance type.', null, null, 'OK');
+    return;
+  }
 
   if (cat === 'Life Insurance' && !validateNomineePercentages()) {
     e.preventDefault(); return;
