@@ -15,7 +15,7 @@ from datetime import datetime, date
 from sqlalchemy import func
 
 from .models import (
-    RetirementScheme, RetirementContribution, RetirementBalanceSnapshot,
+    RetirementScheme, RetirementContribution,
     RetirementSchemeNominee, RetirementDocument, RetirementTimeline,
     RetirementTimelineEvent, SchemeType, SchemeStatus, GrowthMethod,
     ContributionEntryType,
@@ -659,23 +659,6 @@ def group_contributions(contributions, group_by):
         groups[label]["entries"].append(c)
 
     return [groups[l] for l in order]
-
-
-# ── Balance Snapshots (Phase C, Part 3) ───────────────────────────────────────
-
-# ── Balance Snapshots (legacy — Update Balance removed) ──────────────────────
-# update_balance() was removed at the user's request: with Interest
-# Credited entries now available in Contribution History, interest
-# gets logged as its own entry rather than via a separate balance
-# override. get_balance_history() is kept for any historical snapshot
-# rows that already exist from before this change — nothing new
-# creates snapshots going forward.
-
-def get_balance_history(scheme_id):
-    return (RetirementBalanceSnapshot.query
-            .filter_by(scheme_id=scheme_id)
-            .order_by(RetirementBalanceSnapshot.balance_date.desc())
-            .all())
 
 
 # ── Nominees (Phase C, Part 4) ─────────────────────────────────────────────────

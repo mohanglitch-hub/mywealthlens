@@ -178,27 +178,6 @@ def validate_contribution(form):
     return errors
 
 
-# ── Balance Update Validation (Phase C) ───────────────────────────────────────
-
-def validate_balance_update(form):
-    """Validate a balance-update submission (creates a snapshot)."""
-    errors = []
-
-    balance = _parse_float(form.get("new_balance"))
-    if balance is None:
-        errors.append("New balance is required.")
-    elif balance < 0:
-        errors.append("Balance cannot be negative.")
-
-    date_raw = form.get("balance_date")
-    if not date_raw:
-        errors.append("Balance date is required.")
-    elif not _parse_date(date_raw):
-        errors.append("Balance date is invalid.")
-
-    return errors
-
-
 # ── Nominee Validation (Phase C) ──────────────────────────────────────────────
 
 def validate_nominee(form):
