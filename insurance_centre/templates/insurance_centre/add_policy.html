@@ -184,6 +184,19 @@
       <div class="ic-form-grid-2">
         <div class="ic-field">
           <label class="ic-label">Policy Status</label>
+          {% if is_edit and policy.is_archived %}
+          <!-- Section: same fix as retirement_centre's scheme_form.html
+               — editing an archived policy is explicitly allowed for
+               every other field, but Status must never be silently
+               touched by an unrelated edit. Locked to a read-only
+               display, with a hidden input carrying the real value
+               through, so this field only ever changes via the
+               dedicated Restore button. -->
+          <div class="ic-status-locked">
+            🗄 Archived — use <strong>Restore</strong> on this policy's page to reactivate it before changing its status.
+          </div>
+          <input type="hidden" name="status" value="Archived" />
+          {% else %}
           <select name="status" class="ic-select">
             {% for s in policy_statuses %}
             {% if s != 'Archived' %}
@@ -194,6 +207,7 @@
             {% endif %}
             {% endfor %}
           </select>
+          {% endif %}
         </div>
         <div class="ic-field">
           <label class="ic-label">Policy Start Date</label>
@@ -496,6 +510,12 @@
   .ic-field:last-child{ margin-bottom:0; }
   .ic-label          { font-size:0.78rem; font-weight:600; color:var(--muted2); letter-spacing:0.06em; text-transform:uppercase; }
   .ic-required       { color:var(--down); }
+
+  .ic-status-locked {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 11px 14px; font-size: 0.88rem; color: var(--text2); line-height: 1.5;
+  }
+  .ic-status-locked strong { color: var(--text); }
 
   .ic-input, .ic-select, .ic-textarea {
     background:var(--surface2); border:1px solid var(--border);

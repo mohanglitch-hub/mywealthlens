@@ -481,7 +481,21 @@ def save_document_metadata(db, policy, user_id,
 
 
 def delete_document(db, doc, user_id):
-    """Remove document metadata. Caller must delete the actual file."""
+    """
+    Remove document metadata. Caller must delete the actual file.
+
+    Confirmed real inconsistency during audit: every other function in
+    this file (archive_policy, add_nominee, etc.) checks ownership
+    before acting, and retirement_centre's equivalent delete_document
+    already does the same — this one silently omitted it, taking
+    user_id only for the timeline log. Not currently exploitable
+    through the live app (the route already scopes its query by
+    user_id before ever reaching this function), but the function
+    itself provided zero protection on its own, unlike every sibling.
+    Brought in line with the established (bool, error) pattern.
+    """
+    if doc.user_id != user_id:
+        return False, "You do not have permission to delete this document."
     policy_id = doc.policy_id
     name = doc.original_name
     db.session.delete(doc)
@@ -489,6 +503,7 @@ def delete_document(db, doc, user_id):
                  TimelineEvent.DOCUMENT_DELETED,
                  f"Document removed: {name}")
     db.session.commit()
+    return True, None
 
 
 # ── Query Helpers ─────────────────────────────────────────────────────────────
