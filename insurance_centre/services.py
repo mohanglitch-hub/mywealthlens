@@ -13,7 +13,7 @@ from .models import (
     PolicyStatus, TimelineEvent, InsuranceCategory,
     InsuranceType, PremiumFrequency
 )
-from .validators import validate_policy, validate_nominee, ValidationError
+from .validators import validate_policy, validate_nominee
 
 
 # ── Timeline Helper ───────────────────────────────────────────────────────────
