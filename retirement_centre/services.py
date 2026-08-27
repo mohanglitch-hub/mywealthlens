@@ -18,7 +18,7 @@ from .models import (
     RetirementScheme, RetirementContribution,
     RetirementSchemeNominee, RetirementDocument, RetirementTimeline,
     RetirementTimelineEvent, SchemeType, SchemeStatus, GrowthMethod,
-    ContributionEntryType,
+    ContributionEntryType, RETIREMENT_CATEGORY_GROUPS, RETIREMENT_CATEGORY_ORDER,
 )
 from .utils import (current_financial_year, financial_year_bounds,
                     fy_quarter_label, fy_half_label, month_label,
@@ -290,7 +290,6 @@ class RetirementStatisticsService:
         returns all five, even with 0 schemes, so the dashboard shows
         '0 Schemes' rather than silently omitting a category card.
         """
-        from .models import RETIREMENT_CATEGORY_GROUPS, RETIREMENT_CATEGORY_ORDER
         start, end = financial_year_bounds(current_financial_year())
         schemes = self._active_schemes_query().all()
 
@@ -320,7 +319,6 @@ class RetirementStatisticsService:
         """Number of the five display categories that have at least
         one active scheme — used for the 'Across N categories' stat
         card subtext."""
-        from .models import RETIREMENT_CATEGORY_GROUPS
         schemes = self._active_schemes_query().all()
         types_present = {s.scheme_type for s in schemes}
         return sum(1 for types in RETIREMENT_CATEGORY_GROUPS.values()
@@ -868,8 +866,6 @@ def get_vault_documents(user_id, q=None, category=None, doc_type=None,
     joined with scheme info for display and filtering. Never queries
     another user's data — always scoped by user_id (Section 17).
     """
-    from .models import RETIREMENT_CATEGORY_GROUPS
-
     query = (RetirementDocument.query
              .join(RetirementScheme,
                    RetirementDocument.scheme_id == RetirementScheme.id)
@@ -902,8 +898,6 @@ def get_vault_documents(user_id, q=None, category=None, doc_type=None,
 def vault_summary(user_id):
     """Total document count + per-category counts for the Vault's
     summary cards. Never fabricated — counts real rows only."""
-    from .models import RETIREMENT_CATEGORY_GROUPS, RETIREMENT_CATEGORY_ORDER
-
     all_docs = get_vault_documents(user_id)
     by_category = []
     for cat_name in RETIREMENT_CATEGORY_ORDER:

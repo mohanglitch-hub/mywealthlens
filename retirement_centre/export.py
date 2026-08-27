@@ -21,7 +21,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     HRFlowable, KeepTogether,
@@ -29,7 +29,7 @@ from reportlab.platypus import (
 
 from . import services
 from .models import RetirementScheme, SchemeType
-from .utils import format_inr, format_date, current_financial_year, financial_year_bounds
+from .utils import format_inr, format_date
 
 # ── Shared colours (matches app.py / insurance_centre's dark theme) ──────────
 _TEAL   = colors.HexColor("#00d4aa")
