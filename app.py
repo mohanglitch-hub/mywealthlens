@@ -1,22 +1,17 @@
-from flask import Flask, jsonify, render_template, redirect, url_for, request, flash, session
+from flask import Flask, render_template, redirect, url_for, request, flash, session
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import bcrypt, pdfplumber, io, re, os, secrets, yfinance as yf
 from datetime import datetime as dt, timedelta
-from models import db, User, MutualFund, Stock, Goal, UserProfile, NetWorthHistory, Family, FamilyMember, FamilyInvite
+from models import db, User, MutualFund, Stock, Goal, NetWorthHistory
 from insurance_centre import insurance_bp
 from retirement_centre import retirement_bp
 from wealth import wealth_bp
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory
-from insurance_centre.models import (
-    InsurancePolicy, InsuranceNominee, InsuranceMember,
-    InsuranceAddon, InsuranceDocument, InsuranceTimeline,
-    InsuranceCategory, InsuranceType, PolicyStatus,
-    PremiumFrequency, DocumentType, TimelineEvent
-)
+from insurance_centre.models import InsuranceDocument
 
 app = Flask(__name__)
 
@@ -571,7 +566,6 @@ def delete_all_stocks():
     return redirect(url_for('upload'))
 
 def calculate_goal(target_amt, target_year, current_savings, monthly_sip, annual_return, inflation_rate=0):
-    import math as _math
     from datetime import datetime as _dt
     current_year = _dt.now().year
     years  = max(target_year - current_year, 0)
@@ -647,7 +641,7 @@ def add_goal():
     )
     db.session.add(goal)
     db.session.commit()
-    flash(f'Goal added successfully!', 'success')
+    flash('Goal added successfully!', 'success')
     return redirect(url_for('goals'))
 
 @app.route('/goals/delete/<int:goal_id>', methods=['POST'])
@@ -669,13 +663,11 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
                                 TableStyle, HRFlowable, KeepTogether)
-from reportlab.platypus import PageBreak
 import openpyxl
-from openpyxl.styles import (Font, PatternFill, Alignment, Border, Side,
-                             GradientFill)
+from openpyxl.styles import (Font, PatternFill, Alignment, Border, Side)
 from openpyxl.utils import get_column_letter
 import io as _io
 from datetime import datetime as _dt
@@ -766,8 +758,6 @@ def _sip_projection(target_amt, target_year, current_savings, monthly_sip, annua
 
     # Yearly milestones after month 12
     balance_after_12 = rows[-1][1]
-    months_done = 12
-    total_months = (target_year - cur_year) * 12 - cur_month + 1
     for yr in range(cur_year + 1, target_year + 1):
         months_to_yr = (yr - cur_year) * 12 - cur_month + 1
         if months_to_yr <= 12:
@@ -1059,7 +1049,6 @@ def export_excel():
     MUTED_HEX = '64748B'
     GREEN_HEX = '22C55E'
     RED_HEX   = 'EF4444'
-    AMBER_HEX = 'F59E0B'
 
     def _fill(hex_): return PatternFill('solid', fgColor=hex_)
     def _font(hex_=WHITE_HEX, bold=False, sz=10):
