@@ -24,9 +24,10 @@ from .models import (
     RetirementDocument, SchemeType, SchemeStatus, GrowthMethod,
     ContributionPreference, NPSTier, NomineeRelation, RetirementDocumentType,
     scheme_type_to_category, category_to_slug,
+    RETIREMENT_CATEGORY_ORDER, RETIREMENT_CATEGORY_GROUPS,
 )
 from .utils import (
-    format_inr, format_date, financial_year_bounds, mask_account_number,
+    format_inr, format_date, mask_account_number,
     save_document_file, delete_document_file, secure_file_path,
     is_previewable, get_preview_mimetype, current_financial_year,
 )
@@ -183,8 +184,6 @@ def _form_template_context(is_edit, scheme, values, back_category=None):
     category page keeps you in that category's context instead of
     always dropping you back at the main dashboard.
     """
-    from .models import category_to_slug
-
     return dict(
         is_edit=is_edit,
         scheme=scheme,
@@ -553,8 +552,6 @@ def document_vault():
     navigate straight to "my EPF documents" or "this specific PPF
     account's documents" rather than scanning one long flat list.
     """
-    from .models import RETIREMENT_CATEGORY_ORDER, RetirementDocumentType, scheme_type_to_category
-
     q        = request.args.get("q", "").strip()
     category = request.args.get("category", "")
     doc_type = request.args.get("doc_type", "")
@@ -786,8 +783,6 @@ def manage_schemes():
     card click (Phase F, Sections 14 & 15) — one implementation for
     both, per the "reuse existing architecture" instruction.
     """
-    from .models import RETIREMENT_CATEGORY_GROUPS, RETIREMENT_CATEGORY_ORDER
-
     q             = request.args.get("q", "").strip()
     category      = request.args.get("category", "")
     status_filter = request.args.get("status", "active")

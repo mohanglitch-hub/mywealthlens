@@ -10,6 +10,8 @@ project's existing per-module utils.py convention.
 """
 
 from datetime import date, datetime as _dt
+import mimetypes
+from flask import current_app
 
 
 # ── Display Helpers ───────────────────────────────────────────────────────────
@@ -149,7 +151,6 @@ def secure_file_path(file_path, scheme_id):
     Validate that file_path is within the expected scheme documents
     directory. Prevents path-traversal attacks.
     """
-    from flask import current_app
     expected_base = os.path.join(
         current_app.instance_path, "documents", "retirement", str(scheme_id)
     )
@@ -167,14 +168,7 @@ def is_previewable(filename):
 
 
 def get_preview_mimetype(filename):
-    ext = os.path.splitext(filename)[1].lower()
-    mimetypes = {
-        ".pdf":  "application/pdf",
-        ".jpg":  "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png":  "image/png",
-    }
-    return mimetypes.get(ext, "application/octet-stream")
+    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
 # ── Display Masking ───────────────────────────────────────────────────────────
