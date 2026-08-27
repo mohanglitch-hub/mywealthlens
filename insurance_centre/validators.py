@@ -5,18 +5,13 @@ All validation logic for the Insurance Centre.
 Returns lists of error strings. Empty list = valid.
 """
 
+import os
 from datetime import date
-from models import db
 from .models import (
     InsurancePolicy, InsuranceCategory, InsuranceType,
     PolicyStatus, PremiumFrequency, NomineeRelation,
-    MemberRelation, MotorAddonType
+    MemberRelation, DocumentType
 )
-
-
-class ValidationError(Exception):
-    """Raised when validation fails."""
-    pass
 
 
 # ── Policy Validation ─────────────────────────────────────────────────────────
@@ -171,7 +166,6 @@ def validate_member(data, policy):
     """Validate health insured member data."""
     errors = []
 
-    from .models import InsuranceCategory
     if policy.category != InsuranceCategory.HEALTH:
         errors.append("Members can only be added to Health Insurance policies.")
         return errors
@@ -209,7 +203,6 @@ def validate_document(file, doc_type):
     """
     errors = []
 
-    from .models import DocumentType
     if not file or not file.filename:
         errors.append("No file selected.")
         return errors
@@ -219,7 +212,6 @@ def validate_document(file, doc_type):
 
     # Allowed extensions
     allowed = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx"}
-    import os
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in allowed:
         errors.append(

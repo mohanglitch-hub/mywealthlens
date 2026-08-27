@@ -5,19 +5,20 @@ Lightweight route handlers. All business logic is in services.py.
 Routes only handle: request parsing, auth, calling services, response.
 """
 
+import os
 from flask import (
     render_template, redirect, url_for, request,
-    flash, jsonify, send_file, abort, current_app
+    flash, jsonify, send_file, abort
 )
 from flask_login import login_required, current_user
 
 from . import insurance_bp
 from .models import (
     InsurancePolicy, InsuranceNominee, InsuranceMember,
-    InsuranceAddon, InsuranceDocument, InsuranceTimeline,
+    InsuranceDocument,
     InsuranceCategory, InsuranceType, PolicyStatus,
     PremiumFrequency, NomineeRelation, MemberRelation,
-    MotorAddonType, DocumentType, TimelineEvent
+    MotorAddonType, DocumentType
 )
 from . import services
 
@@ -29,7 +30,8 @@ def _db():
 
 from . import validators
 from .utils import (
-    save_document_file, delete_document_file,
+    save_document_file, delete_document_file, secure_file_path,
+    is_previewable, get_preview_mimetype,
     renewal_badge, format_inr, format_date,
     category_to_slug, slug_to_category
 )
@@ -316,7 +318,6 @@ def delete_policy_permanent(policy_id):
                                 policy_id=policy_id))
 
     # Delete all related documents' PHYSICAL FILES from disk.
-    from .utils import delete_document_file
     for doc in policy.documents.all():
         delete_document_file(doc.file_path)
 
@@ -369,7 +370,6 @@ def renew_policy(policy_id):
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=policy_id))
 
-    from .utils import _parse_date
     from datetime import datetime
 
     new_renewal = datetime.strptime(
@@ -392,8 +392,6 @@ def renew_policy(policy_id):
 @login_required
 def category_view(slug):
     """Dedicated category page — shows only policies for that category."""
-    from .models import InsuranceCategory
-
     category = slug_to_category(slug)
     if category not in InsuranceCategory.ALL:
         abort(404)
@@ -535,7 +533,6 @@ def upload_document(policy_id):
                                 policy_id=policy_id))
 
     try:
-        from .utils import save_document_file
         stored_name, file_path, file_size = save_document_file(file, policy_id)
     except OSError as e:
         flash(f"File could not be saved: {e}", "error")
@@ -563,8 +560,6 @@ def delete_document(doc_id):
     """Delete document — removes file and metadata. Validates ownership.
     Redirects back to wherever the delete was triggered from (policy
     detail page or the Document Vault) via a 'next' form field."""
-    from insurance_centre.models import InsuranceDocument
-
     doc = InsuranceDocument.query.filter_by(
         id=doc_id, user_id=current_user.id).first_or_404()
     policy_id = doc.policy_id
@@ -574,7 +569,6 @@ def delete_document(doc_id):
                     else url_for("insurance_centre.policy_detail", policy_id=policy_id))
 
     # Security: verify file is within expected directory
-    from .utils import delete_document_file, secure_file_path
     if doc.file_path and not secure_file_path(doc.file_path, policy_id):
         flash("Invalid file path — operation denied.", "error")
         return redirect(redirect_url)
@@ -593,19 +587,15 @@ def delete_document(doc_id):
 @login_required
 def download_document(doc_id):
     """Download document — validates ownership, preserves original filename."""
-    from insurance_centre.models import InsuranceDocument
-
     doc = InsuranceDocument.query.filter_by(
         id=doc_id, user_id=current_user.id).first_or_404()
 
-    import os
     if not doc.file_path or not os.path.exists(doc.file_path):
         flash("File not found on server.", "error")
         return redirect(url_for("insurance_centre.policy_detail",
                                 policy_id=doc.policy_id))
 
     # Security: verify path is within expected directory
-    from .utils import secure_file_path
     if not secure_file_path(doc.file_path, doc.policy_id):
         flash("Invalid file path — operation denied.", "error")
         return redirect(url_for("insurance_centre.policy_detail",
@@ -622,13 +612,8 @@ def download_document(doc_id):
 @login_required
 def preview_document(doc_id):
     """Preview document inline in browser (PDF and images only)."""
-    from insurance_centre.models import InsuranceDocument
-
     doc = InsuranceDocument.query.filter_by(
         id=doc_id, user_id=current_user.id).first_or_404()
-
-    import os
-    from .utils import is_previewable, get_preview_mimetype, secure_file_path
 
     if not doc.file_path or not os.path.exists(doc.file_path):
         flash("File not found on server.", "error")
@@ -689,7 +674,7 @@ def export_pdf():
     """Export all active policies to branded PDF."""
     try:
         from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle
         from reportlab.lib.units import cm
         from reportlab.lib import colors
         from reportlab.platypus import (SimpleDocTemplate, Paragraph,
@@ -711,7 +696,6 @@ def export_pdf():
         title="MyWealthLens — Insurance Centre",
         author=current_user.name)
 
-    styles  = getSampleStyleSheet()
     ACCENT  = colors.HexColor("#0F766E")
     LIGHT   = colors.HexColor("#F0FDF9")
     BORDER  = colors.HexColor("#E2E8F0")
@@ -965,7 +949,6 @@ def upload_document_vault():
         return redirect(url_for("insurance_centre.document_vault"))
 
     try:
-        from .utils import save_document_file
         stored_name, file_path, file_size = save_document_file(file, policy_id)
     except OSError as e:
         flash(f"File could not be saved: {e}", "error")

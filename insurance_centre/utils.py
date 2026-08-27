@@ -6,8 +6,10 @@ Shared helpers used across services and routes.
 
 import os
 import uuid
-from datetime import date, timedelta
+import mimetypes
+from datetime import date
 from flask import current_app
+from .models import PremiumFrequency
 
 
 # ── Document Storage ──────────────────────────────────────────────────────────
@@ -79,10 +81,10 @@ def format_date(d, fmt="%d %b %Y"):
         return "—"
     try:
         # Handle both date and datetime objects
-        from datetime import datetime as _dt, date as _date
+        from datetime import datetime as _dt
         if isinstance(d, _dt):
             return d.strftime(fmt)
-        if isinstance(d, _date):
+        if isinstance(d, date):
             return d.strftime(fmt)
         # Try parsing string
         return _dt.strptime(str(d)[:10], "%Y-%m-%d").strftime(fmt)
@@ -92,7 +94,6 @@ def format_date(d, fmt="%d %b %Y"):
 
 def annual_premium(amount, frequency):
     """Convert any premium frequency to annual equivalent."""
-    from .models import PremiumFrequency
     multipliers = {
         PremiumFrequency.MONTHLY:     12,
         PremiumFrequency.QUARTERLY:   4,
@@ -158,22 +159,13 @@ PREVIEWABLE_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 
 def is_previewable(filename):
     """Check if a file can be previewed in browser."""
-    import os
     ext = os.path.splitext(filename)[1].lower()
     return ext in PREVIEWABLE_EXTENSIONS
 
 
 def get_preview_mimetype(filename):
     """Return MIME type for inline preview."""
-    import os
-    ext = os.path.splitext(filename)[1].lower()
-    mimetypes = {
-        ".pdf":  "application/pdf",
-        ".jpg":  "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png":  "image/png",
-    }
-    return mimetypes.get(ext, "application/octet-stream")
+    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
 
 def secure_file_path(file_path, policy_id):
@@ -181,8 +173,6 @@ def secure_file_path(file_path, policy_id):
     Validate that file_path is within the expected policy documents directory.
     Prevents directory traversal attacks.
     """
-    import os
-    from flask import current_app
     expected_base = os.path.join(
         current_app.instance_path, "documents", "insurance", str(policy_id)
     )
