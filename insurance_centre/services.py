@@ -5,13 +5,14 @@ Business logic layer. Routes call these functions.
 No Flask request/response objects here — pure Python.
 """
 
+import logging
 from datetime import datetime, date
 from models import db
 from .models import (
     InsurancePolicy, InsuranceNominee, InsuranceMember,
     InsuranceAddon, InsuranceDocument, InsuranceTimeline,
     PolicyStatus, TimelineEvent, InsuranceCategory,
-    InsuranceType, PremiumFrequency
+    PremiumFrequency
 )
 from .validators import validate_policy, validate_nominee
 
@@ -753,7 +754,6 @@ def get_dashboard_data(user_id):
             "due_soon_policies": renewals_soon,
         }
     except Exception as e:
-        import logging
         logging.error(f"Dashboard data error for user {user_id}: {e}")
         return {
             "policy_count": 0, "total_coverage": 0, "total_premium": 0,
@@ -792,7 +792,6 @@ def get_policy_with_related(policy_id, user_id):
                              InsuranceTimeline.created_at.desc()).limit(20).all(),
         }
     except Exception as e:
-        import logging
         logging.error(f"get_policy_with_related error: {e}")
         return None
 
