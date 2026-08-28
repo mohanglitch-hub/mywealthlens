@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Family Centre — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="fc-wrap">
+
+  <div class="fc-header">
+    <div>
+      <h1 class="fc-title">👪 Family Centre</h1>
+      <p class="fc-sub">Everyone connected to your financial life — who you've named as a nominee, and who your family wealth came from.</p>
+    </div>
+  </div>
+
+  <div class="fc-stats">
+    <div class="fc-stat-card">
+      <div class="fc-stat-label">People</div>
+      <div class="fc-stat-value">{{ people_count }}</div>
+    </div>
+    <div class="fc-stat-card">
+      <div class="fc-stat-label">Nominee Entries</div>
+      <div class="fc-stat-value">{{ total_nominee_entries }}</div>
+    </div>
+    <div class="fc-stat-card">
+      <div class="fc-stat-label">Family &amp; Inherited Assets</div>
+      <div class="fc-stat-value">{{ total_benefactor_entries }}</div>
+    </div>
+  </div>
+
+  {% if people %}
+  <div class="fc-people">
+    {% for person in people %}
+    <div class="fc-person-card">
+      <div class="fc-person-header">
+        <div class="fc-person-avatar">{{ person.display_name[0]|upper }}</div>
+        <div>
+          <div class="fc-person-name">{{ person.display_name }}</div>
+          <div class="fc-person-count">{{ person.entries|length }} connection{{ 's' if person.entries|length != 1 }}</div>
+        </div>
+      </div>
+      <div class="fc-entries">
+        {% for e in person.entries %}
+        <a href="{{ e.link }}" class="fc-entry">
+          <div class="fc-entry-main">
+            {% if e.direction == 'nominee' %}
+              <div class="fc-entry-line">
+                <span class="fc-entry-tag fc-tag-nominee">Nominee</span>
+                <span class="fc-entry-item">{{ e.item_name }}</span>
+              </div>
+              <div class="fc-entry-detail">
+                {{ e.relationship }}{% if e.percentage %} · {{ e.percentage }}% share{% endif %} · {{ e.source }}
+              </div>
+            {% else %}
+              <div class="fc-entry-line">
+                <span class="fc-entry-tag fc-tag-benefactor">Gave You</span>
+                <span class="fc-entry-item">{{ e.item_name }}</span>
+              </div>
+              <div class="fc-entry-detail">
+                {% if e.relationship %}{{ e.relationship }} · {% endif %}{{ e.detail }}{% if e.date_received %} · Received {{ e.date_received.strftime('%d %b %Y') }}{% endif %}
+              </div>
+            {% endif %}
+          </div>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="fc-empty-state">
+    <div class="fc-empty-title">No one recorded yet</div>
+    <div class="fc-empty-sub">
+      Add a nominee to an Insurance policy or Retirement scheme, or mark a Wealth asset as
+      Inherited / Gifted / Family Owned with who it came from — they'll show up here automatically.
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="fc-note">
+    People are grouped by name — two entries with the exact same name (ignoring case and spacing)
+    are treated as the same person. If a nominee's name is spelled differently in two places,
+    they'll show up here as two separate people until the spelling matches.
+  </div>
+
+</div>
+
+<style>
+  .fc-wrap { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
+  .fc-header { display:flex; justify-content:space-between; align-items:flex-start; }
+  .fc-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+  .fc-sub { font-size:0.88rem; color:var(--muted); max-width:520px; }
+
+  .fc-stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+  .fc-stat-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:16px 18px; box-shadow:var(--shadow-sm);
+  }
+  .fc-stat-label { font-size:0.72rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .fc-stat-value { font-family:'Roboto Mono',monospace; font-size:1.6rem; font-weight:700; color:var(--accent); }
+
+  .fc-people { display:flex; flex-direction:column; gap:14px; }
+  .fc-person-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:20px; box-shadow:var(--shadow-sm);
+  }
+  .fc-person-header { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .fc-person-avatar {
+    width:40px; height:40px; border-radius:50%; background:var(--accent-bg); color:var(--accent);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.1rem; flex-shrink:0;
+  }
+  .fc-person-name { font-size:1rem; font-weight:700; color:var(--text); }
+  .fc-person-count { font-size:0.78rem; color:var(--muted); margin-top:2px; }
+
+  .fc-entries { display:flex; flex-direction:column; gap:6px; }
+  .fc-entry {
+    display:block; padding:10px 14px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; text-decoration:none; color:inherit; transition:border-color 0.2s;
+  }
+  .fc-entry:hover { border-color:var(--accent); }
+  .fc-entry-line { display:flex; align-items:center; gap:8px; }
+  .fc-entry-tag { font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
+  .fc-tag-nominee    { background:var(--accent-bg); color:var(--accent); }
+  .fc-tag-benefactor { background:#F5F3FF; color:#7C3AED; }
+  .fc-entry-item { font-size:0.88rem; font-weight:600; color:var(--text); }
+  .fc-entry-detail { font-size:0.78rem; color:var(--muted); margin-top:4px; }
+
+  .fc-empty-state {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:40px 24px; text-align:center;
+  }
+  .fc-empty-title { font-size:1rem; font-weight:700; color:var(--text); margin-bottom:8px; }
+  .fc-empty-sub { font-size:0.85rem; color:var(--muted); max-width:440px; margin:0 auto; line-height:1.5; }
+
+  .fc-note { font-size:0.76rem; color:var(--muted); text-align:center; padding:4px 20px; line-height:1.5; }
+
+  @media (max-width:640px) {
+    .fc-stats { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}
