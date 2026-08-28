@@ -17,9 +17,9 @@
       <span class="uc-title">Upcoming Commitments</span>
     </div>
 
-    {% if upcoming_renewals %}
     <div class="uc-section">
       <div class="uc-section-label">Insurance Renewals</div>
+      {% if upcoming_renewals %}
       {% for p in upcoming_renewals %}
       <a href="/insurance-centre/policy/{{ p.id }}" class="uc-row">
         <div class="uc-row-main">
@@ -31,8 +31,12 @@
         </span>
       </a>
       {% endfor %}
+      {% elif has_any_renewal_dates %}
+      <div class="uc-empty">Nothing due soon — your policies' renewal dates are all more than 90 days out.</div>
+      {% else %}
+      <div class="uc-empty">No renewal dates recorded yet — add one on a policy's Edit page to see it here.</div>
+      {% endif %}
     </div>
-    {% endif %}
 
     <div class="uc-section">
       <div class="uc-section-label">Retirement SIPs</div>
