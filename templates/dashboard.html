@@ -6,6 +6,49 @@
 
 <div class="dash-wrap">
 
+  <!-- ── Upcoming Commitments (consolidated across modules) ──
+       Deliberately placed OUTSIDE the "total > 0" wealth-gate below
+       — this section is about Insurance/Retirement/Loans, not Wealth
+       assets, so someone with real policies but zero tracked wealth
+       should still see their renewals here. ── -->
+  <div class="uc-card">
+    <div class="uc-header">
+      <span class="uc-icon">🔔</span>
+      <span class="uc-title">Upcoming Commitments</span>
+    </div>
+
+    {% if upcoming_renewals %}
+    <div class="uc-section">
+      <div class="uc-section-label">Insurance Renewals</div>
+      {% for p in upcoming_renewals %}
+      <a href="/insurance-centre/policy/{{ p.id }}" class="uc-row">
+        <div class="uc-row-main">
+          <div class="uc-row-name">{{ p.display_type }} — {{ p.insurer }}</div>
+          <div class="uc-row-date">Renews {{ p.renewal_date.strftime('%d %b %Y') }}</div>
+        </div>
+        <span class="uc-badge uc-badge-{{ 'overdue' if p.renewal_status == 'overdue' else 'soon' }}">
+          {{ 'Overdue' if p.renewal_status == 'overdue' else 'Due Soon' }}
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="uc-section">
+      <div class="uc-section-label">Retirement SIPs</div>
+      <div class="uc-empty">Not tracked yet — Retirement schemes don't currently record a recurring SIP date.</div>
+    </div>
+
+    <div class="uc-section">
+      <div class="uc-section-label">Loan / EMI Payments</div>
+      <div class="uc-empty">Not tracked yet — Liabilities don't currently record a due date.</div>
+    </div>
+
+    {% if not upcoming_renewals %}
+    <div class="uc-all-clear">✓ Nothing due soon in what's currently tracked.</div>
+    {% endif %}
+  </div>
+
   {% if total > 0 %}
 
   <!-- ── Row 1: Net Worth + Export ── -->
@@ -224,6 +267,31 @@
   .hero-value { font-family:'Roboto Mono',monospace; font-size:2.4rem; font-weight:700; color:var(--accent); line-height:1; }
   .hero-sub   { font-size:0.82rem; color:var(--muted); margin-top:8px; }
   .hero-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+
+  /* ── Upcoming Commitments ── */
+  .uc-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:22px 26px; box-shadow:var(--shadow-md);
+  }
+  .uc-header { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .uc-icon { font-size:1.2rem; }
+  .uc-title { font-size:1.05rem; font-weight:700; color:var(--text); }
+  .uc-section { margin-bottom:14px; }
+  .uc-section:last-child { margin-bottom:0; }
+  .uc-section-label { font-size:0.72rem; font-weight:600; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; margin-bottom:8px; }
+  .uc-row {
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    padding:11px 14px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; margin-bottom:6px; text-decoration:none; color:inherit; transition:border-color 0.2s;
+  }
+  .uc-row:hover { border-color:var(--accent); }
+  .uc-row-name { font-size:0.88rem; font-weight:600; color:var(--text); }
+  .uc-row-date { font-size:0.76rem; color:var(--muted); margin-top:2px; }
+  .uc-badge { font-size:0.7rem; font-weight:700; padding:4px 10px; border-radius:20px; white-space:nowrap; }
+  .uc-badge-overdue { background:var(--down-bg); color:var(--down); }
+  .uc-badge-soon    { background:#FFFBEB; color:#D97706; }
+  .uc-empty { font-size:0.82rem; color:var(--muted); padding:4px 2px; }
+  .uc-all-clear { font-size:0.85rem; color:var(--up); font-weight:600; text-align:center; padding:8px 0 2px; }
 
   .btn-accent  { background:var(--accent); color:#fff; text-decoration:none; border-radius:8px; padding:9px 18px; font-weight:700; font-size:0.85rem; border:none; cursor:pointer; transition:opacity 0.2s; white-space:nowrap; }
   .btn-accent:hover { opacity:0.88; }
