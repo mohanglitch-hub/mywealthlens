@@ -11,7 +11,7 @@ from retirement_centre import retirement_bp
 from wealth import wealth_bp
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory
-from insurance_centre.models import InsuranceDocument
+from insurance_centre.models import InsuranceDocument, InsurancePolicy
 
 app = Flask(__name__)
 
@@ -245,6 +245,24 @@ def dashboard():
         _save_snapshot(current_user.id, cat_totals, mfs, stocks,
                        wstats.total_liabilities())
 
+    # ── Upcoming Commitments (Section: consolidated dashboard view) ──
+    # Pulls together anything with a genuinely tracked, near-term due
+    # date across modules. Insurance renewal_date already has a
+    # mature, tested days-to-renewal/status system (built and
+    # verified during the earlier audit) — reused as-is here, not
+    # reimplemented. Retirement (SIP schedules) and Wealth Liabilities
+    # (EMI due dates) have no equivalent tracked date anywhere in
+    # their models — confirmed by direct inspection before building
+    # this — so those sections are shown honestly as "not tracked
+    # yet" rather than silently omitted or faked.
+    upcoming_renewals = [
+        p for p in InsurancePolicy.query.filter_by(
+            user_id=current_user.id, is_archived=False
+        ).filter(InsurancePolicy.renewal_date.isnot(None)).all()
+        if p.renewal_status in ("overdue", "due_soon")
+    ]
+    upcoming_renewals.sort(key=lambda p: p.renewal_date)
+
     # History for stacked area chart
     history = NetWorthHistory.query.filter_by(user_id=current_user.id)\
         .order_by(NetWorthHistory.snapshot_date).limit(365).all()
@@ -266,7 +284,8 @@ def dashboard():
         investments=investments_value, business=business_value, other=other_value,
         mf=mf_value, stocks=stock_value, mf_count=len(mfs),
         stock_count=len(stocks), mutual_funds=mfs, stock_list=stocks,
-        asset_count=asset_count, history_data=history_data)
+        asset_count=asset_count, history_data=history_data,
+        upcoming_renewals=upcoming_renewals)
 
 @app.route('/assets')
 @login_required
