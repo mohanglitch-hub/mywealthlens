@@ -26,6 +26,54 @@
     </div>
   </div>
 
+  {% if gaps %}
+  <div class="fc-gaps-card">
+    <div class="fc-section-title">⚠️ Coverage Gaps — what happens if you're not around</div>
+    <div class="fc-gaps-list">
+      {% for g in gaps %}
+      <a href="{{ g.link }}" class="fc-gap-row">
+        <div>
+          <span class="fc-gap-source">{{ g.source }}</span>
+          <span class="fc-gap-item">{{ g.item_name }}</span>
+        </div>
+        <span class="fc-gap-issue">{{ g.issue }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if duplicates %}
+  <div class="fc-dupe-card">
+    <div class="fc-section-title">🔍 Possible Duplicates?</div>
+    <div class="fc-dupe-sub">These names look very similar — likely the same person, spelled two different ways. Nothing is merged automatically; check and correct the spelling at its source if so.</div>
+    <div class="fc-dupe-list">
+      {% for a, b, score in duplicates %}
+      <div class="fc-dupe-row">
+        <span class="fc-dupe-name">{{ a.display_name }}</span>
+        <span class="fc-dupe-vs">vs</span>
+        <span class="fc-dupe-name">{{ b.display_name }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="fc-add-card">
+    <div class="fc-section-title">+ Add Family Member</div>
+    <form method="POST" action="{{ url_for('family_centre.add_person') }}" class="fc-add-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <input type="text" name="name" placeholder="Name" class="fc-add-input" list="fc-known-names" required />
+      <datalist id="fc-known-names">
+        {% for n in all_known_names %}
+        <option value="{{ n }}"></option>
+        {% endfor %}
+      </datalist>
+      <input type="text" name="relationship" placeholder="Relationship (optional)" class="fc-add-input" />
+      <button type="submit" class="fc-add-btn">Add</button>
+    </form>
+  </div>
+
   {% if people %}
   <div class="fc-people">
     {% for person in people %}
@@ -39,6 +87,21 @@
       </div>
       <div class="fc-entries">
         {% for e in person.entries %}
+        {% if e.direction == 'manual' %}
+          <div class="fc-entry fc-entry-manual">
+            <div class="fc-entry-main">
+              <div class="fc-entry-line">
+                <span class="fc-entry-tag fc-tag-manual">Family Member</span>
+                {% if e.relationship %}<span class="fc-entry-item">{{ e.relationship }}</span>{% endif %}
+              </div>
+              <div class="fc-entry-detail">Added directly to Family Centre</div>
+            </div>
+            <form method="POST" action="{{ url_for('family_centre.delete_person', person_id=e.family_person_id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="fc-entry-delete" title="Remove">✕</button>
+            </form>
+          </div>
+        {% else %}
         <a href="{{ e.link }}" class="fc-entry">
           <div class="fc-entry-main">
             {% if e.direction == 'nominee' %}
@@ -60,6 +123,7 @@
             {% endif %}
           </div>
         </a>
+        {% endif %}
         {% endfor %}
       </div>
     </div>
@@ -69,8 +133,9 @@
   <div class="fc-empty-state">
     <div class="fc-empty-title">No one recorded yet</div>
     <div class="fc-empty-sub">
-      Add a nominee to an Insurance policy or Retirement scheme, or mark a Wealth asset as
-      Inherited / Gifted / Family Owned with who it came from — they'll show up here automatically.
+      Add a nominee to an Insurance policy or Retirement scheme, mark a Wealth asset as
+      Inherited / Gifted / Family Owned with who it came from, or add someone directly above —
+      they'll all show up here automatically.
     </div>
   </div>
   {% endif %}
@@ -97,6 +162,47 @@
   .fc-stat-label { font-size:0.72rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
   .fc-stat-value { font-family:'Roboto Mono',monospace; font-size:1.6rem; font-weight:700; color:var(--accent); }
 
+  .fc-section-title { font-size:0.92rem; font-weight:700; color:var(--text); margin-bottom:12px; }
+
+  .fc-gaps-card {
+    background:#FFFBEB; border:1px solid #FDE68A; border-radius:14px; padding:18px 20px;
+  }
+  .fc-gaps-list { display:flex; flex-direction:column; gap:6px; }
+  .fc-gap-row {
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+    padding:9px 12px; background:var(--surface); border:1px solid #FDE68A; border-radius:8px;
+    text-decoration:none; color:inherit; font-size:0.85rem;
+  }
+  .fc-gap-row:hover { border-color:#D97706; }
+  .fc-gap-source { font-size:0.7rem; font-weight:700; color:#D97706; text-transform:uppercase; margin-right:8px; }
+  .fc-gap-item { font-weight:600; color:var(--text); }
+  .fc-gap-issue { font-size:0.8rem; color:#B45309; font-weight:600; white-space:nowrap; }
+
+  .fc-dupe-card {
+    background:#F5F3FF; border:1px solid #DDD6FE; border-radius:14px; padding:18px 20px;
+  }
+  .fc-dupe-sub { font-size:0.8rem; color:var(--muted); margin-bottom:12px; line-height:1.4; }
+  .fc-dupe-list { display:flex; flex-direction:column; gap:6px; }
+  .fc-dupe-row {
+    display:flex; align-items:center; gap:10px; padding:9px 12px;
+    background:var(--surface); border:1px solid #DDD6FE; border-radius:8px; font-size:0.88rem;
+  }
+  .fc-dupe-name { font-weight:600; color:var(--text); }
+  .fc-dupe-vs { font-size:0.75rem; color:var(--muted); }
+
+  .fc-add-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 20px;
+  }
+  .fc-add-form { display:flex; gap:10px; flex-wrap:wrap; }
+  .fc-add-input {
+    flex:1; min-width:160px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:9px 14px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.88rem;
+  }
+  .fc-add-btn {
+    background:var(--accent); border:none; border-radius:8px; padding:9px 22px;
+    font-size:0.88rem; font-weight:700; color:#fff; cursor:pointer; font-family:'Inter',sans-serif;
+  }
+
   .fc-people { display:flex; flex-direction:column; gap:14px; }
   .fc-person-card {
     background:var(--surface); border:1px solid var(--border); border-radius:14px;
@@ -116,12 +222,19 @@
     border-radius:8px; text-decoration:none; color:inherit; transition:border-color 0.2s;
   }
   .fc-entry:hover { border-color:var(--accent); }
+  .fc-entry-manual { display:flex; justify-content:space-between; align-items:center; }
   .fc-entry-line { display:flex; align-items:center; gap:8px; }
   .fc-entry-tag { font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
   .fc-tag-nominee    { background:var(--accent-bg); color:var(--accent); }
   .fc-tag-benefactor { background:#F5F3FF; color:#7C3AED; }
+  .fc-tag-manual     { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
   .fc-entry-item { font-size:0.88rem; font-weight:600; color:var(--text); }
   .fc-entry-detail { font-size:0.78rem; color:var(--muted); margin-top:4px; }
+  .fc-entry-delete {
+    background:none; border:none; color:var(--muted); cursor:pointer; font-size:0.9rem;
+    padding:4px 8px; border-radius:6px;
+  }
+  .fc-entry-delete:hover { color:var(--down); background:var(--down-bg); }
 
   .fc-empty-state {
     background:var(--surface); border:1px solid var(--border); border-radius:14px;
@@ -134,6 +247,7 @@
 
   @media (max-width:640px) {
     .fc-stats { grid-template-columns:1fr; }
+    .fc-add-form { flex-direction:column; }
   }
 </style>
 {% endblock %}
