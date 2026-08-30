@@ -40,6 +40,8 @@ unrelated people who share a common surname.
 """
 from difflib import SequenceMatcher
 
+from .utils import format_inr
+
 from flask import render_template, redirect, url_for, request, flash
 from flask_login import login_required, current_user
 
@@ -86,6 +88,8 @@ def _build_people(user_id):
             "source": "Insurance",
             "item_name": f"{n.policy.display_type} — {n.policy.insurer}",
             "percentage": n.percentage,
+            "contact": n.contact,
+            "value_at_stake": (n.percentage / 100 * n.policy.sum_assured) if n.percentage else None,
             "link": f"/insurance-centre/policy/{n.policy_id}",
         })
 
@@ -104,6 +108,8 @@ def _build_people(user_id):
             "source": "Retirement",
             "item_name": n.scheme.display_type,
             "percentage": n.percentage,
+            "contact": n.contact,
+            "value_at_stake": (n.percentage / 100 * n.scheme.current_balance) if n.percentage else None,
             "link": f"/retirement/scheme/{n.scheme_id}",
         })
 
@@ -154,6 +160,7 @@ def _build_people(user_id):
             "source": "Wealth",
             "item_name": h.asset.name,
             "percentage": h.percentage,
+            "value_at_stake": (h.percentage / 100 * h.asset.current_value) if h.percentage else None,
             "link": f"/wealth/assets/{h.asset_id}",
         })
 
@@ -167,6 +174,26 @@ def _build_people(user_id):
             "family_person_id": m.id,
             "raw_name": m.name,
         })
+
+    # Surface one contact number per person, for the card header —
+    # the first non-empty one found across their entries, not
+    # repeated on every line (most people only ever have one
+    # recorded anyway, and showing it once, prominently, next to
+    # their name is more useful in a crisis than buried per-entry).
+    for p in people.values():
+        p["contact"] = next(
+            (e["contact"] for e in p["entries"] if e.get("contact")), None
+        )
+        # Total rupee value across every nominee/heir entry with a
+        # known share — turns "50% share" into an actual number.
+        # Only nominee/heir entries carry value_at_stake; benefactor
+        # entries (what THEY gave YOU) and manual entries (no
+        # percentage concept at all) never contribute here.
+        known_values = [
+            e["value_at_stake"] for e in p["entries"]
+            if e.get("value_at_stake") is not None
+        ]
+        p["total_value_at_stake"] = sum(known_values) if known_values else None
 
     # Stable order: most-connected person first, then alphabetical
     return sorted(
@@ -329,6 +356,7 @@ def dashboard():
         relationship_conflicts=relationship_conflicts,
         gaps=gaps,
         all_known_names=_all_known_names(current_user.id),
+        format_inr=format_inr,
     )
 
 

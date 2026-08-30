@@ -104,7 +104,13 @@
         <div class="fc-person-avatar">{{ person.display_name[0]|upper }}</div>
         <div>
           <div class="fc-person-name">{{ person.display_name }}</div>
-          <div class="fc-person-count">{{ person.entries|length }} connection{{ 's' if person.entries|length != 1 }}</div>
+          <div class="fc-person-count">
+            {{ person.entries|length }} connection{{ 's' if person.entries|length != 1 }}
+            {% if person.contact %}· 📞 {{ person.contact }}{% endif %}
+          </div>
+          {% if person.total_value_at_stake %}
+          <div class="fc-person-value">{{ format_inr(person.total_value_at_stake) }} at stake</div>
+          {% endif %}
         </div>
       </div>
       <div class="fc-entries">
@@ -138,7 +144,7 @@
                 <span class="fc-entry-item">{{ e.item_name }}</span>
               </div>
               <div class="fc-entry-detail">
-                {{ e.relationship }}{% if e.percentage %} · {{ e.percentage }}% share{% endif %} · {{ e.source }}
+                {{ e.relationship }}{% if e.percentage %} · {{ e.percentage }}% share{% endif %}{% if e.value_at_stake %} · {{ format_inr(e.value_at_stake) }}{% endif %} · {{ e.source }}
               </div>
             {% elif e.direction == 'heir' %}
               <div class="fc-entry-line">
@@ -146,7 +152,7 @@
                 <span class="fc-entry-item">{{ e.item_name }}</span>
               </div>
               <div class="fc-entry-detail">
-                {% if e.relationship %}{{ e.relationship }} · {% endif %}{% if e.percentage %}{{ e.percentage }}% share · {% endif %}{{ e.source }}
+                {% if e.relationship %}{{ e.relationship }} · {% endif %}{% if e.percentage %}{{ e.percentage }}% share · {% endif %}{% if e.value_at_stake %}{{ format_inr(e.value_at_stake) }} · {% endif %}{{ e.source }}
               </div>
             {% else %}
               <div class="fc-entry-line">
@@ -261,6 +267,7 @@
   }
   .fc-person-name { font-size:1rem; font-weight:700; color:var(--text); }
   .fc-person-count { font-size:0.78rem; color:var(--muted); margin-top:2px; }
+  .fc-person-value { font-size:0.8rem; color:var(--up); font-weight:600; margin-top:2px; }
 
   .fc-entries { display:flex; flex-direction:column; gap:6px; }
   .fc-entry {
