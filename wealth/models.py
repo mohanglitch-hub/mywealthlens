@@ -258,6 +258,9 @@ class WealthAsset(db.Model):
     acquisition_date  = db.Column(db.Date, nullable=True)
     acquisition_value = db.Column(db.Float, nullable=True)
 
+    heirs = db.relationship("WealthAssetHeir", backref="asset",
+                            lazy="dynamic", cascade="all, delete-orphan")
+
     # ── Real Estate specific ─────────────────────────────────────
     property_type    = db.Column(db.String(50),  nullable=True)
     property_address = db.Column(db.String(300), nullable=True)
@@ -324,8 +327,47 @@ class WealthAsset(db.Model):
             SourceType.FAMILY_OWNED, SourceType.JOINT_FAMILY
         )
 
+    @property
+    def total_heirs_percentage(self):
+        return sum(h.percentage or 0 for h in self.heirs)
+
     def __repr__(self):
         return f"<WealthAsset id={self.id} {self.name}>"
+
+
+class WealthAssetHeir(db.Model):
+    """
+    Who should get this asset — the inverse of original_owner (which
+    answers "who gave me this"). Deliberately its own table, matching
+    InsuranceNominee and RetirementSchemeNominee exactly: one asset
+    can have several heirs, each with their own share, the same way
+    a policy or scheme can have several nominees. Percentage is
+    validated against the running total for this asset the same way
+    (see validate_heir in validators.py) — it can exceed neither
+    100% on its own nor push the asset's total over 100%.
+    """
+    __tablename__ = "wealth_asset_heir"
+    __table_args__ = (
+        db.Index("ix_wealth_asset_heir_asset", "asset_id"),
+    )
+
+    id           = db.Column(db.Integer, primary_key=True)
+    asset_id     = db.Column(db.Integer,
+                             db.ForeignKey("wealth_asset.id", ondelete="CASCADE"),
+                             nullable=False)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    name         = db.Column(db.String(200), nullable=False)
+    relationship = db.Column(db.String(100), nullable=True)
+    percentage   = db.Column(db.Float, nullable=True)
+    # ^ Free text relationship, matching original_owner_relationship's
+    # own convention on this same model — Wealth has never used a
+    # fixed relationship list the way Insurance's nominee form does.
+
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<WealthAssetHeir {self.name} ({self.relationship})>"
 
 
 class WealthLiability(db.Model):

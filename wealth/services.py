@@ -16,7 +16,7 @@ from sqlalchemy import or_
 
 from .models import (
     WealthAsset, WealthLiability, WealthStatus, SourceType,
-    WealthDocument,
+    WealthDocument, WealthAssetHeir,
 )
 from . import value_history_service as vhs
 from .timezone_utils import today_ist
@@ -100,7 +100,7 @@ def _asset_fields_from_form(form):
 
 # ── Asset CRUD (Phase B) ──────────────────────────────────────────────────────
 
-def create_asset(db, user_id, form):
+def create_asset(db, user_id, form, multi_data=None):
     """
     Create a new Wealth asset. Assumes the form already passed
     validators.validate_wealth_asset().
@@ -117,6 +117,13 @@ def create_asset(db, user_id, form):
     also need to enter current value separately, do not infer
     silently" — the create form stays single-purpose rather than
     trying to collect two values at once).
+
+    multi_data (the real Flask request.form, not the plain dict in
+    `form`) carries the heir_name[]/heir_relationship[]/
+    heir_percentage[] array fields — mirrors insurance_centre's
+    create_policy(..., multi_data=...) exactly, including why a
+    second parameter exists at all: `form` here is a plain dict for
+    single-value fields; only the real MultiDict supports .getlist().
     """
     fields = _asset_fields_from_form(form)
     if fields["ownership_percentage"] is None:
@@ -127,6 +134,32 @@ def create_asset(db, user_id, form):
     asset = WealthAsset(user_id=user_id, **fields)
     db.session.add(asset)
     db.session.flush()  # assigns asset.id, needed for the history row below
+
+    # ── Intended Heirs ──────────────────────────────────────────
+    if multi_data:
+        names = multi_data.getlist("heir_name[]")
+        rels = multi_data.getlist("heir_relationship[]")
+        pcts = multi_data.getlist("heir_percentage[]")
+
+        total_pct = 0
+        for i, name in enumerate(names):
+            name = name.strip()
+            if not name:
+                continue
+            pct_raw = pcts[i] if i < len(pcts) else ""
+            pct = float(pct_raw) if pct_raw else None
+            if pct:
+                total_pct += pct
+                if total_pct > 100:
+                    db.session.rollback()
+                    return None, f"Total heir percentage exceeds 100% ({total_pct:.1f}%). Please check heir shares."
+            db.session.add(WealthAssetHeir(
+                asset_id     = asset.id,
+                user_id      = user_id,
+                name         = name,
+                relationship = (rels[i].strip() if i < len(rels) and rels[i].strip() else None),
+                percentage   = pct,
+            ))
 
     try:
         vhs.record_wealth_value_change(
@@ -140,7 +173,7 @@ def create_asset(db, user_id, form):
     return asset, None
 
 
-def update_asset(db, asset, user_id, form):
+def update_asset(db, asset, user_id, form, multi_data=None):
     """
     Update an existing asset, scoped to the owning user.
 
@@ -169,6 +202,39 @@ def update_asset(db, asset, user_id, form):
     fields = _asset_fields_from_form(form)
     if fields["ownership_percentage"] is None:
         fields["ownership_percentage"] = 100.0
+
+    # ── Replace Heirs ───────────────────────────────────────────
+    # Mirrors insurance_centre's update_policy nominee handling
+    # exactly: the edit form's heir section is authoritative on
+    # submit — whatever's there (unchanged, edited, added, or
+    # removed via the JS remove button) becomes the complete new
+    # set, not an incremental addition on top of the old one.
+    if multi_data:
+        asset.heirs.delete()
+
+        names = multi_data.getlist("heir_name[]")
+        rels = multi_data.getlist("heir_relationship[]")
+        pcts = multi_data.getlist("heir_percentage[]")
+
+        total_pct = 0
+        for i, name in enumerate(names):
+            name = name.strip()
+            if not name:
+                continue
+            pct_raw = pcts[i] if i < len(pcts) else ""
+            pct = float(pct_raw) if pct_raw else None
+            if pct:
+                total_pct += pct
+                if total_pct > 100:
+                    db.session.rollback()
+                    return None, f"Total heir percentage exceeds 100% ({total_pct:.1f}%). Please check heir shares."
+            db.session.add(WealthAssetHeir(
+                asset_id     = asset.id,
+                user_id      = user_id,
+                name         = name,
+                relationship = (rels[i].strip() if i < len(rels) and rels[i].strip() else None),
+                percentage   = pct,
+            ))
 
     submitted_effective_date = fields["value_as_of"]
     effective_date = submitted_effective_date or today_ist()

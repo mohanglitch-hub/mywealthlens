@@ -9,6 +9,7 @@
       <h1 class="fc-title">👪 Family Centre</h1>
       <p class="fc-sub">Everyone connected to your financial life — who you've named as a nominee, and who your family wealth came from.</p>
     </div>
+    <a href="/family/export/pdf" class="fc-btn-pdf">📄 Download PDF</a>
   </div>
 
   <div class="fc-stats">
@@ -23,6 +24,10 @@
     <div class="fc-stat-card">
       <div class="fc-stat-label">Family &amp; Inherited Assets</div>
       <div class="fc-stat-value">{{ total_benefactor_entries }}</div>
+    </div>
+    <div class="fc-stat-card">
+      <div class="fc-stat-label">Intended Heirs</div>
+      <div class="fc-stat-value">{{ total_heir_entries }}</div>
     </div>
   </div>
 
@@ -59,6 +64,23 @@
   </div>
   {% endif %}
 
+  {% if relationship_conflicts %}
+  <div class="fc-relconflict-card">
+    <div class="fc-section-title">🤔 Relationship Mismatch?</div>
+    <div class="fc-dupe-sub">The same person is recorded with different relationships in different places — one of them may be a mistake, or they may just be phrased differently.</div>
+    <div class="fc-dupe-list">
+      {% for rc in relationship_conflicts %}
+      <div class="fc-dupe-row">
+        <span class="fc-dupe-name">{{ rc.display_name }}</span>
+        <span class="fc-dupe-vs">recorded as</span>
+        {% for r in rc.relationships %}<span class="fc-relconflict-tag">{{ r }}</span>{% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+
   <div class="fc-add-card">
     <div class="fc-section-title">+ Add Family Member</div>
     <form method="POST" action="{{ url_for('family_centre.add_person') }}" class="fc-add-form">
@@ -89,13 +111,19 @@
         {% for e in person.entries %}
         {% if e.direction == 'manual' %}
           <div class="fc-entry fc-entry-manual">
-            <div class="fc-entry-main">
-              <div class="fc-entry-line">
+            <details class="fc-edit-details">
+              <summary class="fc-entry-summary">
                 <span class="fc-entry-tag fc-tag-manual">Family Member</span>
                 {% if e.relationship %}<span class="fc-entry-item">{{ e.relationship }}</span>{% endif %}
-              </div>
-              <div class="fc-entry-detail">Added directly to Family Centre</div>
-            </div>
+                <span class="fc-edit-hint">Edit</span>
+              </summary>
+              <form method="POST" action="{{ url_for('family_centre.edit_person', person_id=e.family_person_id) }}" class="fc-edit-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="text" name="name" value="{{ e.raw_name }}" class="fc-edit-input" required />
+                <input type="text" name="relationship" value="{{ e.relationship or '' }}" placeholder="Relationship" class="fc-edit-input" />
+                <button type="submit" class="fc-edit-save">Save</button>
+              </form>
+            </details>
             <form method="POST" action="{{ url_for('family_centre.delete_person', person_id=e.family_person_id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <button type="submit" class="fc-entry-delete" title="Remove">✕</button>
@@ -111,6 +139,14 @@
               </div>
               <div class="fc-entry-detail">
                 {{ e.relationship }}{% if e.percentage %} · {{ e.percentage }}% share{% endif %} · {{ e.source }}
+              </div>
+            {% elif e.direction == 'heir' %}
+              <div class="fc-entry-line">
+                <span class="fc-entry-tag fc-tag-heir">Will Inherit</span>
+                <span class="fc-entry-item">{{ e.item_name }}</span>
+              </div>
+              <div class="fc-entry-detail">
+                {% if e.relationship %}{{ e.relationship }} · {% endif %}{% if e.percentage %}{{ e.percentage }}% share · {% endif %}{{ e.source }}
               </div>
             {% else %}
               <div class="fc-entry-line">
@@ -151,10 +187,12 @@
 <style>
   .fc-wrap { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
   .fc-header { display:flex; justify-content:space-between; align-items:flex-start; }
+  .fc-btn-pdf { background:#EFF6FF; color:#3B82F6; border:1px solid #93C5FD; border-radius:8px; padding:10px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; transition:all 0.2s; white-space:nowrap; }
+  .fc-btn-pdf:hover { background:#3B82F6; color:#fff; }
   .fc-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
   .fc-sub { font-size:0.88rem; color:var(--muted); max-width:520px; }
 
-  .fc-stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; }
+  .fc-stats { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
   .fc-stat-card {
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
     padding:16px 18px; box-shadow:var(--shadow-sm);
@@ -188,6 +226,14 @@
     background:var(--surface); border:1px solid #DDD6FE; border-radius:8px; font-size:0.88rem;
   }
   .fc-dupe-name { font-weight:600; color:var(--text); }
+
+  .fc-relconflict-card {
+    background:#FFF7ED; border:1px solid #FDBA74; border-radius:14px; padding:18px 20px;
+  }
+  .fc-relconflict-tag {
+    font-size:0.78rem; font-weight:600; padding:3px 10px; border-radius:20px;
+    background:var(--surface); border:1px solid #FDBA74; color:#C2410C; margin-right:4px;
+  }
   .fc-dupe-vs { font-size:0.75rem; color:var(--muted); }
 
   .fc-add-card {
@@ -222,11 +268,25 @@
     border-radius:8px; text-decoration:none; color:inherit; transition:border-color 0.2s;
   }
   .fc-entry:hover { border-color:var(--accent); }
-  .fc-entry-manual { display:flex; justify-content:space-between; align-items:center; }
+  .fc-entry-manual { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .fc-edit-details { flex:1; }
+  .fc-entry-summary { cursor:pointer; list-style:none; }
+  .fc-entry-summary::-webkit-details-marker { display:none; }
+  .fc-edit-hint { font-size:0.72rem; color:var(--accent); font-weight:600; margin-left:8px; }
+  .fc-edit-form { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  .fc-edit-input {
+    background:var(--surface2); border:1px solid var(--border); border-radius:6px;
+    padding:6px 10px; font-size:0.82rem; color:var(--text); font-family:'Inter',sans-serif;
+  }
+  .fc-edit-save {
+    background:var(--accent); border:none; border-radius:6px; padding:6px 14px;
+    font-size:0.8rem; font-weight:700; color:#fff; cursor:pointer; font-family:'Inter',sans-serif;
+  }
   .fc-entry-line { display:flex; align-items:center; gap:8px; }
   .fc-entry-tag { font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
   .fc-tag-nominee    { background:var(--accent-bg); color:var(--accent); }
   .fc-tag-benefactor { background:#F5F3FF; color:#7C3AED; }
+  .fc-tag-heir       { background:#ECFDF5; color:#059669; }
   .fc-tag-manual     { background:var(--surface2); color:var(--muted); border:1px solid var(--border); }
   .fc-entry-item { font-size:0.88rem; font-weight:600; color:var(--text); }
   .fc-entry-detail { font-size:0.78rem; color:var(--muted); margin-top:4px; }
@@ -248,6 +308,9 @@
   @media (max-width:640px) {
     .fc-stats { grid-template-columns:1fr; }
     .fc-add-form { flex-direction:column; }
+  }
+  @media (min-width:641px) and (max-width:900px) {
+    .fc-stats { grid-template-columns:repeat(2, 1fr); }
   }
 </style>
 {% endblock %}

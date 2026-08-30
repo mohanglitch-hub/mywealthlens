@@ -174,6 +174,48 @@
       </div>
     </div>
 
+    <!-- ── Intended Heirs ── (Section: matches insurance_centre's
+         Nominees pattern exactly — dynamic add/remove rows, replace-
+         on-save semantics. Not nested inside the Source card above,
+         since who inherits this applies regardless of how it was
+         acquired — a self-acquired asset still needs a heir.) -->
+    <div class="wealth-card">
+      <div class="wealth-card-heading">
+        <span class="wealth-card-num">6</span>
+        <span class="wealth-card-title">Intended Heirs</span>
+        <button type="button" class="wealth-btn-add" onclick="addHeir()">+ Add Heir</button>
+      </div>
+      <div id="heirsList">
+        {% if is_edit and existing_heirs %}
+          {% for h in existing_heirs %}
+          <div class="wealth-sub-card" data-heir>
+            <div class="wealth-sub-card-header">
+              <span class="wealth-sub-card-title">Heir {{ loop.index }}</span>
+              <button type="button" class="wealth-btn-remove" onclick="removeHeir(this)">✕ Remove</button>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+              <div class="form-group">
+                <label>Name <span class="wealth-required-mark">*</span></label>
+                <input type="text" name="heir_name[]" value="{{ h.name }}" required />
+              </div>
+              <div class="form-group">
+                <label>Relationship</label>
+                <input type="text" name="heir_relationship[]" value="{{ h.relationship or '' }}" placeholder="e.g. Son" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Percentage (%)</label>
+              <input type="number" name="heir_percentage[]" value="{{ h.percentage or '' }}" min="0" max="100" step="0.01" />
+            </div>
+          </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+      <div id="heirEmpty" class="wealth-hint" {% if is_edit and existing_heirs %}style="display:none;"{% endif %}>
+        No heirs added yet. Click "+ Add Heir" to add.
+      </div>
+    </div>
+
     <!-- ── Category-Specific: Real Estate ── -->
     <div class="wealth-card wealth-group wealth-card-conditional" id="grp-real_estate">
       <div class="wealth-card-heading-plain">Real Estate Details</div>
@@ -376,6 +418,28 @@
   .wealth-select:focus { border-color: var(--accent); }
   .wealth-group { display: none; }
 
+  .wealth-btn-add {
+    background:var(--accent-bg); color:var(--accent);
+    border:1px solid var(--accent); border-radius:6px;
+    padding:6px 14px; font-size:0.78rem; font-weight:600;
+    font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s;
+    margin-left:auto;
+  }
+  .wealth-btn-add:hover { background:var(--accent); color:#fff; }
+  .wealth-btn-remove {
+    background:transparent; color:var(--down); border:1px solid var(--down);
+    border-radius:6px; padding:5px 12px; font-size:0.76rem; font-weight:600;
+    font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s;
+  }
+  .wealth-btn-remove:hover { background:var(--down-bg); }
+  .wealth-sub-card {
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:10px; padding:18px; margin-bottom:12px;
+  }
+  .wealth-sub-card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .wealth-sub-card-title { font-size:0.85rem; font-weight:600; color:var(--text2); }
+  .wealth-hint { font-size:0.82rem; color:var(--muted); font-style:italic; }
+
   .wealth-btn-cancel {
     display: inline-flex; align-items: center; padding: 10px 20px;
     color: var(--text); background: var(--surface2); border: 1px solid var(--border);
@@ -391,6 +455,29 @@
     }
   }
 </style>
+
+<template id="heirTemplate">
+  <div class="wealth-sub-card" data-heir>
+    <div class="wealth-sub-card-header">
+      <span class="wealth-sub-card-title">Heir</span>
+      <button type="button" class="wealth-btn-remove" onclick="removeHeir(this)">✕ Remove</button>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+      <div class="form-group">
+        <label>Name <span class="wealth-required-mark">*</span></label>
+        <input type="text" name="heir_name[]" placeholder="e.g. Priya Sharma" required />
+      </div>
+      <div class="form-group">
+        <label>Relationship</label>
+        <input type="text" name="heir_relationship[]" placeholder="e.g. Son" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Percentage (%)</label>
+      <input type="number" name="heir_percentage[]" placeholder="e.g. 50" min="0" max="100" step="0.01" />
+    </div>
+  </div>
+</template>
 
 <script>
   const ASSET_TYPES_BY_CATEGORY = {{ asset_types_by_category | tojson }};
@@ -442,5 +529,28 @@
     applyCategory();
     applySourceType();
   });
+
+  // ── Intended Heirs ──────────────────────────────────────────
+  let heirCount = {{ existing_heirs|length if is_edit else 0 }};
+  function addHeir() {
+    heirCount++;
+    const tmpl  = document.getElementById('heirTemplate');
+    const clone = tmpl.content.cloneNode(true);
+    const card  = clone.querySelector('[data-heir]');
+    card.querySelector('.wealth-sub-card-title').textContent = `Heir ${heirCount}`;
+    document.getElementById('heirsList').appendChild(clone);
+    document.getElementById('heirEmpty').style.display = 'none';
+  }
+  function removeHeir(btn) {
+    btn.closest('[data-heir]').remove();
+    const cards = document.querySelectorAll('#heirsList [data-heir]');
+    cards.forEach(function (card, i) {
+      card.querySelector('.wealth-sub-card-title').textContent = `Heir ${i + 1}`;
+    });
+    heirCount = cards.length;
+    if (!cards.length) {
+      document.getElementById('heirEmpty').style.display = '';
+    }
+  }
 </script>
 {% endblock %}
