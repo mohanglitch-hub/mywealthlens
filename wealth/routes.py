@@ -223,6 +223,7 @@ def _asset_form_context(is_edit, asset, values):
         # ^ Phase L — max= attribute on the Valuation Date field
         # (Section 28/29: future dates must be rejected client-side
         # too, not just server-side) and the backdating-detection JS.
+        existing_heirs=(asset.heirs.all() if is_edit and asset else []),
     )
 
 
@@ -280,7 +281,7 @@ def add_asset():
                 **_asset_form_context(False, None, form)
             )
 
-        asset, error = services.create_asset(_db(), current_user.id, form)
+        asset, error = services.create_asset(_db(), current_user.id, form, multi_data=request.form)
         if error:
             flash(error, "error")
             return redirect(url_for("wealth.add_asset"))
@@ -314,7 +315,7 @@ def edit_asset(asset_id):
                 **_asset_form_context(True, asset, form)
             )
 
-        updated, error = services.update_asset(_db(), asset, current_user.id, form)
+        updated, error = services.update_asset(_db(), asset, current_user.id, form, multi_data=request.form)
         if error:
             flash(error, "error")
             return redirect(url_for("wealth.asset_detail", asset_id=asset_id))

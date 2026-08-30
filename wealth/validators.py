@@ -317,3 +317,41 @@ def validate_wealth_liability(form):
         errors.append("Invalid status selected.")
 
     return errors
+
+
+def validate_heir(data, asset):
+    """
+    Validate intended-heir data for a Wealth asset. Mirrors
+    insurance_centre's validate_nominee — checks this heir's own %
+    is sane, and that adding it wouldn't push the asset's total
+    heir percentage over 100%. Relationship is free text here
+    (matching original_owner_relationship's own convention on this
+    model), not checked against a fixed list the way Insurance's
+    nominee relationship is.
+    """
+    errors = []
+
+    name = data.get("name", "").strip()
+    if not name:
+        errors.append("Heir name is required.")
+
+    percentage = data.get("percentage")
+    if percentage not in (None, "", 0, "0"):
+        try:
+            pct = float(percentage)
+            if pct < 0:
+                errors.append("Heir percentage cannot be negative.")
+            elif pct > 100:
+                errors.append("Heir percentage cannot exceed 100%.")
+            else:
+                current_total = asset.total_heirs_percentage
+                if current_total + pct > 100:
+                    remaining = 100 - current_total
+                    errors.append(
+                        f"Total heir percentage would exceed 100%. "
+                        f"Only {remaining:.1f}% remains available."
+                    )
+        except (ValueError, TypeError):
+            errors.append("Heir percentage must be a number.")
+
+    return errors

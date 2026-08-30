@@ -47,7 +47,7 @@ from family_centre import family_bp
 from family_centre.models import FamilyPerson
 from insurance_centre.models import InsuranceNominee, InsurancePolicy
 from retirement_centre.models import RetirementSchemeNominee, RetirementScheme
-from wealth.models import WealthAsset
+from wealth.models import WealthAsset, WealthAssetHeir
 
 
 DUPLICATE_THRESHOLD = 0.90
@@ -131,6 +131,32 @@ def _build_people(user_id):
             "link": f"/wealth/assets/{a.id}",
         })
 
+    # ── Intended Heirs (active assets with recorded heirs) ──
+    # The inverse direction from the benefactor entries just above:
+    # "who should get this asset", using the SAME table shape as
+    # InsuranceNominee/RetirementSchemeNominee — an asset can have
+    # multiple heirs, each with their own %, just like a policy can
+    # have multiple nominees. An asset can ALSO have an
+    # original_owner (inherited from someone) at the same time as
+    # having heirs (going to someone else) — two unrelated facts,
+    # handled by two separate queries.
+    heir_rows = (
+        WealthAssetHeir.query
+        .join(WealthAsset, WealthAssetHeir.asset_id == WealthAsset.id)
+        .filter(WealthAsset.user_id == user_id,
+                WealthAsset.is_archived == False)
+        .all()
+    )
+    for h in heir_rows:
+        _add(h.name, {
+            "direction": "heir",
+            "relationship": h.relationship,
+            "source": "Wealth",
+            "item_name": h.asset.name,
+            "percentage": h.percentage,
+            "link": f"/wealth/assets/{h.asset_id}",
+        })
+
     # ── Manually-added family members ──
     manual_rows = FamilyPerson.query.filter_by(user_id=user_id).all()
     for m in manual_rows:
@@ -139,6 +165,7 @@ def _build_people(user_id):
             "relationship": m.relationship,
             "source": "Family Centre",
             "family_person_id": m.id,
+            "raw_name": m.name,
         })
 
     # Stable order: most-connected person first, then alphabetical
@@ -168,6 +195,40 @@ def _find_possible_duplicates(people):
                 duplicates.append((people[i], people[j], score))
     duplicates.sort(key=lambda d: -d[2])
     return duplicates
+
+
+def _find_relationship_inconsistencies(people):
+    """
+    Flags a person (already correctly grouped by name — this is a
+    within-person check, not a cross-person one like the duplicate
+    detector above) whose entries disagree on the relationship. If
+    Chaithra is "Sister" on one policy and "Cousin" on another,
+    that's worth a second look — one of them is likely a mistake.
+
+    Deliberately does NOT use fuzzy text matching here, unlike name
+    duplicates: "Wife" and "Spouse" mean the same thing but share
+    almost no letters, so a spelling-similarity check would miss the
+    exact case it's meant to catch. Any genuine difference (after
+    trimming whitespace and case) gets flagged — this can't tell a
+    real conflict from two honest phrasings of the same relationship,
+    so like the duplicate detector, it flags rather than judges.
+    """
+    inconsistencies = []
+    for p in people:
+        seen = {}  # normalized -> original casing, first seen
+        for e in p["entries"]:
+            rel = e.get("relationship")
+            if not rel or not rel.strip():
+                continue
+            key = rel.strip().lower()
+            if key not in seen:
+                seen[key] = rel.strip()
+        if len(seen) > 1:
+            inconsistencies.append({
+                "display_name": p["display_name"],
+                "relationships": list(seen.values()),
+            })
+    return inconsistencies
 
 
 def _coverage_gaps(user_id):
@@ -212,6 +273,22 @@ def _coverage_gaps(user_id):
                 "link": f"/retirement/scheme/{s.id}",
             })
 
+    assets = WealthAsset.query.filter_by(
+        user_id=user_id, is_archived=False).all()
+    for a in assets:
+        total_pct = a.total_heirs_percentage
+        if a.heirs.count() == 0:
+            gaps.append({
+                "source": "Wealth", "item_name": a.name,
+                "issue": "No intended heir set", "link": f"/wealth/assets/{a.id}",
+            })
+        elif total_pct < 100:
+            gaps.append({
+                "source": "Wealth", "item_name": a.name,
+                "issue": f"Heirs total {total_pct:.0f}%, not 100%",
+                "link": f"/wealth/assets/{a.id}",
+            })
+
     return gaps
 
 
@@ -228,6 +305,7 @@ def _all_known_names(user_id):
 def dashboard():
     people = _build_people(current_user.id)
     duplicates = _find_possible_duplicates(people)
+    relationship_conflicts = _find_relationship_inconsistencies(people)
     gaps = _coverage_gaps(current_user.id)
 
     total_nominee_entries = sum(
@@ -236,6 +314,9 @@ def dashboard():
     total_benefactor_entries = sum(
         1 for p in people for e in p["entries"] if e["direction"] == "benefactor"
     )
+    total_heir_entries = sum(
+        1 for p in people for e in p["entries"] if e["direction"] == "heir"
+    )
 
     return render_template(
         "family_centre/dashboard.html",
@@ -243,7 +324,9 @@ def dashboard():
         people_count=len(people),
         total_nominee_entries=total_nominee_entries,
         total_benefactor_entries=total_benefactor_entries,
+        total_heir_entries=total_heir_entries,
         duplicates=duplicates,
+        relationship_conflicts=relationship_conflicts,
         gaps=gaps,
         all_known_names=_all_known_names(current_user.id),
     )
@@ -277,3 +360,31 @@ def delete_person(person_id):
     db.session.commit()
     flash(f'"{person.name}" removed.', "success")
     return redirect(url_for("family_centre.dashboard"))
+
+
+@family_bp.route("/people/<int:person_id>/edit", methods=["POST"])
+@login_required
+def edit_person(person_id):
+    person = FamilyPerson.query.filter_by(
+        id=person_id, user_id=current_user.id).first_or_404()
+
+    name = (request.form.get("name") or "").strip()
+    if not name:
+        flash("A name is required.", "error")
+        return redirect(url_for("family_centre.dashboard"))
+
+    person.name = name
+    person.relationship = (request.form.get("relationship") or "").strip() or None
+    from models import db
+    db.session.commit()
+    flash(f'"{name}" updated.', "success")
+    return redirect(url_for("family_centre.dashboard"))
+
+
+@family_bp.route("/export/pdf")
+@login_required
+def export_pdf():
+    """Export the Family Centre 'In Case of Emergency' summary PDF
+    for the current user only."""
+    from . import export as export_module
+    return export_module.build_family_pdf(current_user)
