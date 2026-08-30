@@ -31,6 +31,7 @@ from reportlab.platypus import (
 )
 
 from .routes import _build_people, _coverage_gaps
+from .utils import format_inr
 
 # ── Shared colours (matches app.py / insurance_centre / retirement_centre) ──
 _TEAL   = colors.HexColor("#00d4aa")
@@ -141,14 +142,19 @@ def build_family_pdf(user):
         block.append(HRFlowable(width="100%", color=_TEAL, thickness=0.5))
         block.append(Spacer(1, 1.5*mm))
         block.append(Paragraph(person["display_name"], S["h2"]))
+        if person.get("contact"):
+            block.append(Paragraph(f"Phone: {person['contact']}", S["muted"]))
 
         for e in person["entries"]:
             if e["direction"] == "nominee":
                 pct = f" — {e['percentage']:.0f}% share" if e.get("percentage") else ""
-                line = f"• Nominee on {e['item_name']} ({e.get('relationship') or 'relationship not set'}){pct} — {e['source']}"
+                val = f" ({format_inr(e['value_at_stake'])})" if e.get("value_at_stake") else ""
+                line = f"• Nominee on {e['item_name']} ({e.get('relationship') or 'relationship not set'}){pct}{val} — {e['source']}"
             elif e["direction"] == "heir":
                 rel = f" ({e['relationship']})" if e.get("relationship") else ""
-                line = f"• Will inherit: {e['item_name']}{rel}"
+                pct = f" — {e['percentage']:.0f}% share" if e.get("percentage") else ""
+                val = f" ({format_inr(e['value_at_stake'])})" if e.get("value_at_stake") else ""
+                line = f"• Will inherit: {e['item_name']}{rel}{pct}{val}"
             elif e["direction"] == "benefactor":
                 rel = f" ({e['relationship']})" if e.get("relationship") else ""
                 received = f", received {e['date_received'].strftime('%d %b %Y')}" if e.get("date_received") else ""
