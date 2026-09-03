@@ -9,7 +9,11 @@
       <h1 class="fc-title">👪 Family Centre</h1>
       <p class="fc-sub">Everyone connected to your financial life — who you've named as a nominee, and who your family wealth came from.</p>
     </div>
-    <a href="/family/export/pdf" class="fc-btn-pdf">📄 Download PDF</a>
+    <div class="fc-header-actions">
+      <a href="{{ url_for('family_centre.family_tree') }}" class="fc-btn-audit">🌳 Family Tree</a>
+      <a href="{{ url_for('family_centre.audit_trail') }}" class="fc-btn-audit">📜 Audit Trail</a>
+      <a href="/family/export/pdf" class="fc-btn-pdf">📄 Download PDF</a>
+    </div>
   </div>
 
   <div class="fc-stats">
@@ -111,8 +115,61 @@
           {% if person.total_value_at_stake %}
           <div class="fc-person-value">{{ format_inr(person.total_value_at_stake) }} at stake</div>
           {% endif %}
+          {% if person.is_primary_contact or person.is_minor %}
+          <div class="fc-person-badges">
+            {% if person.is_primary_contact %}<span class="fc-badge fc-badge-primary">⭐ Primary Contact</span>{% endif %}
+            {% if person.is_minor %}<span class="fc-badge fc-badge-minor">🧒 Minor</span>{% endif %}
+          </div>
+          {% endif %}
         </div>
       </div>
+
+      <div class="fc-person-tools">
+        <details class="fc-tool-details">
+          <summary class="fc-tool-summary">{{ 'Primary Contact ✓' if person.is_primary_contact else 'Set as Primary Contact' }}</summary>
+          <div class="fc-tool-body">
+            {% if person.is_primary_contact %}
+            <form method="POST" action="{{ url_for('family_centre.clear_primary_contact') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="name" value="{{ person.display_name }}" />
+              <button type="submit" class="fc-tool-btn fc-tool-btn-clear">Unmark Primary Contact</button>
+            </form>
+            {% else %}
+            <form method="POST" action="{{ url_for('family_centre.set_primary_contact') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="name" value="{{ person.display_name }}" />
+              <button type="submit" class="fc-tool-btn">Mark as Primary Contact</button>
+            </form>
+            {% endif %}
+          </div>
+        </details>
+
+        <details class="fc-tool-details">
+          <summary class="fc-tool-summary">{{ 'Minor + Guardian ✓' if person.is_minor else 'Mark as Minor' }}</summary>
+          <div class="fc-tool-body">
+            {% if person.is_minor %}
+            <div class="fc-guardian-info">
+              Guardian: {{ person.guardian_name }}{% if person.guardian_relationship %} ({{ person.guardian_relationship }}){% endif %}{% if person.guardian_contact %} · 📞 {{ person.guardian_contact }}{% endif %}
+            </div>
+            <form method="POST" action="{{ url_for('family_centre.clear_minor_guardian') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="name" value="{{ person.display_name }}" />
+              <button type="submit" class="fc-tool-btn fc-tool-btn-clear">Clear Minor + Guardian Status</button>
+            </form>
+            {% else %}
+            <form method="POST" action="{{ url_for('family_centre.set_minor_guardian') }}" class="fc-guardian-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="name" value="{{ person.display_name }}" />
+              <input type="text" name="guardian_name" placeholder="Guardian's name" class="fc-edit-input" required />
+              <input type="text" name="guardian_relationship" placeholder="Relationship (optional)" class="fc-edit-input" />
+              <input type="text" name="guardian_contact" placeholder="Guardian's contact (optional)" class="fc-edit-input" />
+              <button type="submit" class="fc-tool-btn">Save</button>
+            </form>
+            {% endif %}
+          </div>
+        </details>
+      </div>
+
       <div class="fc-entries">
         {% for e in person.entries %}
         {% if e.direction == 'manual' %}
@@ -193,8 +250,11 @@
 <style>
   .fc-wrap { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
   .fc-header { display:flex; justify-content:space-between; align-items:flex-start; }
+  .fc-header-actions { display:flex; gap:10px; flex-wrap:wrap; }
   .fc-btn-pdf { background:#EFF6FF; color:#3B82F6; border:1px solid #93C5FD; border-radius:8px; padding:10px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; transition:all 0.2s; white-space:nowrap; }
   .fc-btn-pdf:hover { background:#3B82F6; color:#fff; }
+  .fc-btn-audit { background:var(--surface2); color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; transition:all 0.2s; white-space:nowrap; }
+  .fc-btn-audit:hover { border-color:var(--accent); color:var(--accent); }
   .fc-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:6px; }
   .fc-sub { font-size:0.88rem; color:var(--muted); max-width:520px; }
 
@@ -268,6 +328,26 @@
   .fc-person-name { font-size:1rem; font-weight:700; color:var(--text); }
   .fc-person-count { font-size:0.78rem; color:var(--muted); margin-top:2px; }
   .fc-person-value { font-size:0.8rem; color:var(--up); font-weight:600; margin-top:2px; }
+  .fc-person-badges { display:flex; gap:6px; margin-top:6px; flex-wrap:wrap; }
+  .fc-badge { font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
+  .fc-badge-primary { background:#FFFBEB; color:#B45309; border:1px solid #FDE68A; }
+  .fc-badge-minor { background:#EFF6FF; color:#1D4ED8; border:1px solid #BFDBFE; }
+
+  .fc-person-tools { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .fc-tool-details {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:6px 10px; flex:1; min-width:180px;
+  }
+  .fc-tool-summary { cursor:pointer; list-style:none; font-size:0.78rem; font-weight:600; color:var(--muted); }
+  .fc-tool-summary::-webkit-details-marker { display:none; }
+  .fc-tool-body { margin-top:8px; display:flex; flex-direction:column; gap:8px; }
+  .fc-guardian-form { display:flex; gap:8px; flex-wrap:wrap; }
+  .fc-guardian-info { font-size:0.8rem; color:var(--text); }
+  .fc-tool-btn {
+    background:var(--accent); border:none; border-radius:6px; padding:6px 14px;
+    font-size:0.78rem; font-weight:700; color:#fff; cursor:pointer; font-family:'Inter',sans-serif; align-self:flex-start;
+  }
+  .fc-tool-btn-clear { background:var(--surface2); color:var(--down); border:1px solid var(--down-bg); }
 
   .fc-entries { display:flex; flex-direction:column; gap:6px; }
   .fc-entry {

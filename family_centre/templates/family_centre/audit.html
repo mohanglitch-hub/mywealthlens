@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Family Centre — Audit Trail — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="fca-wrap">
+  <div class="fca-header">
+    <div>
+      <h1 class="fca-title">📜 Family Centre — Audit Trail</h1>
+      <p class="fca-sub">Every add, edit, removal, Primary Contact change, and Minor+Guardian change recorded here — never overwrite, never deleted.</p>
+    </div>
+    <a href="{{ url_for('family_centre.dashboard') }}" class="fca-btn-back">← Back to Family Centre</a>
+  </div>
+
+  {% if entries %}
+  <div class="fca-list">
+    {% for e in entries %}
+    <div class="fca-row">
+      <div class="fca-row-main">
+        <span class="fca-tag">{{ e.event_type }}</span>
+        <span class="fca-desc">{{ e.description }}</span>
+      </div>
+      <div class="fca-date">{{ e.created_at.strftime('%d %b %Y, %I:%M %p') }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="fca-empty">No activity recorded yet.</div>
+  {% endif %}
+</div>
+
+<style>
+  .fca-wrap { max-width:800px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
+  .fca-header { display:flex; justify-content:space-between; align-items:flex-start; }
+  .fca-title { font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+  .fca-sub { font-size:0.85rem; color:var(--muted); max-width:520px; }
+  .fca-btn-back { font-size:0.82rem; font-weight:600; color:var(--accent); text-decoration:none; white-space:nowrap; }
+  .fca-btn-back:hover { text-decoration:underline; }
+
+  .fca-list { display:flex; flex-direction:column; gap:8px; }
+  .fca-row {
+    display:flex; justify-content:space-between; align-items:center; gap:14px;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    padding:12px 16px;
+  }
+  .fca-row-main { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .fca-tag {
+    font-size:0.68rem; font-weight:700; padding:3px 10px; border-radius:20px;
+    background:var(--accent-bg); color:var(--accent); white-space:nowrap;
+  }
+  .fca-desc { font-size:0.85rem; color:var(--text); }
+  .fca-date { font-size:0.75rem; color:var(--muted); white-space:nowrap; }
+
+  .fca-empty {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:40px 24px; text-align:center; color:var(--muted); font-size:0.9rem;
+  }
+
+  @media (max-width:640px) {
+    .fca-row { flex-direction:column; align-items:flex-start; gap:6px; }
+  }
+</style>
+{% endblock %}
