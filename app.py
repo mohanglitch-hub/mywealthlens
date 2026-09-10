@@ -10,6 +10,7 @@ from insurance_centre import insurance_bp
 from retirement_centre import retirement_bp
 from wealth import wealth_bp
 from family_centre import family_bp
+from backup import backup_bp
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory
 from insurance_centre.models import InsuranceDocument, InsurancePolicy
@@ -318,7 +319,20 @@ def preferences():
         'version': 'v1.0.0',
         'documents_stored': doc_count,
     }
-    return render_template('preferences.html', user=current_user, system_health=system_health)
+
+    from backup import services as backup_services
+    backup_settings = backup_services.get_settings(current_user.id)
+    backup_last_display = None
+    if backup_settings.get('last_backup_at'):
+        parsed_dt = dt.fromisoformat(backup_settings['last_backup_at'])
+        size_mb = (backup_settings.get('last_backup_size') or 0) / 1024 / 1024
+        backup_last_display = parsed_dt.strftime('%d %b %Y, %I:%M %p') + f' UTC ({size_mb:.1f} MB)'
+
+    return render_template(
+        'preferences.html', user=current_user, system_health=system_health,
+        backup_settings=backup_settings, backup_has_passphrase=backup_services.has_passphrase(),
+        backup_last_display=backup_last_display,
+    )
 
 @app.route('/account')
 @login_required
@@ -1302,6 +1316,7 @@ app.register_blueprint(insurance_bp)
 app.register_blueprint(retirement_bp)
 app.register_blueprint(wealth_bp)
 app.register_blueprint(family_bp)
+app.register_blueprint(backup_bp)
 
 # Phase I — Automatic Wealth Snapshots. Registers `flask wealth
 # snapshot`, invoked by Windows Task Scheduler (see the Phase I
@@ -1310,6 +1325,11 @@ app.register_blueprint(family_bp)
 # routes.py/services.py living inside each module's own folder.
 from wealth.cli import register_cli
 register_cli(app)
+
+# Backup — `flask backup run`, invoked by Windows Task Scheduler
+# every few minutes. Same pattern as Wealth's CLI registration above.
+from backup.cli import register_cli as register_backup_cli
+register_backup_cli(app)
 
 if __name__ == '__main__': 
      app.run(debug=False, port=5000, host='127.0.0.1')
