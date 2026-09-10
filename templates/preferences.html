@@ -233,27 +233,143 @@
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
             <div class="stat-box">
               <div class="stat-label">Last Backup</div>
-              <div class="stat-value">Not Available</div>
+              <div class="stat-value">{{ backup_last_display or 'Not Available' }}</div>
             </div>
             <div class="stat-box">
               <div class="stat-label">Backup Location</div>
-              <div class="stat-value">Not Available</div>
+              <div class="stat-value" style="word-break:break-all;">{{ backup_settings.folder_path or 'Not Available' }}</div>
             </div>
           </div>
 
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="btn-setting" disabled style="opacity:0.5; cursor:not-allowed;">💾 Create Backup</button>
-            <button class="btn-setting" disabled style="opacity:0.5; cursor:not-allowed;">♻️ Restore Backup</button>
+          {% if backup_settings.folder_path and backup_has_passphrase %}
+          <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+            <form method="POST" action="{{ url_for('backup.backup_now') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="btn-setting">💾 Create Backup</button>
+            </form>
+            <button type="button" class="btn-setting" onclick="document.getElementById('bkp-restore-box').style.display='block'; this.style.display='none';">♻️ Restore Backup</button>
+            {% if backup_settings.enabled %}
+            <span style="font-size:0.78rem; color:var(--up); font-weight:600; margin-left:auto;">● Automatic backup is on</span>
+            {% else %}
+            <span style="font-size:0.78rem; color:var(--muted); margin-left:auto;">Automatic backup is off</span>
+            {% endif %}
           </div>
 
           <div class="coming-soon-row" style="border-bottom:none; margin-top:16px; padding-top:0;">
             <span>🔁</span>
             <div>
               <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Automatic Backup</div>
-              <div style="font-size:0.78rem; color:var(--muted);">Coming in a future phase</div>
+              <div style="font-size:0.78rem; color:var(--muted);">Runs quietly on its own every few minutes when anything changes — nothing to click.</div>
             </div>
-            <span class="badge-soon">Soon</span>
+            {% if backup_settings.enabled %}
+            <form method="POST" action="{{ url_for('backup.disable') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="btn-setting" style="padding:6px 14px; font-size:0.78rem;">Turn Off</button>
+            </form>
+            {% else %}
+            <form method="POST" action="{{ url_for('backup.enable') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="btn-setting" style="padding:6px 14px; font-size:0.78rem;">Turn On</button>
+            </form>
+            {% endif %}
           </div>
+
+          <details style="margin-top:16px;">
+            <summary style="cursor:pointer; font-size:0.82rem; font-weight:600; color:var(--muted);">Change folder or passphrase</summary>
+            <form method="POST" action="{{ url_for('backup.setup') }}" style="margin-top:14px;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label for="folder_path">Backup folder path on this computer</label>
+                <div class="input-wrapper">
+                  <input type="text" id="folder_path" name="folder_path"
+                         value="{{ backup_settings.folder_path or '' }}"
+                         placeholder="e.g. C:\Users\Mohan\Google Drive\MyWealthLens Backup" required />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="passphrase">New passphrase</label>
+                <div class="input-wrapper">
+                  <input type="password" id="passphrase" name="passphrase" minlength="8" required />
+                  <button type="button" class="toggle-pw" onclick="togglePw('passphrase',this)">Show</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="confirm_passphrase">Confirm new passphrase</label>
+                <div class="input-wrapper">
+                  <input type="password" id="confirm_passphrase" name="confirm_passphrase" minlength="8" required />
+                  <button type="button" class="toggle-pw" onclick="togglePw('confirm_passphrase',this)">Show</button>
+                </div>
+              </div>
+              <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Save</button>
+            </form>
+          </details>
+
+          <div id="bkp-restore-box" style="display:none; margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">
+            <div style="font-weight:600; color:var(--down); margin-bottom:4px;">⚠️ Restore From Backup</div>
+            <div style="color:var(--muted); font-size:0.82rem; margin-bottom:16px;">
+              This replaces ALL current data — every asset, policy, scheme, and document — with what's in the backup file. There is no undo.
+            </div>
+            <form method="POST" action="{{ url_for('backup.restore') }}" enctype="multipart/form-data">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label for="backup_file">Backup file</label>
+                <div class="input-wrapper">
+                  <input type="file" id="backup_file" name="backup_file" accept=".zip" required />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="restore_passphrase">Backup passphrase</label>
+                <div class="input-wrapper">
+                  <input type="password" id="restore_passphrase" name="passphrase" required />
+                  <button type="button" class="toggle-pw" onclick="togglePw('restore_passphrase',this)">Show</button>
+                </div>
+              </div>
+              <label style="display:flex; align-items:flex-start; gap:8px; font-size:0.8rem; color:var(--text); margin:14px 0; cursor:pointer;">
+                <input type="checkbox" name="confirm_restore" value="yes" required style="margin-top:3px;" />
+                <span>I understand this will permanently overwrite all current data in MyWealthLens.</span>
+              </label>
+              <button type="submit" class="btn-setting" style="background:var(--down-bg); color:var(--down); border-color:var(--down);">Restore Now</button>
+            </form>
+          </div>
+
+          {% else %}
+          <div style="font-size:0.82rem; color:var(--muted); margin-bottom:16px; line-height:1.5;">
+            Point MyWealthLens at a folder on this computer that's synced to the cloud (like your Google
+            Drive folder) and set a passphrase — after that, it keeps itself backed up automatically,
+            with nothing further needed from you. This app never connects to Google or any cloud service
+            directly; it only writes a file into the folder you choose, and that folder's own sync software
+            handles getting it into the cloud.
+          </div>
+          <form method="POST" action="{{ url_for('backup.setup') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <div class="form-group">
+              <label for="folder_path">Backup folder path on this computer</label>
+              <div class="input-wrapper">
+                <input type="text" id="folder_path" name="folder_path"
+                       placeholder="e.g. C:\Users\Mohan\Google Drive\MyWealthLens Backup" required />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="passphrase">Backup passphrase</label>
+              <div class="input-wrapper">
+                <input type="password" id="passphrase" name="passphrase" minlength="8" required />
+                <button type="button" class="toggle-pw" onclick="togglePw('passphrase',this)">Show</button>
+              </div>
+              <div style="font-size:0.72rem; color:var(--muted2); margin-top:6px;">
+                At least 8 characters. Write this down somewhere safe — there's no "forgot passphrase"
+                recovery for a backup; that's what keeps it genuinely private.
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="confirm_passphrase">Confirm passphrase</label>
+              <div class="input-wrapper">
+                <input type="password" id="confirm_passphrase" name="confirm_passphrase" minlength="8" required />
+                <button type="button" class="toggle-pw" onclick="togglePw('confirm_passphrase',this)">Show</button>
+              </div>
+            </div>
+            <button type="submit" class="btn-primary" style="width:auto; padding:10px 28px;">Set Up Backup</button>
+          </form>
+          {% endif %}
         </div>
       </section>
 
