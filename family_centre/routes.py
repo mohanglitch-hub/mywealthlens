@@ -431,11 +431,12 @@ def _build_tree_data(people):
     in the wrong row would misrepresent the family structure this
     chart exists to show correctly.
     """
-    ROW_Y = {-1: 90, 0: 300, 1: 510}
+    ROW_Y = {-1: 110, 0: 320, 1: 530}
     BUS_TOP_Y = (ROW_Y[-1] + ROW_Y[0]) / 2
     BUS_BOTTOM_Y = (ROW_Y[0] + ROW_Y[1]) / 2
     SPACING = 160
-    MIN_WIDTH = 700
+    MIN_WIDTH = 800
+    ROW_LABEL_OFFSET = 50  # px above each row's node centre-line
 
     parents, children, siblings, spouses, other = [], [], [], [], []
     for p in people:
@@ -468,7 +469,7 @@ def _build_tree_data(people):
 
     if not (parents or children or siblings or spouses):
         return {"has_tree": False, "other": other, "viewbox_width": MIN_WIDTH,
-                "viewbox_height": 600, "nodes": [], "edges": []}
+                "viewbox_height": 600, "nodes": [], "edges": [], "row_labels": []}
 
     # Middle row, left to right: siblings, then You, then spouse(s) —
     # spouse always immediately beside You.
@@ -498,26 +499,55 @@ def _build_tree_data(people):
     union_x = (you_node["x"] + spouse_nodes[0]["x"]) / 2 if spouse_nodes else you_node["x"]
     union_y = ROW_Y[0]
 
-    edges = []  # each: {"type": "trunk"/"branch", "x1","y1","x2","y2"}
+    edges = []  # each: {"kind": ..., "x1","y1","x2","y2", "arrow": bool}
+    row_labels = []
 
     for s in spouse_nodes:
-        edges.append({"x1": you_node["x"], "y1": you_node["y"], "x2": s["x"], "y2": s["y"], "kind": "spouse"})
+        edges.append({"x1": you_node["x"], "y1": you_node["y"], "x2": s["x"], "y2": s["y"], "kind": "spouse", "arrow": False})
     for s in sibling_nodes:
-        edges.append({"x1": union_x, "y1": union_y, "x2": s["x"], "y2": s["y"], "kind": "sibling"})
+        edges.append({"x1": union_x, "y1": union_y, "x2": s["x"], "y2": s["y"], "kind": "sibling", "arrow": False})
+
+    row_labels.append({
+        "text": "You & Family",
+        "x": sum(n["x"] for n in middle_nodes) / len(middle_nodes),
+        "y": ROW_Y[0] - ROW_LABEL_OFFSET,
+    })
 
     if parent_nodes:
-        edges.append({"x1": union_x, "y1": union_y, "x2": union_x, "y2": BUS_TOP_Y, "kind": "trunk"})
-        xs = [n["x"] for n in parent_nodes]
-        edges.append({"x1": min(xs), "y1": BUS_TOP_Y, "x2": max(xs), "y2": BUS_TOP_Y, "kind": "bus"})
+        # The bus line must span far enough to reach BOTH the parents'
+        # own positions AND wherever the trunk down to You/spouse sits
+        # (union_x) — previously this only spanned the parents' own
+        # x-range, so whenever union_x fell outside that range (e.g.
+        # no spouse recorded, so the trunk aligns under You alone,
+        # which is rarely exactly between the parents), the bus line
+        # and the trunk never actually touched on screen.
+        xs = [n["x"] for n in parent_nodes] + [union_x]
+        edges.append({"x1": min(xs), "y1": BUS_TOP_Y, "x2": max(xs), "y2": BUS_TOP_Y, "kind": "bus", "arrow": False})
         for n in parent_nodes:
-            edges.append({"x1": n["x"], "y1": BUS_TOP_Y, "x2": n["x"], "y2": n["y"], "kind": "trunk"})
+            edges.append({"x1": n["x"], "y1": n["y"], "x2": n["x"], "y2": BUS_TOP_Y, "kind": "trunk", "arrow": False})
+        # Single arrowhead where the parents' lineage reaches your
+        # generation — drawn bus-to-union (not union-to-bus) so the
+        # arrow lands pointing down at You, not back up at the bus.
+        edges.append({"x1": union_x, "y1": BUS_TOP_Y, "x2": union_x, "y2": union_y, "kind": "trunk", "arrow": True})
+        row_labels.append({
+            "text": "Parents",
+            "x": sum(n["x"] for n in parent_nodes) / len(parent_nodes),
+            "y": ROW_Y[-1] - ROW_LABEL_OFFSET,
+        })
 
     if child_nodes:
-        edges.append({"x1": union_x, "y1": union_y, "x2": union_x, "y2": BUS_BOTTOM_Y, "kind": "trunk"})
-        xs = [n["x"] for n in child_nodes]
-        edges.append({"x1": min(xs), "y1": BUS_BOTTOM_Y, "x2": max(xs), "y2": BUS_BOTTOM_Y, "kind": "bus"})
+        xs = [n["x"] for n in child_nodes] + [union_x]
+        edges.append({"x1": union_x, "y1": union_y, "x2": union_x, "y2": BUS_BOTTOM_Y, "kind": "trunk", "arrow": False})
+        edges.append({"x1": min(xs), "y1": BUS_BOTTOM_Y, "x2": max(xs), "y2": BUS_BOTTOM_Y, "kind": "bus", "arrow": False})
         for n in child_nodes:
-            edges.append({"x1": n["x"], "y1": BUS_BOTTOM_Y, "x2": n["x"], "y2": n["y"], "kind": "trunk"})
+            # Arrowhead at each child — descent flows from You/spouse
+            # down to each of them individually.
+            edges.append({"x1": n["x"], "y1": BUS_BOTTOM_Y, "x2": n["x"], "y2": n["y"], "kind": "trunk", "arrow": True})
+        row_labels.append({
+            "text": "Children",
+            "x": sum(n["x"] for n in child_nodes) / len(child_nodes),
+            "y": ROW_Y[1] - ROW_LABEL_OFFSET,
+        })
 
     all_nodes = parent_nodes + middle_nodes + child_nodes
     viewbox_height = ROW_Y[1] + 120
@@ -526,6 +556,7 @@ def _build_tree_data(people):
         "has_tree": True,
         "nodes": all_nodes,
         "edges": edges,
+        "row_labels": row_labels,
         "other": other,
         "viewbox_width": viewbox_width,
         "viewbox_height": viewbox_height,
