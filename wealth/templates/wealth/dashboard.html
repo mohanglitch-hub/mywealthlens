@@ -136,7 +136,6 @@
       <div class="wealth-list-card-title"><span class="wealth-list-card-icon">💰</span>Assets</div>
       <div style="display:flex; gap:14px; align-items:center;">
         <a href="{{ url_for('wealth.assets_listing') }}" class="wealth-view-all-link">View All →</a>
-        <a href="{{ url_for('wealth.add_asset') }}" class="wealth-btn-add">+ Add Asset</a>
       </div>
     </div>
 
@@ -145,6 +144,7 @@
         {% for c in data.category_breakdown %}
         <div class="wealth-category-row">
           <span>{{ c.category }}</span>
+          <span class="wealth-leader"></span>
           <span class="wealth-category-total">{{ format_inr(c.total) }}</span>
         </div>
         {% endfor %}
@@ -180,7 +180,6 @@
       <div class="wealth-list-card-title"><span class="wealth-list-card-icon">📉</span>Liabilities</div>
       <div style="display:flex; gap:14px; align-items:center;">
         <a href="{{ url_for('wealth.liabilities_listing') }}" class="wealth-view-all-link">View All →</a>
-        <a href="{{ url_for('wealth.add_liability') }}" class="wealth-btn-add">+ Add Liability</a>
       </div>
     </div>
 
@@ -189,6 +188,7 @@
         {% for c in data.liability_category_breakdown %}
         <div class="wealth-category-row">
           <span>{{ c.category }}</span>
+          <span class="wealth-leader"></span>
           <span class="wealth-category-total">{{ format_inr(c.total) }}</span>
         </div>
         {% endfor %}
@@ -305,9 +305,7 @@
   .wealth-stat-card--link:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
   .wealth-stat-hint {
     font-size: 0.7rem; color: var(--accent); margin-top: 8px; font-weight: 600;
-    opacity: 0; transition: opacity 0.2s;
   }
-  .wealth-stat-card--link:hover .wealth-stat-hint { opacity: 1; }
   .wealth-stat-networth { border-color: var(--accent); }
   .wealth-stat-primary { border-color: var(--accent); border-width: 1.5px; }
   .wealth-stat-label {
@@ -364,10 +362,11 @@
 
   .wealth-category-breakdown { display: flex; flex-direction: column; gap: 2px; }
   .wealth-category-row {
-    display: flex; justify-content: space-between; padding: 8px 6px; margin: 0 -6px;
+    display: flex; align-items: baseline; gap: 8px; padding: 8px 6px; margin: 0 -6px;
     border-bottom: 1px solid var(--border); font-size: 0.85rem; border-radius: 6px;
     transition: background 0.15s;
   }
+  .wealth-leader { flex: 1; min-width: 20px; border-bottom: 1px dotted var(--border); margin-bottom: 3px; }
   .wealth-category-row:hover { background: var(--surface2); }
   .wealth-category-row:last-child { border-bottom: none; }
   .wealth-category-total { font-family: 'Roboto Mono', monospace; font-weight: 700; color: var(--accent); }

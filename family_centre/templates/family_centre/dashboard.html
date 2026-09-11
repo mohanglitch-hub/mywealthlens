@@ -104,127 +104,134 @@
   <div class="fc-people">
     {% for person in people %}
     <div class="fc-person-card">
-      <div class="fc-person-header">
-        <div class="fc-person-avatar">{{ person.display_name[0]|upper }}</div>
-        <div>
-          <div class="fc-person-name">{{ person.display_name }}</div>
-          <div class="fc-person-count">
-            {{ person.entries|length }} connection{{ 's' if person.entries|length != 1 }}
-            {% if person.contact %}· 📞 {{ person.contact }}{% endif %}
-          </div>
-          {% if person.total_value_at_stake %}
-          <div class="fc-person-value">{{ format_inr(person.total_value_at_stake) }} at stake</div>
-          {% endif %}
-          {% if person.is_primary_contact or person.is_minor %}
-          <div class="fc-person-badges">
-            {% if person.is_primary_contact %}<span class="fc-badge fc-badge-primary">⭐ Primary Contact</span>{% endif %}
-            {% if person.is_minor %}<span class="fc-badge fc-badge-minor">🧒 Minor</span>{% endif %}
-          </div>
-          {% endif %}
-        </div>
-      </div>
-
-      <div class="fc-person-tools">
-        <details class="fc-tool-details">
-          <summary class="fc-tool-summary">{{ 'Primary Contact ✓' if person.is_primary_contact else 'Set as Primary Contact' }}</summary>
-          <div class="fc-tool-body">
-            {% if person.is_primary_contact %}
-            <form method="POST" action="{{ url_for('family_centre.clear_primary_contact') }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" name="name" value="{{ person.display_name }}" />
-              <button type="submit" class="fc-tool-btn fc-tool-btn-clear">Unmark Primary Contact</button>
-            </form>
-            {% else %}
-            <form method="POST" action="{{ url_for('family_centre.set_primary_contact') }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" name="name" value="{{ person.display_name }}" />
-              <button type="submit" class="fc-tool-btn">Mark as Primary Contact</button>
-            </form>
-            {% endif %}
-          </div>
-        </details>
-
-        <details class="fc-tool-details">
-          <summary class="fc-tool-summary">{{ 'Minor + Guardian ✓' if person.is_minor else 'Mark as Minor' }}</summary>
-          <div class="fc-tool-body">
-            {% if person.is_minor %}
-            <div class="fc-guardian-info">
-              Guardian: {{ person.guardian_name }}{% if person.guardian_relationship %} ({{ person.guardian_relationship }}){% endif %}{% if person.guardian_contact %} · 📞 {{ person.guardian_contact }}{% endif %}
+      <details class="fc-person-details">
+        <summary class="fc-person-summary">
+          <div class="fc-person-header">
+            <div class="fc-person-avatar">{{ person.display_name[0]|upper }}</div>
+            <div>
+              <div class="fc-person-name">{{ person.display_name }}</div>
+              <div class="fc-person-count">
+                {{ person.entries|length }} connection{{ 's' if person.entries|length != 1 }}
+                {% if person.contact %}· 📞 {{ person.contact }}{% endif %}
+              </div>
+              {% if person.total_value_at_stake %}
+              <div class="fc-person-value">{{ format_inr(person.total_value_at_stake) }} at stake</div>
+              {% endif %}
+              {% if person.is_primary_contact or person.is_minor %}
+              <div class="fc-person-badges">
+                {% if person.is_primary_contact %}<span class="fc-badge fc-badge-primary">⭐ Primary Contact</span>{% endif %}
+                {% if person.is_minor %}<span class="fc-badge fc-badge-minor">🧒 Minor</span>{% endif %}
+              </div>
+              {% endif %}
             </div>
-            <form method="POST" action="{{ url_for('family_centre.clear_minor_guardian') }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" name="name" value="{{ person.display_name }}" />
-              <button type="submit" class="fc-tool-btn fc-tool-btn-clear">Clear Minor + Guardian Status</button>
-            </form>
-            {% else %}
-            <form method="POST" action="{{ url_for('family_centre.set_minor_guardian') }}" class="fc-guardian-form">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <input type="hidden" name="name" value="{{ person.display_name }}" />
-              <input type="text" name="guardian_name" placeholder="Guardian's name" class="fc-edit-input" required />
-              <input type="text" name="guardian_relationship" placeholder="Relationship (optional)" class="fc-edit-input" />
-              <input type="text" name="guardian_contact" placeholder="Guardian's contact (optional)" class="fc-edit-input" />
-              <button type="submit" class="fc-tool-btn">Save</button>
-            </form>
-            {% endif %}
           </div>
-        </details>
-      </div>
+          <span class="fc-person-chevron">▸</span>
+        </summary>
 
-      <div class="fc-entries">
-        {% for e in person.entries %}
-        {% if e.direction == 'manual' %}
-          <div class="fc-entry fc-entry-manual">
-            <details class="fc-edit-details">
-              <summary class="fc-entry-summary">
-                <span class="fc-entry-tag fc-tag-manual">Family Member</span>
-                {% if e.relationship %}<span class="fc-entry-item">{{ e.relationship }}</span>{% endif %}
-                <span class="fc-edit-hint">Edit</span>
-              </summary>
-              <form method="POST" action="{{ url_for('family_centre.edit_person', person_id=e.family_person_id) }}" class="fc-edit-form">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                <input type="text" name="name" value="{{ e.raw_name }}" class="fc-edit-input" required />
-                <input type="text" name="relationship" value="{{ e.relationship or '' }}" placeholder="Relationship" class="fc-edit-input" />
-                <button type="submit" class="fc-edit-save">Save</button>
-              </form>
+        <div class="fc-person-body">
+          <div class="fc-person-tools">
+            <details class="fc-tool-details">
+              <summary class="fc-tool-summary">{{ 'Primary Contact ✓' if person.is_primary_contact else 'Set as Primary Contact' }}</summary>
+              <div class="fc-tool-body">
+                {% if person.is_primary_contact %}
+                <form method="POST" action="{{ url_for('family_centre.clear_primary_contact') }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="name" value="{{ person.display_name }}" />
+                  <button type="submit" class="fc-tool-btn fc-tool-btn-clear">Unmark Primary Contact</button>
+                </form>
+                {% else %}
+                <form method="POST" action="{{ url_for('family_centre.set_primary_contact') }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="name" value="{{ person.display_name }}" />
+                  <button type="submit" class="fc-tool-btn">Mark as Primary Contact</button>
+                </form>
+                {% endif %}
+              </div>
             </details>
-            <form method="POST" action="{{ url_for('family_centre.delete_person', person_id=e.family_person_id) }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="submit" class="fc-entry-delete" title="Remove">✕</button>
-            </form>
+
+            <details class="fc-tool-details">
+              <summary class="fc-tool-summary">{{ 'Minor + Guardian ✓' if person.is_minor else 'Mark as Minor' }}</summary>
+              <div class="fc-tool-body">
+                {% if person.is_minor %}
+                <div class="fc-guardian-info">
+                  Guardian: {{ person.guardian_name }}{% if person.guardian_relationship %} ({{ person.guardian_relationship }}){% endif %}{% if person.guardian_contact %} · 📞 {{ person.guardian_contact }}{% endif %}
+                </div>
+                <form method="POST" action="{{ url_for('family_centre.clear_minor_guardian') }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="name" value="{{ person.display_name }}" />
+                  <button type="submit" class="fc-tool-btn fc-tool-btn-clear">Clear Minor + Guardian Status</button>
+                </form>
+                {% else %}
+                <form method="POST" action="{{ url_for('family_centre.set_minor_guardian') }}" class="fc-guardian-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="name" value="{{ person.display_name }}" />
+                  <input type="text" name="guardian_name" placeholder="Guardian's name" class="fc-edit-input" required />
+                  <input type="text" name="guardian_relationship" placeholder="Relationship (optional)" class="fc-edit-input" />
+                  <input type="text" name="guardian_contact" placeholder="Guardian's contact (optional)" class="fc-edit-input" />
+                  <button type="submit" class="fc-tool-btn">Save</button>
+                </form>
+                {% endif %}
+              </div>
+            </details>
           </div>
-        {% else %}
-        <a href="{{ e.link }}" class="fc-entry">
-          <div class="fc-entry-main">
-            {% if e.direction == 'nominee' %}
-              <div class="fc-entry-line">
-                <span class="fc-entry-tag fc-tag-nominee">Nominee</span>
-                <span class="fc-entry-item">{{ e.item_name }}</span>
-              </div>
-              <div class="fc-entry-detail">
-                {{ e.relationship }}{% if e.percentage %} · {{ e.percentage }}% share{% endif %}{% if e.value_at_stake %} · {{ format_inr(e.value_at_stake) }}{% endif %} · {{ e.source }}
-              </div>
-            {% elif e.direction == 'heir' %}
-              <div class="fc-entry-line">
-                <span class="fc-entry-tag fc-tag-heir">Will Inherit</span>
-                <span class="fc-entry-item">{{ e.item_name }}</span>
-              </div>
-              <div class="fc-entry-detail">
-                {% if e.relationship %}{{ e.relationship }} · {% endif %}{% if e.percentage %}{{ e.percentage }}% share · {% endif %}{% if e.value_at_stake %}{{ format_inr(e.value_at_stake) }} · {% endif %}{{ e.source }}
+
+          <div class="fc-entries">
+            {% for e in person.entries %}
+            {% if e.direction == 'manual' %}
+              <div class="fc-entry fc-entry-manual">
+                <details class="fc-edit-details">
+                  <summary class="fc-entry-summary">
+                    <span class="fc-entry-tag fc-tag-manual">Family Member</span>
+                    {% if e.relationship %}<span class="fc-entry-item">{{ e.relationship }}</span>{% endif %}
+                    <span class="fc-edit-hint">Edit</span>
+                  </summary>
+                  <form method="POST" action="{{ url_for('family_centre.edit_person', person_id=e.family_person_id) }}" class="fc-edit-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                    <input type="text" name="name" value="{{ e.raw_name }}" class="fc-edit-input" required />
+                    <input type="text" name="relationship" value="{{ e.relationship or '' }}" placeholder="Relationship" class="fc-edit-input" />
+                    <button type="submit" class="fc-edit-save">Save</button>
+                  </form>
+                </details>
+                <form method="POST" action="{{ url_for('family_centre.delete_person', person_id=e.family_person_id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <button type="submit" class="fc-entry-delete" title="Remove">✕</button>
+                </form>
               </div>
             {% else %}
-              <div class="fc-entry-line">
-                <span class="fc-entry-tag fc-tag-benefactor">Gave You</span>
-                <span class="fc-entry-item">{{ e.item_name }}</span>
+            <a href="{{ e.link }}" class="fc-entry">
+              <div class="fc-entry-main">
+                {% if e.direction == 'nominee' %}
+                  <div class="fc-entry-line">
+                    <span class="fc-entry-tag fc-tag-nominee">Nominee</span>
+                    <span class="fc-entry-item">{{ e.item_name }}</span>
+                  </div>
+                  <div class="fc-entry-detail">
+                    {{ e.relationship }}{% if e.percentage %} · {{ e.percentage }}% share{% endif %}{% if e.value_at_stake %} · {{ format_inr(e.value_at_stake) }}{% endif %} · {{ e.source }}
+                  </div>
+                {% elif e.direction == 'heir' %}
+                  <div class="fc-entry-line">
+                    <span class="fc-entry-tag fc-tag-heir">Will Inherit</span>
+                    <span class="fc-entry-item">{{ e.item_name }}</span>
+                  </div>
+                  <div class="fc-entry-detail">
+                    {% if e.relationship %}{{ e.relationship }} · {% endif %}{% if e.percentage %}{{ e.percentage }}% share · {% endif %}{% if e.value_at_stake %}{{ format_inr(e.value_at_stake) }} · {% endif %}{{ e.source }}
+                  </div>
+                {% else %}
+                  <div class="fc-entry-line">
+                    <span class="fc-entry-tag fc-tag-benefactor">Gave You</span>
+                    <span class="fc-entry-item">{{ e.item_name }}</span>
+                  </div>
+                  <div class="fc-entry-detail">
+                    {% if e.relationship %}{{ e.relationship }} · {% endif %}{{ e.detail }}{% if e.date_received %} · Received {{ e.date_received.strftime('%d %b %Y') }}{% endif %}
+                  </div>
+                {% endif %}
               </div>
-              <div class="fc-entry-detail">
-                {% if e.relationship %}{{ e.relationship }} · {% endif %}{{ e.detail }}{% if e.date_received %} · Received {{ e.date_received.strftime('%d %b %Y') }}{% endif %}
-              </div>
+            </a>
             {% endif %}
+            {% endfor %}
           </div>
-        </a>
-        {% endif %}
-        {% endfor %}
-      </div>
+        </div>
+      </details>
     </div>
     {% endfor %}
   </div>
@@ -248,9 +255,9 @@
 </div>
 
 <style>
-  .fc-wrap { max-width:900px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
-  .fc-header { display:flex; justify-content:space-between; align-items:flex-start; }
-  .fc-header-actions { display:flex; gap:10px; flex-wrap:wrap; }
+  .fc-wrap { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
+  .fc-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+  .fc-header-actions { display:flex; gap:10px; flex-wrap:nowrap; flex-shrink:0; }
   .fc-btn-pdf { background:#EFF6FF; color:#3B82F6; border:1px solid #93C5FD; border-radius:8px; padding:10px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; transition:all 0.2s; white-space:nowrap; }
   .fc-btn-pdf:hover { background:#3B82F6; color:#fff; }
   .fc-btn-audit { background:var(--surface2); color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:0.82rem; font-weight:600; text-decoration:none; transition:all 0.2s; white-space:nowrap; }
@@ -320,7 +327,7 @@
     background:var(--surface); border:1px solid var(--border); border-radius:14px;
     padding:20px; box-shadow:var(--shadow-sm);
   }
-  .fc-person-header { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
+  .fc-person-header { display:flex; align-items:center; gap:12px; }
   .fc-person-avatar {
     width:40px; height:40px; border-radius:50%; background:var(--accent-bg); color:var(--accent);
     display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1.1rem; flex-shrink:0;
@@ -332,6 +339,17 @@
   .fc-badge { font-size:0.68rem; font-weight:700; padding:3px 9px; border-radius:20px; white-space:nowrap; }
   .fc-badge-primary { background:#FFFBEB; color:#B45309; border:1px solid #FDE68A; }
   .fc-badge-minor { background:#EFF6FF; color:#1D4ED8; border:1px solid #BFDBFE; }
+
+  .fc-person-summary {
+    list-style:none; cursor:pointer;
+    display:flex; justify-content:space-between; align-items:center; gap:12px;
+  }
+  .fc-person-summary::-webkit-details-marker { display:none; }
+  .fc-person-chevron {
+    font-size:0.85rem; color:var(--muted); transition:transform 0.2s; flex-shrink:0;
+  }
+  .fc-person-details[open] .fc-person-chevron { transform:rotate(90deg); }
+  .fc-person-body { margin-top:16px; padding-top:16px; border-top:1px solid var(--border); }
 
   .fc-person-tools { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
   .fc-tool-details {
@@ -395,6 +413,8 @@
   @media (max-width:640px) {
     .fc-stats { grid-template-columns:1fr; }
     .fc-add-form { flex-direction:column; }
+    .fc-header { flex-direction:column; }
+    .fc-header-actions { flex-wrap:wrap; }
   }
   @media (min-width:641px) and (max-width:900px) {
     .fc-stats { grid-template-columns:repeat(2, 1fr); }
