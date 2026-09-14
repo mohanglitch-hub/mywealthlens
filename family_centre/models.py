@@ -37,6 +37,8 @@ class TimelineEvent:
     PRIMARY_CONTACT_UNSET = "Primary Contact Unset"
     MINOR_STATUS_SET      = "Minor + Guardian Set"
     MINOR_STATUS_CLEARED  = "Minor + Guardian Cleared"
+    CHILD_ADDED           = "Child Added"
+    SPOUSE_ADDED          = "Spouse Added"
 
 
 class FamilyPerson(db.Model):
@@ -53,6 +55,22 @@ class FamilyPerson(db.Model):
     connection elsewhere — deleting it would just clear that
     metadata, not remove the person (they'd still show up via their
     nominee/benefactor/heir entry).
+
+    RECURSIVE STRUCTURE (spouse_id / parent_family_person_id):
+    Family Centre's People view classifies top-level people (Parents/
+    Siblings/Spouse/Children) purely from free-text relationship
+    strings relative to the logged-in user — that's deliberately
+    unchanged, and still how someone first appears in the tree. These
+    two new self-referential columns let the tree extend BELOW that
+    top level to any depth: a top-level child can now have their own
+    recorded spouse and their own children, who can each have theirs,
+    and so on — a real recursive family graph, not just three fixed
+    rows. parent_family_person_id must point at a FamilyPerson row
+    (not at "the logged-in user" — the user has no row of their own),
+    so attaching a child to someone who currently only exists via a
+    nominee/heir/benefactor entry first requires an on-demand
+    FamilyPerson row for them (via get_or_create_family_person,
+    exactly the same mechanism Primary Contact/Minor already use).
     """
     __tablename__ = "family_person"
 
@@ -71,6 +89,24 @@ class FamilyPerson(db.Model):
     guardian_name          = db.Column(db.String(200), nullable=True)
     guardian_relationship  = db.Column(db.String(100), nullable=True)
     guardian_contact       = db.Column(db.String(100), nullable=True)
+
+    # ── Recursive tree links ─────────────────────────────────────────
+    spouse_id = db.Column(db.Integer, db.ForeignKey("family_person.id"), nullable=True)
+    # Self-referential, symmetric in meaning (if A.spouse_id = B, treat
+    # B as A's spouse regardless of which row set it) but only ever
+    # written on ONE side by services.py — see set_spouse().
+
+    parent_family_person_id = db.Column(db.Integer, db.ForeignKey("family_person.id"), nullable=True)
+    # If set, this person is a CHILD of that FamilyPerson (and of
+    # their spouse, if any). NULL means this person sits at the top
+    # level, positioned purely by relationship-text classification —
+    # exactly today's behaviour, untouched.
+
+    spouse = db.relationship("FamilyPerson", remote_side=[id], foreign_keys=[spouse_id])
+    children = db.relationship(
+        "FamilyPerson", backref=db.backref("parent_person", remote_side=[id]),
+        foreign_keys=[parent_family_person_id],
+    )
 
     def __repr__(self):
         return f"<FamilyPerson {self.name} ({self.relationship})>"

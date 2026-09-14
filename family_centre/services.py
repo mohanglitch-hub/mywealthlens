@@ -165,7 +165,121 @@ def clear_minor_guardian(user_id, name):
     return person
 
 
-# ── Metadata lookup for the People view ──────────────────────────────────
+# ── Recursive tree — add spouse / add child to ANY person ────────────────
+
+def add_spouse(user_id, person_name, spouse_name):
+    """
+    Records `spouse_name` as the spouse of `person_name` — either can
+    be a brand-new name or an existing FamilyPerson (found via
+    get_or_create_family_person, so this works whether the person
+    already has a row or only exists via a nominee/heir/benefactor
+    entry so far). Symmetric relationship, written on the PERSON's
+    side only (person.spouse_id = spouse.id) — the tree-building code
+    checks both directions, so it doesn't matter which side "owns"
+    the link; it only matters that exactly one row holds it, so a
+    person is never shown with two different reported spouses from
+    each side disagreeing.
+    """
+    spouse_name = (spouse_name or "").strip()
+    if not spouse_name:
+        return None, "A spouse's name is required."
+
+    person = get_or_create_family_person(user_id, person_name)
+    if person is None:
+        return None, "Person not found."
+
+    spouse = get_or_create_family_person(user_id, spouse_name)
+    person.spouse_id = spouse.id
+
+    log_timeline(
+        user_id, TimelineEvent.SPOUSE_ADDED,
+        f"{spouse.name} added as {person.name}'s spouse",
+        person_name=person.name,
+    )
+    db.session.commit()
+    return spouse, None
+
+
+def add_child(user_id, person_name, child_name, child_relationship=None):
+    """
+    Adds `child_name` as a child of `person_name` in the recursive
+    tree — this is what lets the diagram go beyond the three
+    top-level rows: a child (or grandchild, or further down) can have
+    their own children added the exact same way, to any depth.
+
+    `person_name` is first resolved/created via
+    get_or_create_family_person, exactly like Primary Contact/Minor
+    already do — someone who only exists today as, say, an Insurance
+    nominee gets a real FamilyPerson row the first time you attach a
+    child to them, since parent_family_person_id has to point at an
+    actual row, not just a name.
+    """
+    child_name = (child_name or "").strip()
+    if not child_name:
+        return None, "A name is required."
+
+    parent = get_or_create_family_person(user_id, person_name)
+    if parent is None:
+        return None, "Person not found."
+
+    child = FamilyPerson(
+        user_id=user_id, name=child_name,
+        relationship=(child_relationship or "").strip() or None,
+        is_manual=True, parent_family_person_id=parent.id,
+    )
+    db.session.add(child)
+
+    log_timeline(
+        user_id, TimelineEvent.CHILD_ADDED,
+        f"{child_name} added as {parent.name}'s child",
+        person_name=child_name,
+    )
+    db.session.commit()
+    return child, None
+
+
+def _find_spouse(person):
+    """Checks both directions — person.spouse_id, or someone else
+    whose spouse_id points back at person — so it doesn't matter
+    which side of the pair the link was originally written on."""
+    if person.spouse_id:
+        return FamilyPerson.query.get(person.spouse_id)
+    return FamilyPerson.query.filter_by(spouse_id=person.id).first()
+
+
+def build_subtree(person):
+    """
+    Recursively builds a nested dict for everything BELOW this
+    FamilyPerson in the tree — their spouse (if any) and their
+    children, each of whom is walked the same way to any depth. This
+    is what a top-level Parents/You&Family/Children node expands into
+    once someone starts recording a top-level person's own spouse or
+    children — the tree isn't limited to the original three rows.
+
+    Returns None if this person has no FamilyPerson row at all yet
+    (nothing to recurse into — they've never had a spouse or child
+    attached), so callers can skip rendering an expansion arrow for
+    people with nothing further down.
+    """
+    if person is None:
+        return None
+    spouse = _find_spouse(person)
+    children = FamilyPerson.query.filter_by(
+        user_id=person.user_id, parent_family_person_id=person.id
+    ).order_by(FamilyPerson.name).all()
+
+    return {
+        "id": person.id,
+        "name": person.name,
+        "relationship": person.relationship,
+        "is_primary_contact": person.is_primary_contact,
+        "is_minor": person.is_minor,
+        "spouse": {"id": spouse.id, "name": spouse.name} if spouse else None,
+        "children": [build_subtree(c) for c in children],
+    }
+
+
+
 
 def get_metadata_by_name(user_id):
     """
