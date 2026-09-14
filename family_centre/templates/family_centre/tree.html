@@ -2,6 +2,44 @@
 {% block title %}Family Centre — Family Tree — MyWealthLens{% endblock %}
 
 {% block content %}
+
+{% macro render_branch(branch) %}
+<div class="ftree-branch">
+  <div class="ftree-branch-avatar">{{ branch.name[0]|upper }}</div>
+  <div class="ftree-branch-ribbon">
+    <div class="ftree-branch-name">{{ branch.name }}{% if branch.spouse %} <span class="ftree-branch-amp">&amp;</span> {{ branch.spouse.name }}{% endif %}</div>
+    {% if branch.relationship %}<div class="ftree-branch-rel">{{ branch.relationship }}</div>{% endif %}
+  </div>
+
+  <details class="ftree-branch-tools">
+    <summary class="ftree-branch-tools-summary">+ Add spouse or child</summary>
+    <div class="ftree-branch-tools-body">
+      <form method="POST" action="{{ url_for('family_centre.add_spouse') }}" class="ftree-add-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="name" value="{{ branch.name }}" />
+        <input type="text" name="spouse_name" placeholder="Spouse's name" class="ftree-add-input" required />
+        <button type="submit" class="ftree-add-btn">Add Spouse</button>
+      </form>
+      <form method="POST" action="{{ url_for('family_centre.add_child_route') }}" class="ftree-add-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="name" value="{{ branch.name }}" />
+        <input type="text" name="child_name" placeholder="Child's name" class="ftree-add-input" required />
+        <input type="text" name="child_relationship" placeholder="Relationship (optional)" class="ftree-add-input" />
+        <button type="submit" class="ftree-add-btn">Add Child</button>
+      </form>
+    </div>
+  </details>
+
+  {% if branch.children %}
+  <div class="ftree-branch-list">
+    {% for child in branch.children %}
+      {{ render_branch(child) }}
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}
+
 <div class="ftree-wrap">
   <div class="ftree-header">
     <div>
@@ -103,6 +141,39 @@
     </div>
   </div>
   {% endif %}
+
+  {% if extended_branches %}
+  <div class="ftree-extended">
+    <div class="ftree-extended-title">🌿 Extended Family</div>
+    <div class="ftree-extended-sub">Anyone above who has their own spouse or children recorded shows their branch here — add as many generations as you like.</div>
+    <div class="ftree-extended-list">
+      {% for branch in extended_branches %}
+        {{ render_branch(branch) }}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="ftree-add-any">
+    <details class="ftree-add-details">
+      <summary class="ftree-add-summary">+ Add a spouse or child to someone</summary>
+      <div class="ftree-add-body">
+        <form method="POST" action="{{ url_for('family_centre.add_spouse') }}" class="ftree-add-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="text" name="name" placeholder="Existing person's name" class="ftree-add-input" required />
+          <input type="text" name="spouse_name" placeholder="Spouse's name" class="ftree-add-input" required />
+          <button type="submit" class="ftree-add-btn">Add Spouse</button>
+        </form>
+        <form method="POST" action="{{ url_for('family_centre.add_child_route') }}" class="ftree-add-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="text" name="name" placeholder="Parent's name" class="ftree-add-input" required />
+          <input type="text" name="child_name" placeholder="Child's name" class="ftree-add-input" required />
+          <input type="text" name="child_relationship" placeholder="Relationship (optional)" class="ftree-add-input" />
+          <button type="submit" class="ftree-add-btn">Add Child</button>
+        </form>
+      </div>
+    </details>
+  </div>
 </div>
 
 <style>
@@ -173,6 +244,68 @@
   .ftree-other-chip {
     font-size:0.78rem; color:var(--text); background:var(--surface2); border:1px solid var(--border);
     border-radius:20px; padding:5px 12px;
+  }
+
+  .ftree-extended {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:24px 20px 32px; overflow-x:auto;
+  }
+  .ftree-extended-title { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ftree-extended-sub { font-size:0.78rem; color:var(--muted); margin-bottom:20px; }
+  .ftree-extended-list { display:flex; gap:32px; justify-content:center; min-width:min-content; }
+
+  .ftree-branch { display:flex; flex-direction:column; align-items:center; position:relative; padding-top:4px; }
+  .ftree-branch-avatar {
+    width:44px; height:44px; border-radius:50%; background:#059669; color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:1rem;
+    border:2px solid var(--surface); box-shadow:0 0 0 1px var(--border); flex-shrink:0;
+  }
+  .ftree-branch-ribbon {
+    background:#E1F5EE; margin-top:-6px; padding:6px 14px 10px; min-width:70px; text-align:center;
+    clip-path:polygon(0 0, 100% 0, 100% 78%, 50% 100%, 0 78%);
+  }
+  .ftree-branch-name { font-size:0.78rem; font-weight:700; color:#04342C; white-space:nowrap; }
+  .ftree-branch-amp { font-weight:400; opacity:0.7; }
+  .ftree-branch-rel { font-size:0.68rem; color:#0F6E56; margin-top:1px; }
+
+  .ftree-branch-tools { margin-top:6px; }
+  .ftree-branch-tools-summary {
+    cursor:pointer; list-style:none; font-size:0.68rem; font-weight:600; color:var(--muted); text-align:center;
+  }
+  .ftree-branch-tools-summary::-webkit-details-marker { display:none; }
+  .ftree-branch-tools-body {
+    display:flex; flex-direction:column; gap:8px; margin-top:8px; background:var(--surface2);
+    border:1px solid var(--border); border-radius:8px; padding:10px; min-width:160px;
+  }
+
+  .ftree-branch-list {
+    display:flex; gap:20px; padding-top:24px; margin-top:20px; position:relative; justify-content:center;
+  }
+  .ftree-branch-list::before {
+    content:''; position:absolute; top:0; left:10%; right:10%; height:1px; background:#92400E; opacity:0.4;
+  }
+  .ftree-branch-list .ftree-branch::before {
+    content:''; position:absolute; top:-24px; left:50%; width:1px; height:24px; background:#92400E; opacity:0.4;
+  }
+
+  .ftree-add-any { text-align:center; }
+  .ftree-add-details { display:inline-block; }
+  .ftree-add-summary {
+    cursor:pointer; list-style:none; font-size:0.8rem; font-weight:600; color:var(--accent);
+  }
+  .ftree-add-summary::-webkit-details-marker { display:none; }
+  .ftree-add-body {
+    display:flex; gap:16px; flex-wrap:wrap; justify-content:center; margin-top:14px;
+    background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px;
+  }
+  .ftree-add-form { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .ftree-add-input {
+    border:1px solid var(--border); border-radius:6px; padding:7px 10px; font-size:0.8rem;
+    background:var(--surface2); color:var(--text); font-family:'Inter',sans-serif; width:150px;
+  }
+  .ftree-add-btn {
+    background:var(--accent); border:none; border-radius:6px; padding:7px 14px;
+    font-size:0.78rem; font-weight:700; color:#fff; cursor:pointer; font-family:'Inter',sans-serif;
   }
 </style>
 {% endblock %}

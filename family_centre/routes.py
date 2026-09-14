@@ -726,14 +726,55 @@ def audit_trail():
 @family_bp.route("/tree")
 @login_required
 def family_tree():
-    """Visual family tree — radial diagram, You at the centre."""
+    """Visual family tree — radial diagram, You at the centre, with
+    an Extended Family section below for anyone who has their own
+    recorded spouse or children beyond the three top-level rows."""
     people = _build_people(current_user.id)
     tree_data = _build_tree_data(people)
+
+    metadata_by_name = services.get_metadata_by_name(current_user.id)
+    extended_branches = []
+    for node in tree_data.get("nodes", []):
+        fp = metadata_by_name.get(node["name"].strip().lower())
+        if fp is None:
+            continue
+        subtree = services.build_subtree(fp)
+        if subtree and (subtree["spouse"] or subtree["children"]):
+            extended_branches.append(subtree)
+
     return render_template(
         "family_centre/tree.html",
         tree_data=tree_data,
         people_count=len(people),
+        extended_branches=extended_branches,
     )
+
+
+@family_bp.route("/people/add-spouse", methods=["POST"])
+@login_required
+def add_spouse():
+    name = (request.form.get("name") or "").strip()
+    spouse_name = (request.form.get("spouse_name") or "").strip()
+    spouse, error = services.add_spouse(current_user.id, name, spouse_name)
+    if error:
+        flash(error, "error")
+    else:
+        flash(f'"{spouse.name}" added as {name}\'s spouse.', "success")
+    return redirect(url_for("family_centre.family_tree"))
+
+
+@family_bp.route("/people/add-child", methods=["POST"])
+@login_required
+def add_child_route():
+    name = (request.form.get("name") or "").strip()
+    child_name = (request.form.get("child_name") or "").strip()
+    child_relationship = request.form.get("child_relationship")
+    child, error = services.add_child(current_user.id, name, child_name, child_relationship)
+    if error:
+        flash(error, "error")
+    else:
+        flash(f'"{child.name}" added as {name}\'s child.', "success")
+    return redirect(url_for("family_centre.family_tree"))
 
 
 @family_bp.route("/export/pdf")
