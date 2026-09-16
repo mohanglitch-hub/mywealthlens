@@ -19,11 +19,6 @@
     {% endif %}
   </div>
 
-  <div class="ret-tabs">
-    <a href="{{ url_for('retirement_centre.manage_schemes') }}" class="ret-tab">Manage Schemes</a>
-    <span class="ret-tab ret-tab-active">Document Vault</span>
-  </div>
-
   {% if not upload_schemes %}
     <div class="ret-schemes-card">
       <div class="ret-empty-state">
@@ -170,11 +165,6 @@
   .ret-breadcrumb { font-size: 0.95rem; margin-bottom: 4px; }
   .ret-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
   .ret-breadcrumb a:hover { color: var(--accent); }
-
-  .ret-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
-  .ret-tab { padding: 10px 4px; font-size: 0.85rem; font-weight: 600; color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent; margin-right: 20px; }
-  .ret-tab:hover { color: var(--text2); }
-  .ret-tab-active { color: var(--accent); border-bottom-color: var(--accent); }
 
   .ret-summary-grid { display: grid; gap: 16px; }
   .ret-stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; box-shadow: var(--shadow-sm); }
