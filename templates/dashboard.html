@@ -252,11 +252,80 @@
   </div>
   {% endif %}
 
+  <!-- ── Recent Activity (unified across Wealth, Insurance,
+       Retirement, Family Centre). Placed after the wealth section
+       (Save Snapshot etc.) so it reads below it, not above — but
+       still outside the "total > 0" gate above, so it keeps showing
+       even for someone with zero tracked wealth but real Insurance/
+       Retirement/Family activity, same reasoning as Upcoming
+       Commitments at the top of this page. ── -->
+  <div class="ra-card">
+    <div class="ra-header">
+      <span class="ra-icon">🕒</span>
+      <span class="ra-title">Recent Activity</span>
+    </div>
+
+    {% if recent_activity %}
+    <div class="ra-list">
+      {% for event in recent_activity %}
+      <a href="{{ event.link }}" class="ra-row">
+        <span class="ra-module-icon">{{ event.module_icon }}</span>
+        <div class="ra-row-main">
+          <div class="ra-row-top">
+            <span class="ra-event-type" style="color:{{ event.color }};">{{ event.event_type }}</span>
+            <span class="ra-module-tag">{{ event.module }}</span>
+          </div>
+          <div class="ra-desc">{{ event.description }}</div>
+          <div class="ra-time">{{ format_date(event.timestamp) }}</div>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    <a href="{{ url_for('activity_full') }}" class="ra-view-all">View All →</a>
+    {% else %}
+    <div class="ra-empty">No activity in the last 10 days.</div>
+    {% endif %}
+  </div>
+
 </div>
 
 <style>
   /* ── Wrapper ── */
   .dash-wrap { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:20px; }
+
+  .ra-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:20px; box-shadow:var(--shadow-sm);
+  }
+  .ra-header { display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .ra-icon { font-size:1.2rem; }
+  .ra-title { font-size:1.05rem; font-weight:700; color:var(--text); }
+
+  .ra-list { display:flex; flex-direction:column; }
+  .ra-row {
+    display:flex; align-items:flex-start; gap:12px; padding:12px 4px;
+    border-bottom:1px solid var(--border); text-decoration:none; color:inherit; transition:background 0.15s;
+  }
+  .ra-row:last-child { border-bottom:none; }
+  .ra-row:hover { background:var(--surface2); border-radius:8px; }
+  .ra-module-icon { font-size:1.1rem; flex-shrink:0; margin-top:2px; }
+  .ra-row-main { flex:1; min-width:0; }
+  .ra-row-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .ra-event-type { font-size:0.72rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; }
+  .ra-module-tag {
+    font-size:0.68rem; font-weight:600; color:var(--muted); background:var(--surface2);
+    border:1px solid var(--border); border-radius:20px; padding:2px 9px;
+  }
+  .ra-desc { font-size:0.85rem; color:var(--text); margin-top:3px; }
+  .ra-time { font-size:0.75rem; color:var(--muted); margin-top:2px; }
+
+  .ra-view-all {
+    display:block; text-align:center; margin-top:12px; padding-top:12px;
+    border-top:1px solid var(--border); font-size:0.82rem; font-weight:600;
+    color:var(--accent); text-decoration:none;
+  }
+  .ra-view-all:hover { text-decoration:underline; }
+  .ra-empty { font-size:0.85rem; color:var(--muted); text-align:center; padding:20px 0; }
 
   /* ── Row 1: Hero ── */
   .top-row {

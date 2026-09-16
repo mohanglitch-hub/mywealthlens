@@ -545,27 +545,6 @@
     {% endif %}
   </div>
 
-  <!-- ── Timeline ── -->
-  <div class="pd-card">
-    <div class="pd-card-title">📅 Policy Timeline</div>
-    {% if timeline %}
-    <div class="pd-timeline">
-      {% for event in timeline %}
-      <div class="pd-timeline-row">
-        <div class="pd-timeline-dot"></div>
-        <div class="pd-timeline-content">
-          <div class="pd-timeline-event">{{ event.event_type }}</div>
-          <div class="pd-timeline-desc">{{ event.description }}</div>
-          <div class="pd-timeline-time">{{ format_date(event.created_at) }}</div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-    {% else %}
-    <div class="pd-empty-sub">No activity recorded.</div>
-    {% endif %}
-  </div>
-
 </div>
 
 <style>
@@ -636,16 +615,6 @@
   .pd-doc-info     { flex:1; min-width:0; }
   .pd-doc-name     { font-weight:500; color:var(--text); font-size:0.875rem; }
   .pd-doc-meta     { font-size:0.75rem; color:var(--muted); margin-top:2px; }
-
-  /* Timeline */
-  .pd-timeline     { display:flex; flex-direction:column; gap:0; }
-  .pd-timeline-row { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid var(--border); }
-  .pd-timeline-row:last-child { border-bottom:none; }
-  .pd-timeline-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); margin-top:5px; flex-shrink:0; }
-  .pd-timeline-content { flex:1; }
-  .pd-timeline-event { font-size:0.82rem; font-weight:600; color:var(--text); }
-  .pd-timeline-desc  { font-size:0.8rem; color:var(--text2); margin-top:2px; }
-  .pd-timeline-time  { font-size:0.72rem; color:var(--muted); margin-top:4px; }
 
   /* Empty */
   .pd-empty-sub    { font-size:0.85rem; color:var(--muted); font-style:italic; padding:8px 0; }

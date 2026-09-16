@@ -292,3 +292,19 @@ def get_metadata_by_name(user_id):
     """
     rows = FamilyPerson.query.filter_by(user_id=user_id).all()
     return {p.name.strip().lower(): p for p in rows}
+
+
+def get_recent_activity(user_id, limit=50):
+    """
+    Latest N FamilyTimeline entries — used by the main Dashboard's
+    unified Activity feed (see root-level activity.py). Family
+    Centre's own dedicated Audit Trail page has been removed; this is
+    the sole remaining consumer of FamilyTimeline for display, but
+    the table itself and all the log_timeline() calls throughout this
+    module are unchanged.
+    """
+    return (FamilyTimeline.query
+            .filter_by(user_id=user_id)
+            .order_by(FamilyTimeline.created_at.desc())
+            .limit(limit)
+            .all())

@@ -13,6 +13,21 @@ from family_centre import family_bp
 from backup import backup_bp
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory
+
+
+def format_date(d, fmt="%d %b %Y"):
+    """Format a date/datetime for display. Returns '—' if None. Own
+    copy rather than importing wealth.utils.format_date — matches
+    this project's established per-module convention (see
+    wealth/utils.py's own top-of-file note on this)."""
+    if not d:
+        return "—"
+    try:
+        if isinstance(d, dt):
+            return d.strftime(fmt)
+        return dt.strptime(str(d)[:10], "%Y-%m-%d").strftime(fmt)
+    except Exception:
+        return str(d)
 from insurance_centre.models import InsuranceDocument, InsurancePolicy
 
 app = Flask(__name__)
@@ -281,6 +296,15 @@ def dashboard():
         'other':       h.other,
     } for h in history]
 
+    # ── Unified cross-module Recent Activity (Wealth, Insurance,
+    # Retirement, Family Centre merged into one feed) — replaces the
+    # four separate per-module "Recent Activity" widgets, their
+    # per-item equivalents (Insurance's Policy Timeline, Retirement's
+    # per-scheme Activity section), and Family Centre's old standalone
+    # Audit Trail page. See activity.py.
+    import activity as activity_module
+    recent_activity = activity_module.get_unified_activity(current_user.id, days=10)[:5]
+
     return render_template('dashboard.html',
         user=current_user, total=total_value,
         real_estate=real_estate_value, precious_metals=precious_metals_value,
@@ -290,7 +314,21 @@ def dashboard():
         stock_count=len(stocks), mutual_funds=mfs, stock_list=stocks,
         asset_count=asset_count, history_data=history_data,
         upcoming_renewals=upcoming_renewals,
-        has_any_renewal_dates=has_any_renewal_dates)
+        has_any_renewal_dates=has_any_renewal_dates,
+        recent_activity=recent_activity,
+        format_date=format_date)
+
+
+@app.route('/activity')
+@login_required
+def activity_full():
+    """Full unified activity feed — the "View All" destination from
+    the Dashboard's Recent Activity widget. Same underlying data
+    (get_unified_activity), just unsliced."""
+    import activity as activity_module
+    all_activity = activity_module.get_unified_activity(current_user.id, days=10)
+    return render_template('activity.html', all_activity=all_activity, format_date=format_date)
+
 
 @app.route('/assets')
 @login_required

@@ -49,7 +49,7 @@ from flask import render_template, redirect, url_for, request, flash
 from flask_login import login_required, current_user
 
 from family_centre import family_bp
-from family_centre.models import FamilyPerson, FamilyTimeline
+from family_centre.models import FamilyPerson
 from insurance_centre.models import InsuranceNominee, InsurancePolicy
 from retirement_centre.models import RetirementSchemeNominee, RetirementScheme
 from wealth.models import WealthAsset, WealthAssetHeir
@@ -707,20 +707,6 @@ def clear_minor_guardian():
     services.clear_minor_guardian(current_user.id, name)
     flash(f'"{name}" — minor + guardian status cleared.', "success")
     return redirect(url_for("family_centre.dashboard"))
-
-
-@family_bp.route("/audit")
-@login_required
-def audit_trail():
-    """Family Centre's own audit trail — matches the Insurance /
-    Retirement Timeline pattern, most-recent first."""
-    entries = (
-        FamilyTimeline.query
-        .filter_by(user_id=current_user.id)
-        .order_by(FamilyTimeline.created_at.desc())
-        .all()
-    )
-    return render_template("family_centre/audit.html", entries=entries)
 
 
 @family_bp.route("/tree")
