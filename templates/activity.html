@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Activity — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="act-wrap">
+  <div class="act-header">
+    <div>
+      <h1 class="act-title">🕒 Activity</h1>
+      <p class="act-sub">Everything that's happened across MyWealthLens in the last 10 days.</p>
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="act-btn-back">← Back to Dashboard</a>
+  </div>
+
+  {% if all_activity %}
+  <div class="act-list">
+    {% for event in all_activity %}
+    <a href="{{ event.link }}" class="act-row">
+      <span class="act-module-icon">{{ event.module_icon }}</span>
+      <div class="act-row-main">
+        <div class="act-row-top">
+          <span class="act-event-type" style="color:{{ event.color }};">{{ event.event_type }}</span>
+          <span class="act-module-tag">{{ event.module }}</span>
+        </div>
+        <div class="act-desc">{{ event.description }}</div>
+        <div class="act-time">{{ format_date(event.timestamp) }}</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="act-empty">
+    <div class="act-empty-title">No activity in the last 10 days</div>
+    <div class="act-empty-sub">Anything you add, update, or upload across Wealth, Insurance, Retirement, or Family Centre will show up here.</div>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+  .act-wrap { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:18px; }
+  .act-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+  .act-title { font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+  .act-sub { font-size:0.85rem; color:var(--muted); }
+  .act-btn-back {
+    font-size:0.82rem; font-weight:600; color:var(--muted); text-decoration:none; white-space:nowrap;
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:10px 14px;
+    transition:all 0.2s;
+  }
+  .act-btn-back:hover { border-color:var(--accent); color:var(--accent); }
+
+  .act-list {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:8px 24px; box-shadow:var(--shadow-sm);
+  }
+  .act-row {
+    display:flex; align-items:flex-start; gap:14px; padding:14px 4px;
+    border-bottom:1px solid var(--border); text-decoration:none; color:inherit; transition:background 0.15s;
+  }
+  .act-row:last-child { border-bottom:none; }
+  .act-row:hover { background:var(--surface2); border-radius:8px; }
+  .act-module-icon { font-size:1.2rem; flex-shrink:0; margin-top:2px; }
+  .act-row-main { flex:1; min-width:0; }
+  .act-row-top { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .act-event-type { font-size:0.74rem; font-weight:700; text-transform:uppercase; letter-spacing:0.06em; }
+  .act-module-tag {
+    font-size:0.68rem; font-weight:600; color:var(--muted); background:var(--surface2);
+    border:1px solid var(--border); border-radius:20px; padding:2px 9px;
+  }
+  .act-desc { font-size:0.88rem; color:var(--text); margin-top:3px; }
+  .act-time { font-size:0.76rem; color:var(--muted); margin-top:2px; }
+
+  .act-empty {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:40px 24px; text-align:center;
+  }
+  .act-empty-title { font-size:1rem; font-weight:700; color:var(--text); margin-bottom:8px; }
+  .act-empty-sub { font-size:0.85rem; color:var(--muted); max-width:420px; margin:0 auto; line-height:1.5; }
+</style>
+{% endblock %}

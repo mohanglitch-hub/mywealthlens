@@ -86,18 +86,12 @@ def dashboard():
     analytics_summary = analytics_service.dashboard_summary(
         current_user.id, assets_for_analytics)
 
-    # Recent Activity — derived from existing timestamps only, see
-    # services.get_recent_activity() docstring for the full rationale
-    # on why this doesn't need a new audit-event table.
-    recent_activity = services.get_recent_activity(current_user.id, limit=7)
-
     return render_template(
         "wealth/dashboard.html",
         data=data,
         history_trend=history_trend,
         document_summary=document_summary,
         analytics_summary=analytics_summary,
-        recent_activity=recent_activity,
         asset_category_icons=_asset_category_icons(),
         liability_category_icons=_liability_category_icons(),
         format_inr=format_inr,

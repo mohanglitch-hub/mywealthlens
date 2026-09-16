@@ -202,35 +202,6 @@
     {% endif %}
   </div>
 
-  <!-- ── Recent Activity ── -->
-  {% if data.recent_activity %}
-  <div class="ret-schemes-card">
-    <h2 class="ret-section-title" style="margin-bottom:16px;">Recent Activity <span class="ret-activity-sub">— last {{ data.recent_activity|length }} activities</span></h2>
-    <div class="ret-activity-list">
-      {% for a in data.recent_activity %}
-      {% set badge_map = {
-        'Scheme Created':      ('🟢', 'badge-created'),
-        'Scheme Updated':      ('✏️', 'badge-updated'),
-        'Contribution Added':  ('💰', 'badge-created'),
-        'Balance Updated':     ('📊', 'badge-updated'),
-        'Document Uploaded':   ('📄', 'badge-document'),
-        'Archived':            ('📦', 'badge-archived'),
-        'Restored':            ('♻️', 'badge-restored'),
-      } %}
-      {% set badge = badge_map.get(a.event_type, ('📋', 'badge-default')) %}
-      <div class="ret-activity-row">
-        <div class="ret-activity-badge {{ badge[1] }}">{{ badge[0] }}</div>
-        <div class="ret-activity-content">
-          <div class="ret-activity-event {{ badge[1] }}">{{ a.event_type|upper }}</div>
-          <div class="ret-activity-desc">{{ a.description }}</div>
-          <div class="ret-activity-time">{{ format_date(a.created_at) }}</div>
-        </div>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
 </div>
 
 <style>
@@ -299,7 +270,6 @@
     margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
   }
   .ret-section-title { font-size: 1rem; font-weight: 600; color: var(--text); }
-  .ret-activity-sub { font-size: 0.78rem; font-weight: 400; color: var(--muted); }
   .ret-btn-add {
     background: var(--accent); border: 1px solid var(--accent);
     border-radius: 8px; padding: 8px 16px; font-size: 0.82rem;
@@ -398,25 +368,6 @@
   .ret-empty-icon { font-size: 2.5rem; margin-bottom: 12px; }
   .ret-empty-title { font-weight: 600; font-size: 1rem; margin-bottom: 6px; color: var(--text); }
   .ret-empty-sub { font-size: 0.85rem; max-width: 420px; margin: 0 auto; }
-
-  /* ── Recent Activity ── */
-  .ret-activity-list { display: flex; flex-direction: column; }
-  .ret-activity-row { display: flex; align-items: flex-start; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border); }
-  .ret-activity-row:last-child { border-bottom: none; }
-  .ret-activity-badge {
-    width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center;
-    justify-content: center; font-size: 0.9rem; flex-shrink: 0; margin-top: 2px;
-  }
-  .ret-activity-content { flex: 1; }
-  .ret-activity-desc { font-size: 0.875rem; color: var(--text); line-height: 1.4; }
-  .ret-activity-time { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
-  .ret-activity-event { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 2px; }
-  .badge-created  { background: var(--up-bg);     color: var(--up); }
-  .badge-updated  { background: var(--accent-bg); color: var(--accent); }
-  .badge-document { background: #EFF6FF;          color: #3B82F6; }
-  .badge-archived { background: #FEF3C7;          color: #D97706; }
-  .badge-restored { background: var(--up-bg);     color: var(--up); }
-  .badge-default  { background: var(--surface2);  color: var(--muted); }
 
   @media (max-width: 1024px) {
     .ret-category-grid { grid-template-columns: repeat(3, 1fr); }

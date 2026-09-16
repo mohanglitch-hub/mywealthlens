@@ -954,6 +954,7 @@ def get_recent_activity(user_id, limit=7):
             "event_type": "Asset Added", "icon": "🟢", "badge_class": "wa-badge-created",
             "description": f"Added \"{a.name}\" ({a.category})",
             "timestamp": a.created_at,
+            "entity_kind": "asset", "entity_id": a.id,
         })
 
     for l in (WealthLiability.query.filter_by(user_id=user_id)
@@ -962,6 +963,7 @@ def get_recent_activity(user_id, limit=7):
             "event_type": "Liability Added", "icon": "🟢", "badge_class": "wa-badge-created",
             "description": f"Added \"{l.name}\" ({l.category})",
             "timestamp": l.created_at,
+            "entity_kind": "liability", "entity_id": l.id,
         })
 
     for v in (WealthValueSnapshot.query.filter_by(user_id=user_id)
@@ -979,6 +981,7 @@ def get_recent_activity(user_id, limit=7):
             "event_type": "Valuation Recorded", "icon": "✏️", "badge_class": "wa-badge-updated",
             "description": f"Recorded a{'n initial' if v.note == 'Initial Value' else ' new'} valuation for \"{entity_name}\"",
             "timestamp": v.created_at,
+            "entity_kind": v.entity_type, "entity_id": v.entity_id,
         })
 
     for d in (WealthDocument.query.filter_by(user_id=user_id)
@@ -987,6 +990,7 @@ def get_recent_activity(user_id, limit=7):
             "event_type": "Document Uploaded", "icon": "📄", "badge_class": "wa-badge-document",
             "description": f"Uploaded \"{d.original_name}\"",
             "timestamp": d.uploaded_at,
+            "entity_kind": "document", "entity_id": d.id,
         })
 
     for s in (WealthSnapshot.query.filter_by(user_id=user_id, source=SnapshotSource.MANUAL)
@@ -995,6 +999,7 @@ def get_recent_activity(user_id, limit=7):
             "event_type": "Snapshot Created", "icon": "📸", "badge_class": "wa-badge-snapshot",
             "description": "Saved a Wealth Snapshot",
             "timestamp": datetime.combine(s.snapshot_date, datetime.min.time()),
+            "entity_kind": "snapshot", "entity_id": s.id,
         })
 
     events.sort(key=lambda e: e["timestamp"], reverse=True)
