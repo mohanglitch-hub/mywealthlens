@@ -14,12 +14,10 @@
       <h1>Manage Retirement Schemes</h1>
       <p>Search, filter, and manage all your retirement schemes in one place.</p>
     </div>
-    <a href="{{ url_for('retirement_centre.export_pdf') }}" class="ret-btn-outline">📄 Download PDF</a>
-  </div>
-
-  <div class="ret-tabs">
-    <span class="ret-tab ret-tab-active">Manage Schemes</span>
-    <a href="{{ url_for('retirement_centre.document_vault') }}" class="ret-tab">Document Vault</a>
+    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <a href="{{ url_for('retirement_centre.add_scheme') }}" class="ret-btn-add">+ Add Scheme</a>
+      <a href="{{ url_for('retirement_centre.export_pdf') }}" class="ret-btn-outline">📄 Download PDF</a>
+    </div>
   </div>
 
   <!-- ── Status Tabs ── -->
@@ -56,7 +54,6 @@
   <div class="ret-schemes-card">
     <div class="ret-schemes-header">
       <div class="ret-section-label">{{ schemes|length }} Scheme{{ 's' if schemes|length != 1 }}</div>
-      <a href="{{ url_for('retirement_centre.add_scheme') }}" class="ret-btn-add">+ Add Scheme</a>
     </div>
 
     {% if schemes %}
@@ -142,17 +139,9 @@
   .ret-breadcrumb a { color: var(--accent2); text-decoration: none; font-weight: 600; }
   .ret-breadcrumb a:hover { color: var(--accent); }
 
-  .ret-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
-  .ret-tab {
-    padding: 10px 4px; font-size: 0.85rem; font-weight: 600; color: var(--muted);
-    text-decoration: none; border-bottom: 2px solid transparent; margin-right: 20px;
-  }
-  .ret-tab:hover { color: var(--text2); }
-  .ret-tab-active { color: var(--accent); border-bottom-color: var(--accent); }
-
-  .ret-status-tabs { display: flex; gap: 10px; }
+  .ret-status-tabs { display: flex; gap: 8px; margin-bottom: 4px; }
   .ret-status-tab {
-    padding: 8px 20px; border-radius: 20px; font-size: 1.1rem; font-weight: 700;
+    padding: 6px 16px; border-radius: 16px; font-size: 0.82rem; font-weight: 600;
     background: var(--surface2); border: 1px solid var(--border);
     text-decoration: none; transition: all 0.2s;
   }
