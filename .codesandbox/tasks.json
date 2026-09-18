@@ -1,0 +1,18 @@
+{
+  "setupTasks": [
+    {
+      "name": "Install dependencies",
+      "command": "pip install -r requirements.txt"
+    }
+  ],
+  "tasks": {
+    "start": {
+      "name": "Start MyWealthLens",
+      "command": "HOST=0.0.0.0 PORT=5000 python3 app.py",
+      "runAtStart": true,
+      "preview": {
+        "port": 5000
+      }
+    }
+  }
+}

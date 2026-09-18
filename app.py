@@ -1369,5 +1369,12 @@ register_cli(app)
 from backup.cli import register_cli as register_backup_cli
 register_backup_cli(app)
 
-if __name__ == '__main__': 
-     app.run(debug=False, port=5000, host='127.0.0.1')
+if __name__ == '__main__':
+     # HOST defaults to 127.0.0.1 for local security (see SECURITY.md).
+     # Cloud preview environments like CodeSandbox set HOST=0.0.0.0 via
+     # their own env config so the dev server is reachable through their
+     # proxy. PORT is also configurable since some sandboxes assign their
+     # own port.
+     host = os.environ.get('HOST', '127.0.0.1')
+     port = int(os.environ.get('PORT', 5000))
+     app.run(debug=False, port=port, host=host)
