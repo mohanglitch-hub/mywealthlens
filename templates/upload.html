@@ -12,17 +12,22 @@
   <!-- Info banner -->
   <div class="info-banner">
     <div style="font-weight:600; color:var(--accent); margin-bottom:8px;">📋 How to get your CAS PDF</div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" class="info-grid">
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;" class="info-grid">
       <div>
         <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Mutual Funds</div>
         <div>Visit <a href="https://www.camsonline.com/InvestorServices/COL_ISStmtOfAccount.aspx" target="_blank" class="link-accent">CAMS</a>
         or <a href="https://mfs.kfintech.com/investor/General/ConsolidatedAccountStatement" target="_blank" class="link-accent">KFintech</a>
-        → Request CAS → Password is your <strong style="color:var(--text);">PAN in uppercase</strong></div>
+        → Request CAS → set <strong style="color:var(--text);">Statement Type: Detailed</strong> (not Summary — Detailed is what makes XIRR possible)
+        → Password is your <strong style="color:var(--text);">PAN in uppercase</strong></div>
       </div>
       <div>
         <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Stocks (CDSL/NSDL)</div>
         <div>Visit <a href="https://www.cdslindia.com/Investors/ConsolidatedAccountStatement.html" target="_blank" class="link-accent">CDSL</a>
         → CAS → Password is your <strong style="color:var(--text);">8-digit date of birth</strong> (DDMMYYYY)</div>
+      </div>
+      <div>
+        <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Stock Tradebook (for XIRR)</div>
+        <div>Export your buy/sell tradebook as CSV from your broker (Zerodha Console → Reports → Tradebook works out of the box; most other brokers' CSV exports should also be recognised automatically).</div>
       </div>
     </div>
   </div>
@@ -113,6 +118,26 @@
       {% endif %}
     </div>
 
+    <!-- Broker Tradebook -->
+    <div class="upload-card">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+        <span style="font-size:1.4rem;">📉</span>
+        <div style="font-weight:600; font-size:1rem; color:var(--text);">Stock Tradebook (XIRR)</div>
+      </div>
+      <div style="color:var(--muted); font-size:0.8rem; margin-bottom:20px;">Buy/Sell CSV from your broker — adds real per-stock &amp; portfolio XIRR</div>
+
+      <form method="POST" action="/upload/tradebook" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+        <div class="form-group">
+          <label>Select CSV file</label>
+          <input type="file" name="csv_file" accept=".csv" required class="file-input" />
+        </div>
+        <div class="field-hint">Needs columns for symbol/ISIN, date, buy/sell, quantity and price — most broker exports already have these, just named slightly differently.</div>
+        <button type="submit" class="btn-primary" style="margin-top:14px;">Import Tradebook</button>
+      </form>
+    </div>
+
   </div>
 
   <!-- What happens section -->
@@ -121,11 +146,15 @@
     <div class="info-grid" style="gap:16px; font-size:0.85rem; color:var(--muted2); line-height:1.6;">
       <div>
         <div style="color:var(--accent); font-weight:600; margin-bottom:4px;">📊 Mutual Funds</div>
-        PDF is read locally → Folio, scheme, units and NAV extracted → Saved to your account → Appears on dashboard
+        PDF is read → every purchase, redemption, switch & dividend extracted (not just current balances) → real XIRR calculated per fund and across your portfolio → appears on dashboard
       </div>
       <div>
         <div style="color:var(--accent); font-weight:600; margin-bottom:4px;">📈 Stocks</div>
         PDF is read locally → ISIN and quantity extracted → Live NSE price fetched → Current value calculated → Saved to dashboard
+      </div>
+      <div>
+        <div style="color:var(--accent); font-weight:600; margin-bottom:4px;">📉 Tradebook</div>
+        CSV is read → every buy/sell extracted → holdings rebuilt from actual trades → real per-stock & portfolio XIRR calculated, same as mutual funds
       </div>
     </div>
     <div class="privacy-note">
@@ -142,11 +171,11 @@
     border-radius:10px; padding:16px 20px; margin-bottom:28px;
     font-size:0.85rem; color:var(--muted); line-height:1.6;
   }
-  .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .info-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); gap:12px; }
   .link-accent { color:var(--accent); text-decoration:none; font-weight:500; }
   .link-accent:hover { text-decoration:underline; }
 
-  .upload-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:28px; }
+  .upload-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px,1fr)); gap:20px; margin-bottom:28px; }
   .upload-card {
     background:var(--surface); border:1px solid var(--border);
     border-radius:12px; padding:28px; box-shadow:var(--shadow-sm);

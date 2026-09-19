@@ -3,16 +3,22 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import bcrypt, pdfplumber, io, re, os, secrets, yfinance as yf
-from datetime import datetime as dt, timedelta
-from models import db, User, MutualFund, Stock, Goal, NetWorthHistory
+import bcrypt, pdfplumber, io, re, os, secrets, csv, yfinance as yf
+import casparser
+from datetime import datetime as dt, timedelta, date as _date_cls
+from models import (db, User, MutualFund, MutualFundTransaction, Stock, StockTransaction,
+                     Goal, GoalHoldingLink, NetWorthHistory)
+from cas_xirr import scheme_xirr as _scheme_xirr, portfolio_xirr as _portfolio_xirr
+from stock_xirr import stock_xirr as _stock_xirr, portfolio_stock_xirr as _portfolio_stock_xirr
+import goal_glide
 from insurance_centre import insurance_bp
 from retirement_centre import retirement_bp
 from wealth import wealth_bp
 from family_centre import family_bp
 from backup import backup_bp
 from wealth.services import WealthStatisticsService
-from wealth.models import WealthAssetCategory
+from wealth.models import WealthAssetCategory, WealthAsset
+from retirement_centre.models import RetirementScheme
 
 
 def format_date(d, fmt="%d %b %Y"):
@@ -397,54 +403,97 @@ def extract_pdf_text(file_bytes, password=None):
         app.logger.warning('PDF extraction failed: %s', e)
         return None
 
-def _clean_scheme_name(raw):
-    """Clean up MF scheme names extracted from CAMS/KFintech PDFs."""
-    name = raw.strip()
-    # Remove option/plan suffixes that are PDF artifacts
-    name = re.sub(r'\s*[-–]\s*(Regular|Direct)\s*[-–]\s*(Growth|IDCW|Dividend).*$', 
-                  lambda m: m.group(0), name)
-    # Remove trailing garbage: dates, page numbers, numeric artifacts
-    name = re.sub(r'\s+\d{1,2}[/-]\d{1,2}[/-]\d{2,4}.*$', '', name)
-    name = re.sub(r'\s+Page\s+\d+.*$', '', name, flags=re.IGNORECASE)
-    name = re.sub(r'\s{2,}', ' ', name)
-    name = name.strip(" -|/\\.,")
-    # Capitalise properly if all caps
-    if name == name.upper() and len(name) > 4:
-        name = name.title()
-    return name[:100] if name else 'Unknown Fund'
+def _scheme_date(d):
+    """casparser's TransactionData.date is Union[date, str] — normalise
+    both to a plain date, or None if unparseable."""
+    if isinstance(d, _date_cls):
+        return d
+    try:
+        return dt.strptime(str(d)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return None
 
-def parse_cams_pdf(text):
-    holdings = []
-    folio_blocks = re.split(r'Folio' + r'\s*No\s*[:\.]', text, flags=re.IGNORECASE)
-    for block in folio_blocks[1:]:
-        lines = [l.strip() for l in block.strip().split(chr(10)) if l.strip()]
-        if not lines:
-            continue
-        folio = lines[0].strip()
-        amc   = lines[1].strip() if len(lines) > 1 else ''
-        raw_scheme = lines[2].strip() if len(lines) > 2 else ''
-        scheme = _clean_scheme_name(raw_scheme)
-        if not folio or len(folio) > 30:
-            continue
-        units = nav = value = None
-        for line in lines:
-            u = re.search(r'Units' + r'[:\s]+([\d,]+\.?\d*)', line, re.IGNORECASE)
-            n = re.search(r'NAV' + r'[^:]*:\s*([\d,]+\.?\d*)', line, re.IGNORECASE)
-            v = re.search(r'Value' + r'[:\s]+([\d,]+\.?\d*)', line, re.IGNORECASE)
-            if u and not units:
-                try: units = float(u.group(1).replace(',', ''))
-                except: pass
-            if n and not nav:
-                try: nav = float(n.group(1).replace(',', ''))
-                except: pass
-            if v and not value:
-                try: value = float(v.group(1).replace(',', ''))
-                except: pass
-        if units and units > 0 and scheme:
-            holdings.append({'folio': folio, 'amc': amc, 'scheme': scheme,
-                'units': units, 'nav': nav or 0,
-                'value': value or (round(units * nav, 2) if nav else 0)})
-    return holdings
+
+def _decimal_to_float(v):
+    return float(v) if v is not None else None
+
+
+def import_detailed_cas(cas_data, user_id):
+    """
+    Upload CAS rebuild (see migrate_add_mf_transactions.py). Replaces
+    the old hand-rolled regex parser: casparser has already done the
+    hard part (folio/scheme/transaction extraction, running-balance
+    reconciliation — see cas_data.parse_warnings). This function's job
+    is just mapping casparser's typed CASData into our own tables and
+    computing XIRR from the resulting transaction rows.
+
+    Wipes and re-imports ALL of this user's mutual_fund /
+    mutual_fund_transaction rows — same "re-upload overwrites
+    everything" behaviour the old parser had (a DETAILED CAS is
+    cumulative, so this is safe and simple; see the FAQ note we found
+    on comparable tools — re-uploading is the intended way to refresh).
+
+    Only schemes with a positive closing balance become a holding
+    (fully redeemed/closed folios are skipped, matching the old
+    parser's behaviour — not a regression, a known follow-up).
+
+    Returns (holdings_count, transactions_count, portfolio_xirr_pct).
+    """
+    MutualFundTransaction.query.filter_by(user_id=user_id).delete()
+    MutualFund.query.filter_by(user_id=user_id).delete()
+    db.session.flush()
+
+    all_transactions_for_portfolio = []
+    total_current_value = 0.0
+    holdings_count = 0
+    transactions_count = 0
+
+    for folio in cas_data.folios:
+        for scheme in folio.schemes:
+            units = _decimal_to_float(scheme.close)
+            if not units or units <= 0:
+                continue
+            nav = _decimal_to_float(scheme.valuation.nav)
+            value = _decimal_to_float(scheme.valuation.value) or 0.0
+            invested = _decimal_to_float(scheme.valuation.cost)
+
+            mf = MutualFund(
+                user_id=user_id, folio=folio.folio, amc=folio.amc,
+                scheme=scheme.scheme, isin=scheme.isin, amfi_code=scheme.amfi,
+                units=units, nav=nav, value=value, invested=invested,
+                source='cams',
+            )
+            db.session.add(mf)
+            db.session.flush()  # need mf.id for the transaction rows below
+
+            scheme_txns = []
+            for t in scheme.transactions:
+                txn_date = _scheme_date(t.date)
+                if txn_date is None:
+                    continue
+                row = MutualFundTransaction(
+                    user_id=user_id, mutual_fund_id=mf.id,
+                    folio=folio.folio, scheme=scheme.scheme,
+                    date=txn_date,
+                    txn_type=t.type.value if hasattr(t.type, "value") else str(t.type),
+                    description=t.description,
+                    amount=_decimal_to_float(t.amount),
+                    units=_decimal_to_float(t.units),
+                    nav=_decimal_to_float(t.nav),
+                    balance_units=_decimal_to_float(t.balance),
+                )
+                db.session.add(row)
+                scheme_txns.append(row)
+                transactions_count += 1
+
+            mf.xirr = _scheme_xirr(scheme_txns, value)
+            all_transactions_for_portfolio.extend(scheme_txns)
+            total_current_value += value
+            holdings_count += 1
+
+    portfolio_rate = _portfolio_xirr(all_transactions_for_portfolio, total_current_value)
+    db.session.commit()
+    return holdings_count, transactions_count, portfolio_rate
 
 def _clean_stock_name(raw_name):
     """Remove PDF artifacts, page numbers, dates and junk from holding names."""
@@ -566,22 +615,54 @@ def upload_cams():
     except Exception:
         flash('Could not read the uploaded file.', 'error')
         return redirect(url_for('upload'))
-    text = extract_pdf_text(file_bytes, password if password else None)
-    if not text:
+
+    try:
+        cas_data = casparser.read_cas_pdf(io.BytesIO(file_bytes), password, output='dict')
+    except casparser.exceptions.IncorrectPasswordError:
+        flash('Incorrect password. Please check it and try again.', 'error')
+        return redirect(url_for('upload'))
+    except casparser.exceptions.ParserException as e:
+        app.logger.warning('CAS parse failed: %s', e)
+        flash('Could not read this PDF as a CAMS/KFintech CAS statement. '
+              'Please check the file and try again.', 'error')
+        return redirect(url_for('upload'))
+    except Exception as e:
+        app.logger.warning('CAS parse failed (unexpected): %s', e)
         flash('Could not read the PDF. Please check the password and try again.', 'error')
         return redirect(url_for('upload'))
-    holdings = parse_cams_pdf(text)
-    if not holdings:
+
+    if not hasattr(cas_data, 'folios'):
+        # NSDLCASData (a CDSL/NSDL demat statement) landed on the wrong
+        # upload form — it has .accounts, not .folios.
+        flash('This looks like a CDSL/NSDL demat statement, not a CAMS/KFintech '
+              'mutual fund statement. Use the Stocks upload for that instead.', 'error')
+        return redirect(url_for('upload'))
+
+    if not cas_data.folios:
         flash('No mutual fund holdings found in this PDF.', 'error')
         return redirect(url_for('upload'))
-    MutualFund.query.filter_by(user_id=current_user.id).delete()
-    for h in holdings:
-        mf = MutualFund(user_id=current_user.id, folio=h['folio'], amc=h['amc'],
-            scheme=h['scheme'], units=h['units'], nav=h['nav'],
-            value=h['value'], source='cams')
-        db.session.add(mf)
-    db.session.commit()
-    flash(f'Successfully imported {len(holdings)} mutual fund holdings!', 'success')
+
+    holdings_count, transactions_count, portfolio_rate = import_detailed_cas(cas_data, current_user.id)
+
+    if holdings_count == 0:
+        flash('No active mutual fund holdings found in this PDF (all folios may be zero-balance).', 'error')
+        return redirect(url_for('upload'))
+
+    if cas_data.cas_type == 'SUMMARY':
+        flash(f'Imported {holdings_count} mutual fund holdings, but this was a SUMMARY '
+              f'statement — it has no transaction history, so XIRR isn’t available. '
+              f'Re-download from camsonline.com with Statement Type set to “Detailed” '
+              f'to get real returns.', 'warning')
+    else:
+        xirr_msg = f' Portfolio XIRR: {portfolio_rate}%.' if portfolio_rate is not None else ''
+        flash(f'Successfully imported {holdings_count} mutual fund holdings '
+              f'({transactions_count} transactions).{xirr_msg}', 'success')
+
+    if cas_data.parse_warnings:
+        flash(f'{len(cas_data.parse_warnings)} scheme(s) had data that didn’t fully '
+              f'reconcile against the statement’s own running balance — double-check '
+              f'those holdings before relying on their numbers.', 'warning')
+
     return redirect(url_for('upload'))
 
 @app.route('/upload/cdsl', methods=['POST'])
@@ -640,7 +721,251 @@ def delete_all_stocks():
     flash('All stock data cleared.', 'success')
     return redirect(url_for('upload'))
 
-def calculate_goal(target_amt, target_year, current_savings, monthly_sip, annual_return, inflation_rate=0):
+
+# ── Broker tradebook import ──────────────────────────────────────────────────
+# Header names vary by broker — this is deliberately a flexible
+# substring matcher (built against Zerodha's console tradebook export,
+# the most common format for Indian retail investors) rather than a
+# hard-coded column list, so tradebooks from other brokers with
+# differently-cased or differently-ordered but similarly-named columns
+# still have a reasonable chance of matching. Ambiguous or missing
+# columns fail loudly (see import_tradebook()) rather than guessing.
+_TRADEBOOK_COLUMN_HINTS = {
+    'symbol':   ['tradingsymbol', 'symbol', 'scrip', 'stock name', 'company'],
+    'isin':     ['isin'],
+    'date':     ['trade_date', 'trade date', 'date'],
+    'type':     ['trade_type', 'transaction_type', 'txn_type', 'type', 'side'],
+    'quantity': ['quantity', 'qty'],
+    'price':    ['price', 'rate', 'trade_price'],
+}
+
+
+def _match_tradebook_columns(fieldnames):
+    """Returns {field: actual_csv_column_name} for each of the 6 needed
+    fields, or raises ValueError naming what's missing."""
+    normalized = {f.strip().lower(): f for f in fieldnames if f}
+    matched = {}
+    missing = []
+    for field, hints in _TRADEBOOK_COLUMN_HINTS.items():
+        found = None
+        for hint in hints:
+            for norm, original in normalized.items():
+                if hint in norm:
+                    found = original
+                    break
+            if found:
+                break
+        if found:
+            matched[field] = found
+        else:
+            missing.append(field)
+    if missing:
+        raise ValueError(
+            f"Could not find a column for: {', '.join(missing)}. "
+            f"Columns found in file: {', '.join(fieldnames)}"
+        )
+    return matched
+
+
+def _parse_tradebook_csv(file_text):
+    """Returns a list of dicts: {symbol, isin, date, txn_type, quantity,
+    price, amount}, one per valid row. Rows that fail to parse (bad
+    date, non-numeric quantity/price, unrecognised BUY/SELL value) are
+    skipped and counted, not silently included with wrong data."""
+    reader = csv.DictReader(file_text.splitlines())
+    if not reader.fieldnames:
+        raise ValueError("File doesn't look like a CSV (no header row found).")
+    cols = _match_tradebook_columns(reader.fieldnames)
+
+    rows = []
+    skipped = 0
+    for raw in reader:
+        try:
+            symbol = (raw.get(cols['symbol']) or '').strip()
+            isin = (raw.get(cols['isin']) or '').strip() or None
+            date_str = (raw.get(cols['date']) or '').strip()
+            type_str = (raw.get(cols['type']) or '').strip().upper()
+            qty = float(raw.get(cols['quantity']) or 0)
+            price = float(raw.get(cols['price']) or 0)
+
+            if type_str in ('BUY', 'B'):
+                txn_type = 'BUY'
+            elif type_str in ('SELL', 'S'):
+                txn_type = 'SELL'
+            else:
+                skipped += 1
+                continue
+
+            txn_date = None
+            for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%d-%b-%Y', '%Y/%m/%d'):
+                try:
+                    txn_date = dt.strptime(date_str[:10], fmt).date()
+                    break
+                except ValueError:
+                    continue
+            if txn_date is None or not symbol or qty <= 0:
+                skipped += 1
+                continue
+
+            rows.append({
+                'symbol': symbol, 'isin': isin, 'date': txn_date,
+                'txn_type': txn_type, 'quantity': qty, 'price': price,
+                'amount': round(qty * price, 2),
+            })
+        except (ValueError, TypeError):
+            skipped += 1
+            continue
+    return rows, skipped
+
+
+def import_tradebook(rows, user_id):
+    """
+    Rebuilds this user's TRADEBOOK-sourced stock holdings from a list
+    of parsed BUY/SELL rows (see _parse_tradebook_csv()). Mirrors
+    import_detailed_cas()'s wipe-and-rebuild approach: only rows with
+    source='tradebook' are wiped first, so stocks imported via the
+    separate CDSL/NSDL CAS upload (source='cdsl') are left untouched —
+    the two import paths are independent, matching how a real investor
+    might use CDSL for a snapshot balance and a broker tradebook for
+    the transaction history behind it.
+
+    Grouped by (symbol, isin): closing quantity = sum(BUY qty) -
+    sum(SELL qty). Only positive-quantity positions become a holding
+    (a fully-sold position is skipped, same convention as mutual
+    funds). Live price is fetched the same way the CDSL importer does;
+    falls back to the last transaction's price if that fails.
+
+    Returns (holdings_count, transactions_count, portfolio_rate).
+    """
+    Stock.query.filter_by(user_id=user_id, source='tradebook').delete()
+    db.session.flush()
+
+    groups = {}
+    for r in rows:
+        key = (r['symbol'], r['isin'])
+        groups.setdefault(key, []).append(r)
+
+    all_transactions_for_portfolio = []
+    total_current_value = 0.0
+    holdings_count = 0
+    transactions_count = 0
+
+    for (symbol, isin), txns in groups.items():
+        txns.sort(key=lambda r: r['date'])
+        net_qty = sum(t['quantity'] if t['txn_type'] == 'BUY' else -t['quantity'] for t in txns)
+        if net_qty <= 0:
+            continue
+
+        last_price = txns[-1]['price'] or 0
+        ticker, live_price = fetch_live_price_by_isin(isin or symbol, symbol)
+        price = live_price or last_price
+        value = round(net_qty * price, 2)
+        invested = sum(t['amount'] for t in txns if t['txn_type'] == 'BUY')
+
+        stock = Stock(
+            user_id=user_id, isin=isin or '', name=symbol, quantity=net_qty,
+            buy_price=last_price, live_price=price, value=value,
+            ticker=ticker, source='tradebook', invested=invested,
+            price_updated_at=dt.utcnow() if live_price else None,
+        )
+        db.session.add(stock)
+        db.session.flush()  # need stock.id for the transaction rows below
+
+        stock_txns = []
+        for t in txns:
+            row = StockTransaction(
+                user_id=user_id, stock_id=stock.id, isin=isin, symbol=symbol,
+                date=t['date'], txn_type=t['txn_type'], quantity=t['quantity'],
+                price=t['price'], amount=t['amount'],
+            )
+            db.session.add(row)
+            stock_txns.append(row)
+            transactions_count += 1
+
+        stock.xirr = _stock_xirr(stock_txns, value)
+        all_transactions_for_portfolio.extend(stock_txns)
+        total_current_value += value
+        holdings_count += 1
+
+    portfolio_rate = _portfolio_stock_xirr(all_transactions_for_portfolio, total_current_value)
+    db.session.commit()
+    return holdings_count, transactions_count, portfolio_rate
+
+
+@app.route('/upload/tradebook', methods=['POST'])
+@login_required
+def upload_tradebook():
+    csv_file = request.files.get('csv_file')
+    if not csv_file or csv_file.filename == '':
+        flash('Please select a CSV file.', 'error')
+        return redirect(url_for('upload'))
+    try:
+        file_text = csv_file.read().decode('utf-8-sig', errors='replace')
+    except Exception:
+        flash('Could not read the uploaded file.', 'error')
+        return redirect(url_for('upload'))
+
+    try:
+        rows, skipped = _parse_tradebook_csv(file_text)
+    except ValueError as e:
+        flash(f'Could not read this as a tradebook CSV: {e}', 'error')
+        return redirect(url_for('upload'))
+
+    if not rows:
+        flash('No valid BUY/SELL rows found in this file.', 'error')
+        return redirect(url_for('upload'))
+
+    holdings_count, transactions_count, portfolio_rate = import_tradebook(rows, current_user.id)
+
+    if holdings_count == 0:
+        flash('No open positions found (all holdings in this tradebook may be fully sold).', 'error')
+        return redirect(url_for('upload'))
+
+    xirr_msg = f' Portfolio XIRR: {portfolio_rate}%.' if portfolio_rate is not None else ''
+    skip_msg = f' ({skipped} row(s) skipped — unrecognised format.)' if skipped else ''
+    flash(f'Imported {holdings_count} stock holdings ({transactions_count} transactions).'
+          f'{xirr_msg}{skip_msg}', 'success')
+    return redirect(url_for('upload'))
+
+def _stepup_sip_future_value(monthly_sip, step_up_pct, annual_return, years):
+    """
+    FV of a monthly SIP that increases by step_up_pct once a year.
+    Year-by-year: each year's 12 payments are grown to THAT year's
+    end (annuity-due — payment at the start of each month, matching
+    the flat-SIP formula's own (1+r) tail factor below), then that
+    year's total is compounded forward to the goal date. The SIP
+    amount for next year is only stepped up after a full year.
+
+    Only called when step_up_pct > 0 — see calculate_goal(). At
+    step_up_pct == 0 this would be mathematically equivalent to the
+    flat formula, but the flat formula's own code path is kept as
+    the one actually used for that case (years of production use,
+    zero reason to risk a rounding-level behaviour change for
+    everyone's existing goals).
+    """
+    r = (annual_return / 100) / 12
+    whole_years = int(years)
+    frac_months = round((years - whole_years) * 12)
+    fv = 0.0
+    sip = monthly_sip
+    for y in range(whole_years):
+        months_remaining = (whole_years - y - 1) * 12 + frac_months
+        if r > 0:
+            fv_this_year = sip * (((1 + r) ** 12 - 1) / r) * (1 + r)
+        else:
+            fv_this_year = sip * 12
+        fv += fv_this_year * ((1 + r) ** months_remaining)
+        sip *= (1 + step_up_pct / 100)
+    if frac_months > 0:
+        if r > 0:
+            fv += sip * (((1 + r) ** frac_months - 1) / r) * (1 + r)
+        else:
+            fv += sip * frac_months
+    return fv
+
+
+def calculate_goal(target_amt, target_year, current_savings, monthly_sip, annual_return,
+                    inflation_rate=0, step_up_pct=0):
     from datetime import datetime as _dt
     current_year = _dt.now().year
     years  = max(target_year - current_year, 0)
@@ -653,7 +978,9 @@ def calculate_goal(target_amt, target_year, current_savings, monthly_sip, annual
     else:
         inflation_adjusted_target = target_amt
 
-    if r > 0:
+    if step_up_pct and step_up_pct > 0:
+        fv_sip = _stepup_sip_future_value(monthly_sip, step_up_pct, annual_return, years)
+    elif r > 0:
         fv_sip = monthly_sip * (((1 + r) ** months - 1) / r) * (1 + r)
     else:
         fv_sip = monthly_sip * months
@@ -680,15 +1007,91 @@ def calculate_goal(target_amt, target_year, current_savings, monthly_sip, annual
         'inflation_applied':          inflation_rate > 0,
     }
 
+def _holding_lookup(holding_type, holding_id):
+    """Returns (holding, raw_value, display_name) for one of the four
+    linkable holding types, or (None, 0, None) if it can't be found
+    (deleted, or a re-upload wiped it — see import_detailed_cas() /
+    import_tradebook(), both of which wipe-and-rebuild on re-import)."""
+    if holding_type == 'mutual_fund':
+        h = MutualFund.query.get(holding_id)
+        return (h, (h.value or 0), h.scheme) if h else (None, 0, None)
+    if holding_type == 'stock':
+        h = Stock.query.get(holding_id)
+        return (h, (h.value or 0), h.name) if h else (None, 0, None)
+    if holding_type == 'wealth_asset':
+        h = WealthAsset.query.get(holding_id)
+        return (h, (h.current_value or 0), h.name) if h else (None, 0, None)
+    if holding_type == 'retirement_scheme':
+        h = RetirementScheme.query.get(holding_id)
+        name = h.custom_type or h.scheme_type if h else None
+        return (h, (h.current_balance or 0), name) if h else (None, 0, None)
+    return (None, 0, None)
+
+
+def _goal_linked_value(goal):
+    """Sum of (holding_value * allocation_pct/100) across a goal's
+    linked holdings, across all four linkable holding types — see
+    GoalHoldingLink's docstring in models.py and _holding_lookup()
+    above. Returns (linked_value, [ {link, holding, name,
+    allocated_value} ... ]) — the list is for the template to render
+    names/values and for goal_glide.rebalance_suggestion(), since
+    GoalHoldingLink can't hold a real SQLAlchemy relationship across
+    holding types."""
+    linked_value = 0.0
+    rows = []
+    for link in goal.links:
+        holding, raw_value, name = _holding_lookup(link.holding_type, link.holding_id)
+        if holding is None:
+            continue  # holding was deleted / re-upload wiped it — link is now stale, skip silently
+        allocated_value = raw_value * (link.allocation_pct / 100)
+        linked_value += allocated_value
+        rows.append({'link': link, 'holding': holding, 'name': name, 'allocated_value': allocated_value})
+    return linked_value, rows
+
+
+GOAL_REVIEW_PERIOD_DAYS = 90
+
+
 @app.route('/goals')
 @login_required
 def goals():
     user_goals = Goal.query.filter_by(user_id=current_user.id).order_by(Goal.target_year).all()
     goals_data = []
+    review_cutoff = dt.utcnow() - timedelta(days=GOAL_REVIEW_PERIOD_DAYS)
     for g in user_goals:
-        calc = calculate_goal(g.target_amt, g.target_year, g.current_savings, g.monthly_sip, g.annual_return, getattr(g, 'inflation_rate', 0) or 0)
-        goals_data.append({'goal': g, 'calc': calc})
-    return render_template('goals.html', goals_data=goals_data)
+        linked_value, linked_rows = _goal_linked_value(g)
+        effective_current = (g.current_savings or 0) + linked_value
+        calc = calculate_goal(g.target_amt, g.target_year, effective_current, g.monthly_sip,
+                               g.annual_return, getattr(g, 'inflation_rate', 0) or 0,
+                               getattr(g, 'step_up_pct', 0) or 0)
+
+        glide_curve = goal_glide.glide_path_curve(g, linked_value=linked_value)
+        rebalance = goal_glide.rebalance_suggestion(g, linked_rows)
+        drawdown = goal_glide.drawdown_curve(g, glide_curve[-1]['projected_corpus'] if glide_curve else 0)
+        needs_review = (g.last_reviewed_at is None) or (g.last_reviewed_at < review_cutoff)
+
+        goals_data.append({
+            'goal': g, 'calc': calc, 'linked_value': linked_value, 'linked_rows': linked_rows,
+            'glide_curve': glide_curve, 'rebalance': rebalance, 'drawdown': drawdown,
+            'needs_review': needs_review,
+        })
+
+    # For the "link a holding" picker — only funds not already fully committed are still offered,
+    # allocation is left to the user to keep sensible (same trust level as the existing nominee %
+    # fields elsewhere in the app, which also don't hard-block over-allocation across records).
+    available_funds = MutualFund.query.filter_by(user_id=current_user.id).order_by(MutualFund.scheme).all()
+    available_stocks = Stock.query.filter_by(user_id=current_user.id).order_by(Stock.name).all()
+    available_wealth_assets = (WealthAsset.query
+        .filter_by(user_id=current_user.id, is_archived=False)
+        .order_by(WealthAsset.name).all())
+    available_retirement_schemes = (RetirementScheme.query
+        .filter_by(user_id=current_user.id, is_archived=False)
+        .order_by(RetirementScheme.scheme_type).all())
+
+    return render_template('goals.html', goals_data=goals_data,
+        available_funds=available_funds, available_stocks=available_stocks,
+        available_wealth_assets=available_wealth_assets,
+        available_retirement_schemes=available_retirement_schemes)
 
 @app.route('/goals/add', methods=['POST'])
 @login_required
@@ -707,17 +1110,89 @@ def add_goal():
         flash('Target year must be in the future.', 'error')
         return redirect(url_for('goals'))
     inflation_rate = safe_float(request.form.get('inflation_rate', '0'))
+    step_up_pct    = safe_float(request.form.get('step_up_pct', '0'))
+    glide_start    = safe_float(request.form.get('glide_start_equity_pct', '75'))
+    glide_end      = safe_float(request.form.get('glide_end_equity_pct', '30'))
+    is_retirement_goal = request.form.get('is_retirement_goal') == 'on'
+    retirement_age        = request.form.get('retirement_age', type=int)
+    life_expectancy        = request.form.get('life_expectancy', type=int) or 85
+    monthly_expense_today  = request.form.get('monthly_expense_today', type=float)
+    expense_inflation_pct  = safe_float(request.form.get('expense_inflation_pct', '6'))
+    post_retirement_return_pct = safe_float(request.form.get('post_retirement_return_pct', '7'))
     goal = Goal(
         user_id=current_user.id, name=name, emoji=emoji,
         target_amt=target_amt, target_year=target_year,
         current_savings=current_savings, monthly_sip=monthly_sip,
         annual_return=annual_return if annual_return > 0 else 12.0,
-        inflation_rate=inflation_rate if inflation_rate >= 0 else 0
+        inflation_rate=inflation_rate if inflation_rate >= 0 else 0,
+        step_up_pct=step_up_pct if step_up_pct >= 0 else 0,
+        glide_start_equity_pct=max(min(glide_start, 100), 0),
+        glide_end_equity_pct=max(min(glide_end, 100), 0),
+        is_retirement_goal=is_retirement_goal,
+        retirement_age=retirement_age if is_retirement_goal else None,
+        life_expectancy=life_expectancy,
+        monthly_expense_today=monthly_expense_today if is_retirement_goal else None,
+        expense_inflation_pct=expense_inflation_pct,
+        post_retirement_return_pct=post_retirement_return_pct,
     )
     db.session.add(goal)
     db.session.commit()
     flash('Goal added successfully!', 'success')
     return redirect(url_for('goals'))
+
+@app.route('/goals/edit/<int:goal_id>', methods=['POST'])
+@login_required
+def edit_goal(goal_id):
+    """Same fields/validation as add_goal(), but updates an existing
+    goal in place — needed because glide-path and retirement-drawdown
+    parameters are usually decided after seeing the goal's first
+    projection, not at creation time. Deliberately doesn't touch
+    last_reviewed_at (editing isn't reviewing — see review_goal())."""
+    goal = Goal.query.get_or_404(goal_id)
+    if goal.user_id != current_user.id:
+        flash('Permission denied.', 'error')
+        return redirect(url_for('goals'))
+
+    name        = request.form.get('name', '').strip()
+    emoji       = request.form.get('emoji', '').strip()
+    target_amt  = safe_float(request.form.get('target_amt'))
+    target_year = int(request.form.get('target_year', 2030))
+    if not name or target_amt <= 0:
+        flash('Please enter a goal name and target amount.', 'error')
+        return redirect(url_for('goals'))
+    if target_year <= 2024:
+        flash('Target year must be in the future.', 'error')
+        return redirect(url_for('goals'))
+
+    is_retirement_goal = request.form.get('is_retirement_goal') == 'on'
+    glide_start = safe_float(request.form.get('glide_start_equity_pct', '75'))
+    glide_end   = safe_float(request.form.get('glide_end_equity_pct', '30'))
+
+    goal.name = name
+    goal.emoji = emoji
+    goal.target_amt = target_amt
+    goal.target_year = target_year
+    goal.current_savings = safe_float(request.form.get('current_savings'))
+    goal.monthly_sip = safe_float(request.form.get('monthly_sip'))
+    annual_return = safe_float(request.form.get('annual_return', '12'))
+    goal.annual_return = annual_return if annual_return > 0 else 12.0
+    inflation_rate = safe_float(request.form.get('inflation_rate', '0'))
+    goal.inflation_rate = inflation_rate if inflation_rate >= 0 else 0
+    step_up_pct = safe_float(request.form.get('step_up_pct', '0'))
+    goal.step_up_pct = step_up_pct if step_up_pct >= 0 else 0
+    goal.glide_start_equity_pct = max(min(glide_start, 100), 0)
+    goal.glide_end_equity_pct = max(min(glide_end, 100), 0)
+    goal.is_retirement_goal = is_retirement_goal
+    goal.retirement_age = request.form.get('retirement_age', type=int) if is_retirement_goal else None
+    goal.life_expectancy = request.form.get('life_expectancy', type=int) or 85
+    goal.monthly_expense_today = request.form.get('monthly_expense_today', type=float) if is_retirement_goal else None
+    goal.expense_inflation_pct = safe_float(request.form.get('expense_inflation_pct', '6'))
+    goal.post_retirement_return_pct = safe_float(request.form.get('post_retirement_return_pct', '7'))
+
+    db.session.commit()
+    flash(f'{goal.name} updated.', 'success')
+    return redirect(url_for('goals'))
+
 
 @app.route('/goals/delete/<int:goal_id>', methods=['POST'])
 @login_required
@@ -729,6 +1204,95 @@ def delete_goal(goal_id):
     db.session.delete(goal)
     db.session.commit()
     flash('Goal deleted.', 'success')
+    return redirect(url_for('goals'))
+
+_HOLDING_OWNER_CHECK = {
+    'mutual_fund':       lambda h, uid: h.user_id == uid,
+    'stock':             lambda h, uid: h.user_id == uid,
+    'wealth_asset':      lambda h, uid: h.user_id == uid,
+    'retirement_scheme': lambda h, uid: h.user_id == uid,
+}
+
+# Sensible default asset_class per holding type, used when the link
+# form doesn't override it (see goals.html's link-form asset_class
+# select, which defaults to this same mapping client-side too).
+_DEFAULT_ASSET_CLASS = {
+    'mutual_fund': 'equity', 'stock': 'equity',
+    'wealth_asset': 'debt', 'retirement_scheme': 'debt',
+}
+
+
+@app.route('/goals/<int:goal_id>/link', methods=['POST'])
+@login_required
+def link_goal_holding(goal_id):
+    goal = Goal.query.get_or_404(goal_id)
+    if goal.user_id != current_user.id:
+        flash('Permission denied.', 'error')
+        return redirect(url_for('goals'))
+
+    # The link form's <select> submits a single "type:id" value (see
+    # goals.html) so one dropdown can list all four holding types
+    # together instead of needing four separate pickers.
+    raw = request.form.get('holding', '')
+    holding_type, _, holding_id_str = raw.partition(':')
+    holding_id = int(holding_id_str) if holding_id_str.isdigit() else None
+    allocation_pct = safe_float(request.form.get('allocation_pct', '100'))
+    asset_class = request.form.get('asset_class') or _DEFAULT_ASSET_CLASS.get(holding_type, 'other')
+    if asset_class not in ('equity', 'debt', 'other'):
+        asset_class = 'other'
+
+    if holding_type not in _HOLDING_OWNER_CHECK or holding_id is None:
+        flash('Please select a valid holding.', 'error')
+        return redirect(url_for('goals'))
+
+    holding, _, name = _holding_lookup(holding_type, holding_id)
+    if not holding or not _HOLDING_OWNER_CHECK[holding_type](holding, current_user.id):
+        flash('Please select a valid holding.', 'error')
+        return redirect(url_for('goals'))
+    if allocation_pct <= 0 or allocation_pct > 100:
+        flash('Allocation must be between 1% and 100%.', 'error')
+        return redirect(url_for('goals'))
+
+    link = GoalHoldingLink(goal_id=goal.id, holding_type=holding_type,
+                            holding_id=holding.id, allocation_pct=allocation_pct,
+                            asset_class=asset_class)
+    db.session.add(link)
+    db.session.commit()
+    flash(f'Linked {name} to {goal.name}.', 'success')
+    return redirect(url_for('goals'))
+
+@app.route('/goals/<int:goal_id>/unlink/<int:link_id>', methods=['POST'])
+@login_required
+def unlink_goal_holding(goal_id, link_id):
+    goal = Goal.query.get_or_404(goal_id)
+    if goal.user_id != current_user.id:
+        flash('Permission denied.', 'error')
+        return redirect(url_for('goals'))
+    link = GoalHoldingLink.query.get_or_404(link_id)
+    if link.goal_id != goal.id:
+        flash('Permission denied.', 'error')
+        return redirect(url_for('goals'))
+    db.session.delete(link)
+    db.session.commit()
+    flash('Holding unlinked from goal.', 'success')
+    return redirect(url_for('goals'))
+
+
+@app.route('/goals/<int:goal_id>/review', methods=['POST'])
+@login_required
+def review_goal(goal_id):
+    """Goal review nudge (see GOAL_REVIEW_PERIOD_DAYS in goals()) —
+    just stamps last_reviewed_at. Deliberately doesn't change any
+    other field: 'reviewing' a goal means the user looked at its
+    current numbers and confirmed they're still fine, not that
+    anything about the goal itself changed."""
+    goal = Goal.query.get_or_404(goal_id)
+    if goal.user_id != current_user.id:
+        flash('Permission denied.', 'error')
+        return redirect(url_for('goals'))
+    goal.last_reviewed_at = dt.utcnow()
+    db.session.commit()
+    flash(f'{goal.name} marked as reviewed.', 'success')
     return redirect(url_for('goals'))
 
 

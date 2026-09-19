@@ -16,6 +16,7 @@
   <div id="addPanel" style="display:none;" class="panel">
     <div class="panel-title">New Financial Goal</div>
     <form method="POST" action="/goals/add">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 
       <div class="form-group">
         <label>Goal Type</label>
@@ -70,12 +71,77 @@
           </div>
         </div>
         <div class="form-group">
-          <div style="background:var(--accent-bg); border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:22px;">
+          <label>Annual SIP Step-up (%/yr) <span style="color:var(--muted); font-weight:400;">— optional</span></label>
+          <input type="number" name="step_up_pct" step="0.1" min="0" max="50" placeholder="e.g. 10" value="0" />
+          <div style="font-size:0.75rem; color:var(--muted); margin-top:4px;">
+            Increases your monthly SIP by this % every year (e.g. with salary hikes). Leave 0 for a flat SIP.
+          </div>
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <div style="background:var(--accent-bg); border:1px solid var(--border); border-radius:8px; padding:12px;">
             <div style="font-size:0.78rem; color:var(--accent); font-weight:600; margin-bottom:4px;">💡 What inflation rate means</div>
             <div style="font-size:0.75rem; color:var(--muted); line-height:1.5;">
               At 6% inflation, ₹1 Cr target today becomes ₹1.8 Cr in 10 years.
               Your SIP is recalculated against the inflation-adjusted target.
             </div>
+          </div>
+        </div>
+        <div class="form-group">
+          <div style="background:var(--accent-bg); border:1px solid var(--border); border-radius:8px; padding:12px;">
+            <div style="font-size:0.78rem; color:var(--accent); font-weight:600; margin-bottom:4px;">💡 What SIP step-up means</div>
+            <div style="font-size:0.75rem; color:var(--muted); line-height:1.5;">
+              A ₹10,000/mo SIP with a 10% yearly step-up becomes ₹11,000/mo in year 2, ₹12,100/mo in year 3, and so on — reaching your target faster without one big jump.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label>Equity Allocation Now (%)</label>
+          <input type="number" name="glide_start_equity_pct" step="1" min="0" max="100" placeholder="e.g. 75" value="75" />
+        </div>
+        <div class="form-group">
+          <label>Equity Allocation at Target Year (%)</label>
+          <input type="number" name="glide_end_equity_pct" step="1" min="0" max="100" placeholder="e.g. 30" value="30" />
+        </div>
+      </div>
+      <div style="font-size:0.75rem; color:var(--muted); margin:-6px 0 14px;">
+        Sets the glide path — how your equity/debt mix should shift as the goal nears. Same value for both = no shift.
+      </div>
+
+      <div class="form-group" style="margin-bottom:6px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" name="is_retirement_goal" id="isRetirementGoal" onchange="toggleRetirementFields()" style="width:auto;" />
+          This is a retirement goal — model post-retirement withdrawals
+        </label>
+      </div>
+      <div id="retirementFields" style="display:none;">
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label>Retirement Age</label>
+            <input type="number" name="retirement_age" min="30" max="80" placeholder="e.g. 60" />
+          </div>
+          <div class="form-group">
+            <label>Life Expectancy (Age)</label>
+            <input type="number" name="life_expectancy" min="50" max="110" placeholder="85" value="85" />
+          </div>
+          <div class="form-group">
+            <label>Monthly Expense Today (₹)</label>
+            <input type="number" name="monthly_expense_today" step="1" min="0" placeholder="e.g. 60000" />
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label>Expense Inflation (%/yr)</label>
+            <input type="number" name="expense_inflation_pct" step="0.1" min="0" max="20" value="6" />
+          </div>
+          <div class="form-group">
+            <label>Post-Retirement Return (%/yr)</label>
+            <input type="number" name="post_retirement_return_pct" step="0.1" min="0" max="20" value="7" />
           </div>
         </div>
       </div>
@@ -106,11 +172,71 @@
           <span class="status-badge {% if c.on_track %}badge-green{% else %}badge-red{% endif %}">
             {% if c.on_track %}✓ On Track{% else %}⚠ Shortfall{% endif %}
           </span>
+          <button type="button" class="btn-delete" onclick="toggleLinks('edit-{{ g.id }}')">Edit</button>
           <form method="POST" action="/goals/delete/{{ g.id }}" onsubmit="return confirm('Delete this goal?')" style="margin:0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
             <button type="submit" class="btn-delete">Delete</button>
           </form>
         </div>
       </div>
+
+      <div class="edit-goal-panel" id="links-edit-{{ g.id }}" style="display:none;">
+        <form method="POST" action="/goals/edit/{{ g.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="emoji" value="{{ g.emoji or '⭐' }}" />
+          <div class="form-grid-3">
+            <div class="form-group"><label>Goal Name</label><input type="text" name="name" value="{{ g.name }}" required /></div>
+            <div class="form-group"><label>Target Amount (₹)</label><input type="number" name="target_amt" step="1" min="1" value="{{ g.target_amt|int }}" required /></div>
+            <div class="form-group"><label>Target Year</label><input type="number" name="target_year" min="2025" max="2075" value="{{ g.target_year }}" required /></div>
+          </div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Current Savings (₹)</label><input type="number" name="current_savings" step="1" min="0" value="{{ (g.current_savings or 0)|int }}" /></div>
+            <div class="form-group"><label>Monthly SIP (₹)</label><input type="number" name="monthly_sip" step="1" min="0" value="{{ (g.monthly_sip or 0)|int }}" /></div>
+            <div class="form-group"><label>Expected Return (%/yr)</label><input type="number" name="annual_return" step="0.1" min="1" max="30" value="{{ g.annual_return }}" /></div>
+          </div>
+          <div class="form-grid-3">
+            <div class="form-group"><label>Inflation Rate (%/yr)</label><input type="number" name="inflation_rate" step="0.1" min="0" max="20" value="{{ g.inflation_rate or 0 }}" /></div>
+            <div class="form-group"><label>SIP Step-up (%/yr)</label><input type="number" name="step_up_pct" step="0.1" min="0" max="50" value="{{ g.step_up_pct or 0 }}" /></div>
+            <div class="form-group"><label>Equity Now / At Target (%)</label>
+              <div style="display:flex; gap:6px;">
+                <input type="number" name="glide_start_equity_pct" step="1" min="0" max="100" value="{{ g.glide_start_equity_pct }}" />
+                <input type="number" name="glide_end_equity_pct" step="1" min="0" max="100" value="{{ g.glide_end_equity_pct }}" />
+              </div>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:6px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" name="is_retirement_goal" id="editIsRetirementGoal-{{ g.id }}" onchange="toggleEditRetirementFields({{ g.id }})" style="width:auto;" {% if g.is_retirement_goal %}checked{% endif %} />
+              This is a retirement goal
+            </label>
+          </div>
+          <div id="editRetirementFields-{{ g.id }}" style="display:{{ 'block' if g.is_retirement_goal else 'none' }};">
+            <div class="form-grid-3">
+              <div class="form-group"><label>Retirement Age</label><input type="number" name="retirement_age" min="30" max="80" value="{{ g.retirement_age or '' }}" /></div>
+              <div class="form-group"><label>Life Expectancy</label><input type="number" name="life_expectancy" min="50" max="110" value="{{ g.life_expectancy or 85 }}" /></div>
+              <div class="form-group"><label>Monthly Expense Today (₹)</label><input type="number" name="monthly_expense_today" step="1" min="0" value="{{ g.monthly_expense_today or '' }}" /></div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-group"><label>Expense Inflation (%/yr)</label><input type="number" name="expense_inflation_pct" step="0.1" min="0" max="20" value="{{ g.expense_inflation_pct or 6 }}" /></div>
+              <div class="form-group"><label>Post-Retirement Return (%/yr)</label><input type="number" name="post_retirement_return_pct" step="0.1" min="0" max="20" value="{{ g.post_retirement_return_pct or 7 }}" /></div>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary" style="width:auto; padding:8px 22px;">Save Changes</button>
+        </form>
+      </div>
+
+      {% if item.needs_review %}
+      <div class="review-nudge">
+        <div>
+          <div style="font-weight:600; color:var(--warning); font-size:0.85rem;">Goal not yet reviewed</div>
+          <div style="font-size:0.78rem; color:var(--muted); margin-top:2px;">Review your goal to confirm progress and update allocations.</div>
+        </div>
+        <form method="POST" action="/goals/{{ g.id }}/review" style="margin:0;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="btn-review-now">Review Now</button>
+        </form>
+      </div>
+      {% endif %}
 
       <!-- Progress bar -->
       <div style="margin-bottom:20px;">
@@ -133,6 +259,13 @@
           <div class="stat-label">Target</div>
           <div class="stat-value">₹{{ "{:,.0f}".format(g.target_amt) }}</div>
         </div>
+        {% if c.inflation_applied %}
+        <div class="goal-stat">
+          <div class="stat-label">Target (Inflation-Adjusted)</div>
+          <div class="stat-value" style="color:var(--warning);">₹{{ "{:,.0f}".format(c.inflation_adjusted_target) }}</div>
+          <div style="font-size:0.7rem; color:var(--muted); margin-top:2px;">at {{ g.inflation_rate }}%/yr over {{ c.years_left }}y — Shortfall/Progress use this figure</div>
+        </div>
+        {% endif %}
         {% if c.on_track %}
         <div class="goal-stat goal-stat-green">
           <div class="stat-label">Surplus</div>
@@ -147,7 +280,16 @@
         <div class="goal-stat">
           <div class="stat-label">Monthly SIP</div>
           <div class="stat-value">₹{{ "{:,.0f}".format(g.monthly_sip) }}</div>
+          {% if g.step_up_pct and g.step_up_pct > 0 %}
+          <div style="font-size:0.7rem; color:var(--accent); margin-top:2px;">+{{ g.step_up_pct }}%/yr step-up</div>
+          {% endif %}
         </div>
+        {% if item.linked_value > 0 %}
+        <div class="goal-stat">
+          <div class="stat-label">From Linked Holdings</div>
+          <div class="stat-value" style="color:#0ea5e9;">₹{{ "{:,.0f}".format(item.linked_value) }}</div>
+        </div>
+        {% endif %}
         {% if not c.on_track and c.required_sip > 0 %}
         <div class="goal-stat goal-stat-amber">
           <div class="stat-label">Required SIP</div>
@@ -166,6 +308,156 @@
         </div>
         {% endif %}
       </div>
+
+      <!-- Linked Holdings -->
+      <div class="goal-links">
+        <div class="goal-links-header" onclick="toggleLinks({{ g.id }})">
+          <span>🔗 Linked Holdings {% if item.linked_rows %}<span class="count-badge-sm">{{ item.linked_rows|length }}</span>{% endif %}</span>
+          <span class="chevron" id="chev-{{ g.id }}">▾</span>
+        </div>
+        <div class="goal-links-body" id="links-{{ g.id }}" style="display:none;">
+          {% if item.linked_rows %}
+          {% for row in item.linked_rows %}
+          <div class="link-row">
+            <div>
+              <div class="link-name">{{ row.name }} <span class="asset-class-badge asset-class-{{ row.link.asset_class }}">{{ row.link.asset_class }}</span></div>
+              <div class="link-meta">{{ row.link.allocation_pct }}% = ₹{{ "{:,.0f}".format(row.allocated_value) }}</div>
+            </div>
+            <form method="POST" action="/goals/{{ g.id }}/unlink/{{ row.link.id }}" onsubmit="return confirm('Unlink this holding from the goal?')" style="margin:0;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="btn-unlink">Unlink</button>
+            </form>
+          </div>
+          {% endfor %}
+          {% else %}
+          <div style="color:var(--muted); font-size:0.8rem; padding:8px 0;">
+            No holdings linked yet — "Current Savings" above is a manually entered number.
+            Link a real holding so this goal tracks its current value automatically.
+          </div>
+          {% endif %}
+
+          {% if available_funds or available_stocks or available_wealth_assets or available_retirement_schemes %}
+          <form method="POST" action="/goals/{{ g.id }}/link" class="link-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <select name="holding" required onchange="onLinkHoldingChange(this)">
+              <option value="" disabled selected>Select a holding to link…</option>
+              {% if available_funds %}
+              <optgroup label="Mutual Funds">
+                {% for mf in available_funds %}
+                <option value="mutual_fund:{{ mf.id }}" data-class="equity">{{ mf.scheme }} (₹{{ "{:,.0f}".format(mf.value) }})</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
+              {% if available_stocks %}
+              <optgroup label="Stocks">
+                {% for st in available_stocks %}
+                <option value="stock:{{ st.id }}" data-class="equity">{{ st.name }} (₹{{ "{:,.0f}".format(st.value) }})</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
+              {% if available_wealth_assets %}
+              <optgroup label="Wealth Assets (FD, Gold, Real Estate, …)">
+                {% for wa in available_wealth_assets %}
+                <option value="wealth_asset:{{ wa.id }}" data-class="{{ 'debt' if wa.category == 'Bank & Deposits' else 'other' }}">{{ wa.name }} · {{ wa.asset_type or wa.category }} (₹{{ "{:,.0f}".format(wa.current_value) }})</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
+              {% if available_retirement_schemes %}
+              <optgroup label="EPF / PPF / NPS / Pension">
+                {% for rs in available_retirement_schemes %}
+                <option value="retirement_scheme:{{ rs.id }}" data-class="debt">{{ rs.custom_type or rs.scheme_type }} (₹{{ "{:,.0f}".format(rs.current_balance) }})</option>
+                {% endfor %}
+              </optgroup>
+              {% endif %}
+            </select>
+            <select name="asset_class" id="assetClass-{{ g.id }}" title="Equity, Debt or Other — used for glide-path rebalancing">
+              <option value="equity">Equity</option>
+              <option value="debt">Debt</option>
+              <option value="other">Other</option>
+            </select>
+            <input type="number" name="allocation_pct" min="1" max="100" value="100" step="1" style="width:80px;" title="Allocation %" />
+            <button type="submit" class="btn-link-add">+ Link</button>
+          </form>
+          {% else %}
+          <div style="color:var(--muted); font-size:0.78rem; margin-top:8px;">
+            No holdings imported yet — <a href="/upload" class="link-accent">upload your CAS/tradebook</a> or add a <a href="/wealth" class="link-accent">Wealth Asset</a> to link real holdings to this goal.
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Glide Path & Rebalancing -->
+      <div class="goal-links">
+        <div class="goal-links-header" onclick="toggleLinks('glide-{{ g.id }}')">
+          <span>📈 Glide Path &amp; Rebalancing</span>
+          <span class="chevron" id="chev-glide-{{ g.id }}">▾</span>
+        </div>
+        <div class="goal-links-body" id="links-glide-{{ g.id }}" style="display:none;">
+          {% if item.rebalance %}
+          <div class="rebalance-box">⚖️ {{ item.rebalance.message }}</div>
+          {% elif item.linked_rows %}
+          <div style="color:var(--muted); font-size:0.8rem; padding:4px 0 10px;">Your equity/debt mix is already close to this year's glide-path target — no rebalancing needed.</div>
+          {% else %}
+          <div style="color:var(--muted); font-size:0.8rem; padding:4px 0 10px;">Link holdings above (with an Equity/Debt classification) to see rebalancing suggestions here.</div>
+          {% endif %}
+          <div class="glide-table-wrap">
+            <table class="glide-table">
+              <thead><tr><th>Year</th><th>Equity</th><th>Debt</th><th>SIP/mo</th><th>Projected</th></tr></thead>
+              <tbody>
+                {% for row in item.glide_curve[:10] %}
+                <tr>
+                  <td>{{ row.year }}</td>
+                  <td>{{ row.equity_pct }}%</td>
+                  <td>{{ row.debt_pct }}%</td>
+                  <td>₹{{ "{:,.0f}".format(row.monthly_sip) }}</td>
+                  <td>₹{{ "{:,.0f}".format(row.projected_corpus) }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% if item.glide_curve|length > 10 %}
+          <div style="font-size:0.72rem; color:var(--muted); margin-top:6px;">+ {{ item.glide_curve|length - 10 }} more year(s) to {{ g.target_year }}</div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% if g.is_retirement_goal %}
+      <!-- Post-Retirement Drawdown -->
+      <div class="goal-links">
+        <div class="goal-links-header" onclick="toggleLinks('draw-{{ g.id }}')">
+          <span>🏖️ Post-Retirement Plan</span>
+          <span class="chevron" id="chev-draw-{{ g.id }}">▾</span>
+        </div>
+        <div class="goal-links-body" id="links-draw-{{ g.id }}" style="display:none;">
+          {% if item.drawdown %}
+            {% if item.drawdown.depleted_at_age %}
+            <div class="drawdown-warning">⚠ At this rate, the corpus runs out at age {{ item.drawdown.depleted_at_age }} — before life expectancy ({{ g.life_expectancy }}). Consider a larger corpus, lower expenses, or a higher post-retirement return assumption.</div>
+            {% else %}
+            <div class="drawdown-ok">✓ At this rate, the corpus lasts through age {{ g.life_expectancy }}.</div>
+            {% endif %}
+            {% set max_corpus = item.drawdown.rows|map(attribute='corpus')|max %}
+            <div class="drawdown-chart">
+              {% for row in item.drawdown.rows %}
+              {% if loop.index0 % 2 == 0 or item.drawdown.rows|length <= 20 %}
+              <div class="drawdown-bar-row" title="Age {{ row.age }}: ₹{{ '{:,.0f}'.format(row.corpus) }}">
+                <div class="drawdown-bar-label">{{ row.age }}</div>
+                <div class="drawdown-bar-track">
+                  <div class="drawdown-bar-fill" style="width:{{ (row.corpus / max_corpus * 100) if max_corpus > 0 else 0 }}%;"></div>
+                </div>
+                <div class="drawdown-bar-value">₹{{ "{:,.0f}".format(row.corpus) }}</div>
+              </div>
+              {% endif %}
+              {% endfor %}
+            </div>
+          {% else %}
+          <div style="color:var(--muted); font-size:0.8rem; padding:4px 0;">
+            Fill in Retirement Age and Monthly Expense Today (edit this goal) to see the withdrawal plan.
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
 
     </div>
     {% endfor %}
@@ -252,6 +544,114 @@
     .goal-numbers { grid-template-columns:1fr; }
     .emoji-btn { font-size:0.78rem; padding:7px 10px; }
   }
+
+  /* Linked Holdings */
+  .goal-links { margin-top:16px; border-top:1px solid var(--border); padding-top:14px; }
+  .goal-links-header {
+    display:flex; align-items:center; justify-content:space-between;
+    cursor:pointer; font-size:0.85rem; font-weight:600; color:var(--text);
+    user-select:none;
+  }
+  .chevron { transition:transform 0.2s; color:var(--muted); }
+  .chevron.open { transform:rotate(180deg); }
+  .count-badge-sm {
+    background:var(--accent-bg); color:var(--accent); border-radius:10px;
+    padding:1px 7px; font-size:0.72rem; font-weight:700; margin-left:6px;
+  }
+  .goal-links-body { margin-top:12px; }
+  .link-row {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:8px 0; border-bottom:1px solid var(--border);
+    gap:10px;
+  }
+  .link-row:last-of-type { border-bottom:none; }
+  .link-name { font-size:0.85rem; color:var(--text); font-weight:500; }
+  .link-meta { font-size:0.75rem; color:var(--muted); margin-top:2px; }
+  .btn-unlink {
+    background:none; border:1px solid var(--border); border-radius:6px;
+    padding:5px 12px; font-size:0.75rem; color:var(--muted); cursor:pointer;
+    white-space:nowrap; transition:all 0.2s;
+  }
+  .btn-unlink:hover { border-color:var(--down); color:var(--down); background:var(--down-bg); }
+  .link-form {
+    display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;
+  }
+  .link-form select {
+    flex:1; min-width:180px; background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; color:var(--text); font-size:0.82rem;
+  }
+  .link-form input[type="number"] {
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; padding:8px 10px; color:var(--text); font-size:0.82rem;
+  }
+  .btn-link-add {
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:8px 16px; font-size:0.82rem; font-weight:600; cursor:pointer;
+    white-space:nowrap; transition:opacity 0.2s;
+  }
+  .btn-link-add:hover { opacity:0.88; }
+  .link-accent { color:var(--accent); text-decoration:none; font-weight:500; }
+  .link-accent:hover { text-decoration:underline; }
+  .link-form select[name="asset_class"] { flex:0 0 110px; min-width:0; }
+
+  /* Review nudge */
+  .review-nudge {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    background:var(--warning-bg); border:1px solid var(--warning);
+    border-radius:8px; padding:12px 16px; margin-bottom:16px; flex-wrap:wrap;
+  }
+  .btn-review-now {
+    background:var(--warning); color:#1a1200; border:none; border-radius:6px;
+    padding:7px 14px; font-size:0.78rem; font-weight:600; cursor:pointer;
+    white-space:nowrap;
+  }
+
+  /* Edit goal panel */
+  .edit-goal-panel {
+    background:var(--surface2); border:1px solid var(--border); border-radius:10px;
+    padding:18px; margin-bottom:16px;
+  }
+
+  /* Asset-class badges */
+  .asset-class-badge {
+    font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;
+    padding:1px 6px; border-radius:6px; margin-left:6px; vertical-align:middle;
+  }
+  .asset-class-equity { background:var(--up-bg); color:var(--up); }
+  .asset-class-debt   { background:#0ea5e922; color:#0ea5e9; }
+  .asset-class-other  { background:var(--border); color:var(--muted); }
+
+  /* Rebalancing */
+  .rebalance-box {
+    background:var(--accent-bg); border:1px solid var(--accent); border-radius:8px;
+    padding:10px 14px; font-size:0.82rem; color:var(--text); margin-bottom:12px;
+  }
+
+  /* Glide table */
+  .glide-table-wrap { overflow-x:auto; }
+  .glide-table { width:100%; border-collapse:collapse; font-size:0.78rem; }
+  .glide-table th {
+    text-align:left; color:var(--muted); font-weight:600; text-transform:uppercase;
+    font-size:0.68rem; letter-spacing:0.06em; padding:6px 8px; border-bottom:1px solid var(--border);
+  }
+  .glide-table td { padding:6px 8px; border-bottom:1px solid var(--border); color:var(--text); font-family:'Roboto Mono',monospace; }
+  .glide-table tr:first-child td { color:var(--accent); font-weight:600; }
+
+  /* Drawdown */
+  .drawdown-warning {
+    background:var(--down-bg); border:1px solid var(--down); border-radius:8px;
+    padding:10px 14px; font-size:0.8rem; color:var(--down); margin-bottom:12px;
+  }
+  .drawdown-ok {
+    background:var(--up-bg); border:1px solid var(--up); border-radius:8px;
+    padding:10px 14px; font-size:0.8rem; color:var(--up); margin-bottom:12px;
+  }
+  .drawdown-chart { display:flex; flex-direction:column; gap:4px; }
+  .drawdown-bar-row { display:grid; grid-template-columns:36px 1fr 90px; align-items:center; gap:8px; }
+  .drawdown-bar-label { font-size:0.7rem; color:var(--muted); text-align:right; }
+  .drawdown-bar-track { height:10px; background:var(--border); border-radius:4px; overflow:hidden; }
+  .drawdown-bar-fill { height:100%; background:var(--accent); border-radius:4px; }
+  .drawdown-bar-value { font-size:0.7rem; color:var(--text); font-family:'Roboto Mono',monospace; text-align:right; }
 </style>
 
 <script>
@@ -264,6 +664,31 @@
     btn.classList.add("active");
     document.getElementById("goalEmoji").value = btn.dataset.emoji;
     document.getElementById("goalName").value  = btn.dataset.name;
+  }
+  function toggleLinks(goalId) {
+    const body = document.getElementById("links-" + goalId);
+    if (!body) return;
+    const chev = document.getElementById("chev-" + goalId);
+    const isHidden = body.style.display === "none";
+    body.style.display = isHidden ? "block" : "none";
+    if (chev) chev.classList.toggle("open", isHidden);
+  }
+  function toggleRetirementFields() {
+    const box = document.getElementById("retirementFields");
+    box.style.display = document.getElementById("isRetirementGoal").checked ? "block" : "none";
+  }
+  function toggleEditRetirementFields(goalId) {
+    const box = document.getElementById("editRetirementFields-" + goalId);
+    const cb = document.getElementById("editIsRetirementGoal-" + goalId);
+    box.style.display = cb.checked ? "block" : "none";
+  }
+  function onLinkHoldingChange(sel) {
+    const opt = sel.options[sel.selectedIndex];
+    const cls = opt.getAttribute("data-class");
+    if (!cls) return;
+    const form = sel.closest("form");
+    const classSelect = form.querySelector("select[name='asset_class']");
+    if (classSelect) classSelect.value = cls;
   }
 </script>
 {% endblock %}
