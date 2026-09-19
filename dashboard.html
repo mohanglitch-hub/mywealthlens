@@ -140,7 +140,12 @@
         <div class="h-name">{{ stock.name }}</div>
         <div class="h-meta">{{ stock.quantity|int }} shares · ₹{{ "{:,.2f}".format(stock.live_price or stock.buy_price or 0) }}/share</div>
       </div>
-      <div class="h-value" style="color:#8b5cf6;">₹{{ "{:,.0f}".format(stock.value) }}</div>
+      <div style="text-align:right;">
+        <div class="h-value" style="color:#8b5cf6;">₹{{ "{:,.0f}".format(stock.value) }}</div>
+        {% if stock.xirr is not none %}
+        <div style="font-size:0.72rem; color:{{ 'var(--up)' if stock.xirr >= 0 else 'var(--down)' }};">XIRR {{ "{:+.1f}".format(stock.xirr) }}%</div>
+        {% endif %}
+      </div>
     </div>
     {% endfor %}
   </div>
