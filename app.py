@@ -2226,8 +2226,7 @@ register_backup_cli(app)
 
 if __name__ == '__main__':
     import os
-    # Local development: defaults to 127.0.0.1:5000 (safe)
-    # Render / cloud: uses HOST=0.0.0.0 and the PORT given by the platform
-    host = os.environ.get('HOST', '127.0.0.1')
+    # On Render (and most cloud platforms) we must bind to 0.0.0.0
+    # Locally it will still work fine
     port = int(os.environ.get('PORT', 5000))
-    app.run(debug=False, host=host, port=port)
+    app.run(host='0.0.0.0', port=port, debug=False)
