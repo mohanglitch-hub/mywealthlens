@@ -377,11 +377,15 @@ def restore_asset(asset_id):
 @login_required
 def delete_asset_permanent(asset_id):
     asset = _get_asset_or_404(asset_id)
-    success, error = services.delete_asset_permanent(_db(), asset, current_user.id)
+    success, error, affected_goal_names = services.delete_asset_permanent(_db(), asset, current_user.id)
     if error:
         flash(error, "error")
         return redirect(url_for("wealth.asset_detail", asset_id=asset_id))
     flash("Asset permanently deleted.", "success")
+    if affected_goal_names:
+        goal_list = ", ".join(affected_goal_names)
+        flash(f"This also removed it from {len(affected_goal_names)} goal(s): {goal_list} — "
+              f"their shortfall has been updated.", "warning")
     return redirect(url_for("wealth.assets_listing", status="archived"))
 
 

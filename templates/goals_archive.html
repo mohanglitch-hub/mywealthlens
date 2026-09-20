@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Archived Goals — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ga-wrap">
+
+  <div class="ga-header">
+    <div>
+      <h1 class="ga-title">📦 Archived Goals</h1>
+      <p class="ga-subtitle">Goals you've marked Achieved or Dropped. Nothing here is deleted — restore any of these back to your active goals anytime.</p>
+    </div>
+    <a href="/goals" class="ga-back-btn">← Back to Goals</a>
+  </div>
+
+  {% if archived_goals %}
+  <div style="font-size:0.85rem; color:var(--muted);">
+    {{ archived_goals|length }} archived goal{{ 's' if archived_goals|length != 1 else '' }}
+  </div>
+
+  <div class="ga-grid">
+    {% for g in archived_goals %}
+    <div class="ga-card {% if g.archive_reason == 'achieved' %}ga-card--achieved{% else %}ga-card--dropped{% endif %}">
+
+      <div class="ga-card-top">
+        <div class="ga-icon-wrap">
+          <span class="ga-icon">{{ g.emoji or "⭐" }}</span>
+        </div>
+        {% if g.archive_reason == 'achieved' %}
+        <span class="ga-badge ga-badge-achieved">🏆 Achieved</span>
+        {% else %}
+        <span class="ga-badge ga-badge-dropped">Dropped</span>
+        {% endif %}
+      </div>
+
+      <div class="ga-name">{{ g.name }}</div>
+      {% if g.is_retirement_goal %}<div class="ga-subtag">Retirement goal</div>{% endif %}
+
+      <div class="ga-details">
+        <div class="ga-detail-row">
+          <span class="ga-detail-label">Target</span>
+          <span class="ga-detail-value ga-target">₹{{ "{:,.0f}".format(g.target_amt) }}</span>
+        </div>
+        <div class="ga-detail-row">
+          <span class="ga-detail-label">Target Year</span>
+          <span class="ga-detail-value">{{ g.target_year }}</span>
+        </div>
+        <div class="ga-detail-row">
+          <span class="ga-detail-label">Savings (at archive)</span>
+          <span class="ga-detail-value">₹{{ "{:,.0f}".format(g.current_savings or 0) }}</span>
+        </div>
+        {% if g.monthly_sip %}
+        <div class="ga-detail-row">
+          <span class="ga-detail-label">Monthly SIP</span>
+          <span class="ga-detail-value">₹{{ "{:,.0f}".format(g.monthly_sip) }}</span>
+        </div>
+        {% endif %}
+        {% if g.archived_at %}
+        <div class="ga-detail-row">
+          <span class="ga-detail-label">Archived On</span>
+          <span class="ga-detail-value">{{ g.archived_at.strftime('%d %b %Y') }}</span>
+        </div>
+        {% endif %}
+      </div>
+
+      <form method="POST" action="/goals/{{ g.id }}/restore"
+            onsubmit="return confirm('Restore {{ g.name }} to your active goals?')" style="margin:0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="next" value="/goals/archived" />
+        <button type="submit" class="ga-btn-restore">↩ Restore to Active Goals</button>
+      </form>
+
+    </div>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <div class="ga-empty-state">
+    <div class="ga-empty-icon">📦</div>
+    <h2 class="ga-empty-title">No archived goals</h2>
+    <p class="ga-empty-desc">Goals you mark as Achieved or Drop from the Goals page will show up here, and you can restore them anytime.</p>
+    <a href="/goals" class="ga-btn-primary">Back to Goals</a>
+  </div>
+  {% endif %}
+
+</div>
+
+<style>
+  .ga-wrap       { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:24px; }
+  .ga-header     { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:16px; }
+  .ga-title      { font-size:1.4rem; font-weight:700; color:var(--text); margin-bottom:6px; }
+  .ga-subtitle   { font-size:0.875rem; color:var(--muted); max-width:560px; line-height:1.5; }
+  .ga-back-btn   {
+    background:none; color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:10px 18px; font-size:0.82rem; font-weight:600; text-decoration:none;
+    transition:all 0.2s; white-space:nowrap;
+  }
+  .ga-back-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  .ga-empty-state {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:60px 32px; text-align:center; display:flex; flex-direction:column;
+    align-items:center; gap:12px;
+  }
+  .ga-empty-icon  { font-size:3.5rem; }
+  .ga-empty-title { font-size:1.15rem; font-weight:700; color:var(--text); }
+  .ga-empty-desc  { font-size:0.875rem; color:var(--muted); max-width:400px; line-height:1.6; }
+  .ga-btn-primary {
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:10px 22px; font-size:0.875rem; font-weight:700; text-decoration:none;
+    display:inline-block; margin-top:6px;
+  }
+
+  .ga-grid  { display:grid; grid-template-columns:repeat(3, 1fr); gap:18px; }
+  .ga-card  {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:22px; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:12px;
+  }
+  .ga-card--achieved { border-color:var(--up); }
+  .ga-card--dropped  { opacity:0.9; border-style:dashed; }
+
+  .ga-card-top   { display:flex; justify-content:space-between; align-items:flex-start; }
+  .ga-icon-wrap  {
+    width:44px; height:44px; border-radius:10px; background:var(--surface2);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .ga-icon       { font-size:1.4rem; }
+  .ga-badge      {
+    display:inline-block; padding:3px 10px; border-radius:12px;
+    font-size:0.7rem; font-weight:700; border:1px solid; white-space:nowrap;
+  }
+  .ga-badge-achieved { background:var(--up-bg); color:var(--up); border-color:var(--up); }
+  .ga-badge-dropped  { background:var(--surface2); color:var(--muted); border-color:var(--border); }
+
+  .ga-name    { font-size:1.05rem; font-weight:700; color:var(--text); }
+  .ga-subtag  { font-size:0.78rem; color:var(--muted); margin-top:-8px; }
+
+  .ga-details      { display:flex; flex-direction:column; gap:6px; padding:12px 0; border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .ga-detail-row   { display:flex; justify-content:space-between; gap:10px; }
+  .ga-detail-label { font-size:0.75rem; color:var(--muted); }
+  .ga-detail-value { font-size:0.82rem; color:var(--text); font-weight:500; font-family:'Roboto Mono',monospace; }
+  .ga-target       { color:var(--accent); font-weight:700; }
+
+  .ga-btn-restore {
+    width:100%; background:var(--up-bg); color:var(--up); border:1px solid var(--up);
+    border-radius:8px; padding:10px 4px; font-size:0.82rem; font-weight:700;
+    cursor:pointer; transition:all 0.2s; margin-top:auto;
+  }
+  .ga-btn-restore:hover { background:var(--up); color:#fff; }
+
+  @media (max-width:1024px) { .ga-grid { grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:640px)  {
+    .ga-grid { grid-template-columns:1fr; }
+    .ga-back-btn { width:100%; text-align:center; }
+    .ga-header { flex-direction:column; align-items:stretch; }
+  }
+</style>
+{% endblock %}

@@ -705,9 +705,21 @@ def delete_scheme_permanent(scheme_id):
     for doc in scheme.documents.all():
         delete_document_file(doc.file_path)
 
+    # Goals-page audit (Sep 2026, Critical #2): a Goal can link directly
+    # to this scheme (e.g. EPF/PPF backing a retirement goal's "current
+    # savings"). Clean up any such links before the scheme itself is
+    # gone, so nothing is left pointing at a dead id.
+    from app import _cleanup_goal_links_for_deleted_holdings
+    affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
+        current_user.id, 'retirement_scheme', [scheme.id])
+
     _db().session.delete(scheme)
     _db().session.commit()
     flash("Scheme permanently deleted.", "success")
+    if affected_goal_names:
+        goal_list = ", ".join(affected_goal_names)
+        flash(f"This also removed it from {len(affected_goal_names)} goal(s): {goal_list} — "
+              f"their shortfall has been updated.", "warning")
     return redirect(url_for("retirement_centre.manage_schemes", status="archived"))
 
 

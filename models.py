@@ -247,8 +247,24 @@ class GoalHoldingLink(db.Model):
     can be the ACTUAL current value of specific investments instead of
     (or alongside) a manually-typed number. Mirrors the nominee/heir
     linking pattern already used elsewhere in the app (percentage
-    allocation, not exclusive ownership — the same fund can back more
-    than one goal).
+    allocation rather than all-or-nothing ownership — a holding CAN
+    back more than one goal, e.g. 60% of an FD toward one goal and the
+    remaining 40% toward another).
+
+    A holding is still a single pool of real money, though, so as of
+    Sep 2026 the total allocation_pct across ALL of a user's goals for
+    one holding_type+holding_id can never exceed 100 — enforced in
+    app.py's link_goal_holding() via _holding_allocated_pct(), and
+    surfaced on the Goals page as "X% / ₹Y still available" so a
+    second link request can only ever claim what's actually left
+    unallocated (previously unenforced: the same fund could be linked
+    at 100% to two different goals and silently double-counted).
+    Likewise, if a holding_id disappears for good — the user deletes
+    it, or a CAS/CDSL/tradebook re-upload wipes and reinserts with new
+    ids — any GoalHoldingLink still pointing at it is explicitly
+    deleted by _cleanup_goal_links_for_deleted_holdings() rather than
+    left to silently rot; see the callers of that helper in app.py,
+    wealth/services.py and retirement_centre/routes.py.
 
     holding_type is a plain string rather than a second FK column per
     type, so a new linkable asset type is a new holding_type value,
