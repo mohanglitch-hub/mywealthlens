@@ -1055,9 +1055,17 @@ GOAL_REVIEW_PERIOD_DAYS = 90
 @app.route('/goals')
 @login_required
 def goals():
-    user_goals = Goal.query.filter_by(user_id=current_user.id).order_by(Goal.target_year).all()
+    current_year = dt.utcnow().year
+    user_goals = (Goal.query
+        .filter_by(user_id=current_user.id, is_archived=False)
+        .order_by(Goal.target_year).all())
     goals_data = []
     review_cutoff = dt.utcnow() - timedelta(days=GOAL_REVIEW_PERIOD_DAYS)
+
+    near_term_count = 0
+    long_term_count = 0
+    achieved_suggested_count = 0
+
     for g in user_goals:
         linked_value, linked_rows = _goal_linked_value(g)
         effective_current = (g.current_savings or 0) + linked_value
@@ -1070,11 +1078,44 @@ def goals():
         drawdown = goal_glide.drawdown_curve(g, glide_curve[-1]['projected_corpus'] if glide_curve else 0)
         needs_review = (g.last_reviewed_at is None) or (g.last_reviewed_at < review_cutoff)
 
+        # Already funded today, regardless of years left — different
+        # from calc['on_track'] (which is about projected future SIP
+        # growth reaching the target by target_year). A goal can be
+        # on_track without being achieved yet, and vice versa (e.g.
+        # a lump sum landed early). Suggested, never auto-applied —
+        # the user confirms via the "Mark as Achieved" action, same
+        # spirit as the review nudge.
+        compare_target = (calc['inflation_adjusted_target']
+                           if calc.get('inflation_applied') else g.target_amt)
+        is_achieved_suggested = effective_current >= compare_target and compare_target > 0
+        if is_achieved_suggested:
+            achieved_suggested_count += 1
+
+        years_left = g.target_year - current_year
+        if years_left <= 1:
+            near_term_count += 1
+        else:
+            long_term_count += 1
+
         goals_data.append({
             'goal': g, 'calc': calc, 'linked_value': linked_value, 'linked_rows': linked_rows,
             'glide_curve': glide_curve, 'rebalance': rebalance, 'drawdown': drawdown,
-            'needs_review': needs_review,
+            'needs_review': needs_review, 'years_left': years_left,
+            'is_achieved_suggested': is_achieved_suggested,
         })
+
+    summary_stats = {
+        'active_count': len(user_goals),
+        'achieved_count': Goal.query.filter_by(
+            user_id=current_user.id, is_archived=True, archive_reason='achieved').count(),
+        'near_term_count': near_term_count,
+        'long_term_count': long_term_count,
+        'achieved_suggested_count': achieved_suggested_count,
+    }
+
+    archived_goals = (Goal.query
+        .filter_by(user_id=current_user.id, is_archived=True)
+        .order_by(Goal.archived_at.desc()).all())
 
     # For the "link a holding" picker — only funds not already fully committed are still offered,
     # allocation is left to the user to keep sensible (same trust level as the existing nominee %
@@ -1089,6 +1130,7 @@ def goals():
         .order_by(RetirementScheme.scheme_type).all())
 
     return render_template('goals.html', goals_data=goals_data,
+        summary_stats=summary_stats, archived_goals=archived_goals,
         available_funds=available_funds, available_stocks=available_stocks,
         available_wealth_assets=available_wealth_assets,
         available_retirement_schemes=available_retirement_schemes)
@@ -1293,6 +1335,56 @@ def review_goal(goal_id):
     goal.last_reviewed_at = dt.utcnow()
     db.session.commit()
     flash(f'{goal.name} marked as reviewed.', 'success')
+    return redirect(url_for('goals'))
+
+
+@app.route('/goals/<int:goal_id>/archive', methods=['POST'])
+@login_required
+def archive_goal(goal_id):
+    """Archive a goal as either 'achieved' or 'dropped' — same
+    Archive -> Restore lifecycle used across Insurance/Retirement
+    Centre/Wealth (never a straight delete). reason comes from the
+    form so one route covers both the "Mark as Achieved" and "Drop
+    this goal" actions in goals.html."""
+    goal = Goal.query.get_or_404(goal_id)
+    if goal.user_id != current_user.id:
+        flash('Permission denied.', 'error')
+        return redirect(url_for('goals'))
+    reason = request.form.get('reason', '').strip().lower()
+    if reason not in ('achieved', 'dropped'):
+        flash('Invalid archive reason.', 'error')
+        return redirect(url_for('goals'))
+    if goal.is_archived:
+        flash(f'{goal.name} is already archived.', 'error')
+        return redirect(url_for('goals'))
+
+    goal.is_archived = True
+    goal.archived_at = dt.utcnow()
+    goal.archive_reason = reason
+    db.session.commit()
+    if reason == 'achieved':
+        flash(f'🎉 {goal.name} marked as achieved and archived!', 'success')
+    else:
+        flash(f'{goal.name} archived as dropped.', 'success')
+    return redirect(url_for('goals'))
+
+
+@app.route('/goals/<int:goal_id>/restore', methods=['POST'])
+@login_required
+def restore_goal(goal_id):
+    goal = Goal.query.get_or_404(goal_id)
+    if goal.user_id != current_user.id:
+        flash('Permission denied.', 'error')
+        return redirect(url_for('goals'))
+    if not goal.is_archived:
+        flash(f'{goal.name} is not archived.', 'error')
+        return redirect(url_for('goals'))
+
+    goal.is_archived = False
+    goal.archived_at = None
+    goal.archive_reason = None
+    db.session.commit()
+    flash(f'{goal.name} restored to active goals.', 'success')
     return redirect(url_for('goals'))
 
 

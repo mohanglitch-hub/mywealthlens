@@ -224,6 +224,16 @@ class Goal(db.Model):
     # None means "never reviewed" — always nudge until the first review.
     last_reviewed_at = db.Column(db.DateTime, nullable=True)
 
+    # Goal archiving: same is_archived/archived_at convention used by
+    # WealthAsset/RetirementScheme/InsurancePolicy (Archive -> Restore,
+    # never a straight delete). archive_reason distinguishes a goal the
+    # user actually hit ('achieved') from one they gave up on
+    # ('dropped') — the plain boolean can't tell those apart, and the
+    # UI needs to show them differently (see goals() in app.py).
+    is_archived     = db.Column(db.Boolean, default=False, nullable=False)
+    archived_at     = db.Column(db.DateTime, nullable=True)
+    archive_reason  = db.Column(db.String(20), nullable=True)  # 'achieved' | 'dropped'
+
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
     links = db.relationship("GoalHoldingLink", backref="goal", lazy=True, cascade="all, delete-orphan")
 
