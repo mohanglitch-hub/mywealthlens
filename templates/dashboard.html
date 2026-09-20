@@ -91,12 +91,6 @@
   <div class="chart-card">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
       <div class="card-label" style="margin-bottom:0;">Net Worth History</div>
-      <form method="POST" action="/networth/snapshot" style="margin:0;">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-        <button type="submit" class="btn-outline">
-          💾 Save Snapshot
-        </button>
-      </form>
     </div>
     <div class="chart-wrap">
       <canvas id="historyChart"></canvas>
@@ -140,7 +134,12 @@
         <div class="h-name">{{ stock.name }}</div>
         <div class="h-meta">{{ stock.quantity|int }} shares · ₹{{ "{:,.2f}".format(stock.live_price or stock.buy_price or 0) }}/share</div>
       </div>
-      <div class="h-value" style="color:#8b5cf6;">₹{{ "{:,.0f}".format(stock.value) }}</div>
+      <div style="text-align:right;">
+        <div class="h-value" style="color:#8b5cf6;">₹{{ "{:,.0f}".format(stock.value) }}</div>
+        {% if stock.xirr is not none %}
+        <div style="font-size:0.72rem; color:{{ 'var(--up)' if stock.xirr >= 0 else 'var(--down)' }};">XIRR {{ "{:+.1f}".format(stock.xirr) }}%</div>
+        {% endif %}
+      </div>
     </div>
     {% endfor %}
   </div>
@@ -365,7 +364,7 @@
   .uc-row-date { font-size:0.76rem; color:var(--muted); margin-top:2px; }
   .uc-badge { font-size:0.7rem; font-weight:700; padding:4px 10px; border-radius:20px; white-space:nowrap; }
   .uc-badge-overdue { background:var(--down-bg); color:var(--down); }
-  .uc-badge-soon    { background:#FFFBEB; color:#D97706; }
+  .uc-badge-soon    { background:var(--warning-bg); color:var(--warning); }
   .uc-empty {
     font-size:0.82rem; color:var(--muted);
     padding:11px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:8px;

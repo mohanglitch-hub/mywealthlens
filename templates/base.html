@@ -28,6 +28,8 @@
       --down-bg:   #FEF2F2;
       --warning:   #D97706;
       --warning-bg:#FFFBEB;
+      --info:      #0284C7;
+      --info-bg:   #F0F9FF;
       --font-ui:   'Inter', sans-serif;
       --font-data: 'Roboto Mono', monospace;
       --radius:    12px;
@@ -56,6 +58,8 @@
       --down-bg:   #ef444411;
       --warning:   #f59e0b;
       --warning-bg:#f59e0b11;
+      --info:      #0ea5e9;
+      --info-bg:   #0ea5e911;
       --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
       --shadow-md: 0 4px 16px rgba(0,0,0,0.3);
       --shadow-lg: 0 8px 40px rgba(0,0,0,0.4);
@@ -437,10 +441,6 @@
       var saved = localStorage.getItem('mwl-theme') || 'light';
       document.documentElement.setAttribute('data-theme', saved);
     })();
-    function setTheme(t) {
-      document.documentElement.setAttribute('data-theme', t);
-      localStorage.setItem('mwl-theme', t);
-    }
   </script>
 </body>
 </html>
