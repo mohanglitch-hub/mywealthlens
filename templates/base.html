@@ -217,8 +217,16 @@
       min-width: 0;
     }
 
+    /* Capped to the same width as page content (1100px, the widest
+       per-page content wrapper in use) and centered, so a flash/nudge
+       banner never stretches wider than the page it belongs to —
+       previously this sat outside every page's own content wrapper
+       and spanned the full remaining browser width instead. Any new
+       page-level banner should follow the same max-width + auto
+       margin pattern rather than going edge-to-edge. */
     .flash-container {
-      margin-bottom: 20px;
+      max-width: 1100px;
+      margin: 0 auto 20px;
     }
     .flash {
       padding: 12px 16px;
