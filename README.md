@@ -35,8 +35,8 @@ Core modules for investments, goals, and family planning are functional. Some ad
 ---
 
 ## Live Demo
-
-Currently not deployed. Will be available soon on Render.
+https://mywealthlens.onrender.com
+> Note: This is hosted on Render’s free plan. The first visit may take 30–50 seconds to wake up.
 
 ---
 
