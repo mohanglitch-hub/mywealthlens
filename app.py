@@ -1376,39 +1376,55 @@ def _section_header(text, styles):
         Spacer(1, 2*mm),
     ]
 
-def _sip_projection(target_amt, target_year, current_savings, monthly_sip, annual_return):
-    """Return list of (month_label, balance) for 12 months + yearly to target."""
+def _sip_projection(target_amt, target_year, current_savings, monthly_sip, annual_return, step_up_pct=0):
+    """Return list of (month_label, balance, kind) for 12 months + yearly to
+    target. step_up_pct steps the SIP up once every 12 ELAPSED months
+    (not calendar-year aligned), matching _stepup_sip_future_value() /
+    calculate_goal() so this table's numbers agree with the goal's own
+    headline Projected Corpus figure instead of quietly assuming a flat
+    SIP. Each row is simulated fresh from month 0 (cheap at these
+    horizons) rather than compounding incrementally, so a mid-run
+    change in the step count can never drift from calculate_goal()'s math."""
+    def _simulate(months):
+        r = annual_return / 100 / 12
+        step_up = (step_up_pct or 0) / 100
+        balance = float(current_savings or 0)
+        sip = float(monthly_sip or 0)
+        for m in range(months):
+            if m > 0 and m % 12 == 0:
+                sip *= (1 + step_up)
+            # Annuity-DUE, matching _stepup_sip_future_value()'s own
+            # "* (1 + r)" tail factor: this month's SIP is added BEFORE
+            # that month's growth is applied, not after — get this
+            # backwards and the table silently drifts ~1% off the
+            # goal's own headline Projected Corpus over a few years.
+            if r > 0:
+                balance = (balance + sip) * (1 + r)
+            else:
+                balance += sip
+        return balance
+
     rows = []
-    r = annual_return / 100 / 12
-    balance = float(current_savings or 0)
     now = _dt.now()
     cur_year = now.year
     cur_month = now.month
 
     # Monthly for first 12 months
     for i in range(1, 13):
-        if r > 0:
-            balance = balance * (1 + r) + float(monthly_sip or 0)
-        else:
-            balance += float(monthly_sip or 0)
         m = (cur_month + i - 1) % 12 + 1
         y = cur_year + (cur_month + i - 1) // 12
-        rows.append((f"{_dt(y, m, 1).strftime('%b %Y')}", balance, "monthly"))
+        rows.append((f"{_dt(y, m, 1).strftime('%b %Y')}", _simulate(i), "monthly"))
 
-    # Yearly milestones after month 12
-    balance_after_12 = rows[-1][1]
+    # Yearly milestones after month 12. Deliberately (yr - cur_year) * 12,
+    # NOT calendar-aligned to each December's real month count — this must
+    # match calculate_goal()'s own `months = (target_year - current_year) * 12`
+    # exactly, or this table's final row silently disagrees with the goal's
+    # headline Projected Corpus figure (the bug this docstring is fixing).
     for yr in range(cur_year + 1, target_year + 1):
-        months_to_yr = (yr - cur_year) * 12 - cur_month + 1
+        months_to_yr = (yr - cur_year) * 12
         if months_to_yr <= 12:
             continue
-        b = balance_after_12
-        extra = months_to_yr - 12
-        for _ in range(extra):
-            if r > 0:
-                b = b * (1 + r) + float(monthly_sip or 0)
-            else:
-                b += float(monthly_sip or 0)
-        rows.append((f"Dec {yr}", b, "yearly"))
+        rows.append((f"Dec {yr}", _simulate(months_to_yr), "yearly"))
 
     return rows
 
@@ -1619,16 +1635,18 @@ def export_pdf():
             ]))
             story += [gmt, Spacer(1, 2*mm)]
 
-            # SIP projection table
-            proj = _sip_projection(g.target_amt, g.target_year,
-                                   effective_current, g.monthly_sip, g.annual_return)
+            # SIP projection table — same step-up SIP and inflation-adjusted
+            # target as the headline stat box above, so the two never disagree
+            compare_target = calc['inflation_adjusted_target'] if calc.get('inflation_applied') else g.target_amt
+            proj = _sip_projection(g.target_amt, g.target_year, effective_current,
+                                   g.monthly_sip, g.annual_return, getattr(g, 'step_up_pct', 0) or 0)
             if proj:
                 story.append(Paragraph("SIP Growth Projection", S['h3']))
                 sip_hdr = [['Period', 'Projected Balance (₹)', 'vs Target (₹)', 'Progress %']]
                 sip_rows = []
                 for (label, bal, kind) in proj:
-                    delta = bal - g.target_amt
-                    progress = min(round(bal / g.target_amt * 100, 1), 100) if g.target_amt else 0
+                    delta = bal - compare_target
+                    progress = min(round(bal / compare_target * 100, 1), 100) if compare_target else 0
                     sip_rows.append([
                         label,
                         f"{bal:,.0f}",
@@ -1872,11 +1890,12 @@ def export_excel():
             _hdr_row(ws4, r4, ['Period', 'Projected Balance (₹)', 'vs Target (₹)', 'Progress %'])
             r4 += 1
 
-            proj = _sip_projection(g.target_amt, g.target_year,
-                                   effective_current, g.monthly_sip, g.annual_return)
+            compare_target = calc['inflation_adjusted_target'] if calc.get('inflation_applied') else g.target_amt
+            proj = _sip_projection(g.target_amt, g.target_year, effective_current,
+                                   g.monthly_sip, g.annual_return, getattr(g, 'step_up_pct', 0) or 0)
             for i, (label, bal, _) in enumerate(proj):
-                delta = bal - g.target_amt
-                progress = min(round(bal / g.target_amt * 100, 1), 100) if g.target_amt else 0
+                delta = bal - compare_target
+                progress = min(round(bal / compare_target * 100, 1), 100) if compare_target else 0
                 _data_row(ws4, r4, [label, round(bal), round(delta), f"{progress}%"], alt=i%2==1)
                 ws4.cell(row=r4, column=2).number_format = '₹#,##0'
                 ws4.cell(row=r4, column=3).number_format = '₹#,##0'
