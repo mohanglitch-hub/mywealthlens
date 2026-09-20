@@ -79,6 +79,14 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["WTF_CSRF_TIME_LIMIT"] = 3600
+# Production-readiness audit (Sep 2026): session cookies must be marked
+# Secure (browser only sends them over HTTPS) once this app is actually
+# deployed behind real HTTPS — but hard-coding True would silently break
+# login during local development, since Mohan's own machine serves plain
+# http://127.0.0.1 with no TLS. MWL_HTTPS=1 is the single flag to flip
+# once a real deployment with HTTPS is in place (same env-var convention
+# already used for HOST/PORT at the bottom of this file).
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get('MWL_HTTPS', '0') == '1'
 db.init_app(app)
 
 csrf = CSRFProtect(app)
@@ -86,8 +94,24 @@ csrf = CSRFProtect(app)
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=[],
+    # Production-readiness audit (Sep 2026): previously default_limits=[]
+    # meant only the 2 explicitly-decorated routes (signup, login) had
+    # any rate limit at all — every other POST route across the whole
+    # app (57+, including every goal link/unlink/archive, every CAS/
+    # CDSL/tradebook upload, every delete) was completely open to abuse.
+    # This applies a sane ceiling to EVERY route automatically (Flask-
+    # Limiter's default_limits cover all routes registered on `app`,
+    # including blueprint routes, once bound here) — routes that need a
+    # tighter limit (auth, bulk imports) still override it individually
+    # below/in their own files, same as signup/login already did.
+    default_limits=["200 per hour", "50 per 15 minutes"],
     storage_uri="memory://"
+    # NOTE: memory:// keeps counts in this one process's RAM — correct
+    # for today's single dev-server process, but once this runs behind a
+    # real WSGI server with multiple worker processes, each worker gets
+    # its own separate counter and the limits stop being accurate. Move
+    # storage_uri to a shared store (Redis) as part of the production
+    # deployment step, once real hosting is chosen.
 )
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -119,7 +143,6 @@ def index():
     return redirect(url_for('login'))
 
 @app.route('/signup', methods=['GET', 'POST'])
-@csrf.exempt
 @limiter.limit('10 per hour')
 def signup():
     if current_user.is_authenticated:
@@ -151,7 +174,6 @@ def signup():
     return render_template('signup.html')
 
 @app.route('/login', methods=['GET', 'POST'])
-@csrf.exempt
 @limiter.limit('5 per 15 minutes', methods=['POST'])
 def login():
     if current_user.is_authenticated:
@@ -176,7 +198,6 @@ def logout():
     return redirect(url_for('login'))
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
-@csrf.exempt
 def forgot_password():
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
@@ -616,6 +637,7 @@ def upload():
 
 @app.route('/upload/cams', methods=['POST'])
 @login_required
+@limiter.limit('10 per hour')
 def upload_cams():
     pdf_file = request.files.get('pdf_file')
     password = request.form.get('password', '').strip().upper()
@@ -685,6 +707,7 @@ def upload_cams():
 
 @app.route('/upload/cdsl', methods=['POST'])
 @login_required
+@limiter.limit('10 per hour')
 def upload_cdsl():
     pdf_file = request.files.get('pdf_file')
     password = request.form.get('password', '').strip()
@@ -734,6 +757,7 @@ def upload_cdsl():
 
 @app.route('/upload/delete-mf', methods=['POST'])
 @login_required
+@limiter.limit('20 per hour')
 def delete_all_mf():
     stale_mf_ids = [row.id for row in
                      MutualFund.query.filter_by(user_id=current_user.id).with_entities(MutualFund.id).all()]
@@ -750,6 +774,7 @@ def delete_all_mf():
 
 @app.route('/upload/delete-stocks', methods=['POST'])
 @login_required
+@limiter.limit('20 per hour')
 def delete_all_stocks():
     stale_stock_ids = [row.id for row in
                         Stock.query.filter_by(user_id=current_user.id).with_entities(Stock.id).all()]
@@ -946,6 +971,7 @@ def import_tradebook(rows, user_id):
 
 @app.route('/upload/tradebook', methods=['POST'])
 @login_required
+@limiter.limit('10 per hour')
 def upload_tradebook():
     csv_file = request.files.get('csv_file')
     if not csv_file or csv_file.filename == '':
@@ -2225,8 +2251,11 @@ from backup.cli import register_cli as register_backup_cli
 register_backup_cli(app)
 
 if __name__ == '__main__':
-    import os
-    # On Render (and most cloud platforms) we must bind to 0.0.0.0
-    # Locally it will still work fine
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+     # HOST defaults to 127.0.0.1 for local security (see SECURITY.md).
+     # Cloud preview environments like CodeSandbox set HOST=0.0.0.0 via
+     # their own env config so the dev server is reachable through their
+     # proxy. PORT is also configurable since some sandboxes assign their
+     # own port.
+     host = os.environ.get('HOST', '127.0.0.1')
+     port = int(os.environ.get('PORT', 5000))
+     app.run(debug=False, port=port, host=host)
