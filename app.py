@@ -1620,7 +1620,7 @@ def export_pdf():
             story += [gmt, Spacer(1, 2*mm)]
 
             # SIP projection table
-             proj = _sip_projection(g.target_amt, g.target_year,
+            proj = _sip_projection(g.target_amt, g.target_year,
                                    effective_current, g.monthly_sip, g.annual_return)
             if proj:
                 story.append(Paragraph("SIP Growth Projection", S['h3']))
