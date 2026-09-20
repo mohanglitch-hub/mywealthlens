@@ -1833,7 +1833,7 @@ def export_excel():
     # ════════════════════════════════════════════════
     # SHEET 3 — Goals + SIP Projections
     # ════════════════════════════════════════════════
-    ws4 = wb.create_sheet("Goals & Projections")
+        ws4 = wb.create_sheet("Goals & Projections")
     _tab_color(ws4, 'F59E0B')
     ws4.sheet_view.showGridLines = False
     for row in ws4.iter_rows(min_row=1, max_row=1000, min_col=1, max_col=8):
@@ -1843,7 +1843,7 @@ def export_excel():
     _title_cell(ws4, 1, 1, "Goals & SIP Projections", sz=14)
     r4 = 3
 
-   if goals:
+    if goals:
         for g in goals:
             linked_value, _ = _goal_linked_value(g)
             effective_current = (g.current_savings or 0) + linked_value
