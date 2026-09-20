@@ -30,13 +30,13 @@ Core modules for investments, goals, and family planning are functional. Some ad
 - Backend: Python (Flask)
 - Frontend: HTML + Templates
 - Database: (mention what you are using — SQLite / PostgreSQL / etc.)
-- Deployment: Docker + Vercel (or whatever you are using)
+- Deployment: Deployment: Docker (planning to deploy on Render)
 
 ---
 
 ## Live Demo
 
-Coming soon (currently being fixed)
+Currently not deployed. Will be available soon on Render.
 
 ---
 
