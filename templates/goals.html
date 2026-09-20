@@ -10,7 +10,7 @@
       <p class="page-sub">Plan, track and achieve your financial milestones</p>
     </div>
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-      <button type="button" onclick="focusSummary('archived')" class="btn-outline-pill">📦 Archived Goals{% if archived_goals %} <span class="count-badge-sm">{{ archived_goals|length }}</span>{% endif %}</button>
+      <a href="/goals/archived" class="btn-archive-pill">📦 Archived Goals{% if summary_stats.archived_total_count %} <span class="count-badge-sm">{{ summary_stats.archived_total_count }}</span>{% endif %}</a>
       <button onclick="togglePanel()" class="btn-accent-pill">+ Add Goal</button>
     </div>
   </div>
@@ -22,11 +22,11 @@
       <div class="summary-value">{{ summary_stats.active_count }}</div>
       <div class="summary-label">Active Goals</div>
     </button>
-    <button type="button" class="summary-card summary-card-green" onclick="focusSummary('achieved')">
+    <a href="/goals/archived" class="summary-card summary-card-green">
       <div class="summary-icon">🏆</div>
       <div class="summary-value">{{ summary_stats.achieved_count }}</div>
       <div class="summary-label">Goals Achieved</div>
-    </button>
+    </a>
     <button type="button" class="summary-card summary-card-amber" onclick="focusSummary('near-term')">
       <div class="summary-icon">⏳</div>
       <div class="summary-value">{{ summary_stats.near_term_count }}</div>
@@ -391,28 +391,40 @@
               {% if available_funds %}
               <optgroup label="Mutual Funds">
                 {% for mf in available_funds %}
-                <option value="mutual_fund:{{ mf.id }}" data-class="equity">{{ mf.scheme }} (₹{{ "{:,.0f}".format(mf.value) }})</option>
+                {% set key = 'mutual_fund:' ~ mf.id %}
+                {% if key not in linked_holding_keys %}
+                <option value="{{ key }}" data-class="equity" data-remaining="{{ '%g'|format(mf.remaining_pct) }}">{{ mf.scheme }} — {{ '%g'|format(mf.remaining_pct) }}% / ₹{{ "{:,.0f}".format(mf.remaining_value) }} available{% if mf.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(mf.value) }}){% endif %}</option>
+                {% endif %}
                 {% endfor %}
               </optgroup>
               {% endif %}
               {% if available_stocks %}
               <optgroup label="Stocks">
                 {% for st in available_stocks %}
-                <option value="stock:{{ st.id }}" data-class="equity">{{ st.name }} (₹{{ "{:,.0f}".format(st.value) }})</option>
+                {% set key = 'stock:' ~ st.id %}
+                {% if key not in linked_holding_keys %}
+                <option value="{{ key }}" data-class="equity" data-remaining="{{ '%g'|format(st.remaining_pct) }}">{{ st.name }} — {{ '%g'|format(st.remaining_pct) }}% / ₹{{ "{:,.0f}".format(st.remaining_value) }} available{% if st.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(st.value) }}){% endif %}</option>
+                {% endif %}
                 {% endfor %}
               </optgroup>
               {% endif %}
               {% if available_wealth_assets %}
               <optgroup label="Wealth Assets (FD, Gold, Real Estate, …)">
                 {% for wa in available_wealth_assets %}
-                <option value="wealth_asset:{{ wa.id }}" data-class="{{ 'debt' if wa.category == 'Bank & Deposits' else 'other' }}">{{ wa.name }} · {{ wa.asset_type or wa.category }} (₹{{ "{:,.0f}".format(wa.current_value) }})</option>
+                {% set key = 'wealth_asset:' ~ wa.id %}
+                {% if key not in linked_holding_keys %}
+                <option value="{{ key }}" data-class="{{ 'debt' if wa.category == 'Bank & Deposits' else 'other' }}" data-remaining="{{ '%g'|format(wa.remaining_pct) }}">{{ wa.name }} · {{ wa.asset_type or wa.category }} — {{ '%g'|format(wa.remaining_pct) }}% / ₹{{ "{:,.0f}".format(wa.remaining_value) }} available{% if wa.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(wa.current_value) }}){% endif %}</option>
+                {% endif %}
                 {% endfor %}
               </optgroup>
               {% endif %}
               {% if available_retirement_schemes %}
               <optgroup label="EPF / PPF / NPS / Pension">
                 {% for rs in available_retirement_schemes %}
-                <option value="retirement_scheme:{{ rs.id }}" data-class="debt">{{ rs.custom_type or rs.scheme_type }} (₹{{ "{:,.0f}".format(rs.current_balance) }})</option>
+                {% set key = 'retirement_scheme:' ~ rs.id %}
+                {% if key not in linked_holding_keys %}
+                <option value="{{ key }}" data-class="debt" data-remaining="{{ '%g'|format(rs.remaining_pct) }}">{{ rs.custom_type or rs.scheme_type }} — {{ '%g'|format(rs.remaining_pct) }}% / ₹{{ "{:,.0f}".format(rs.remaining_value) }} available{% if rs.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(rs.current_balance) }}){% endif %}</option>
+                {% endif %}
                 {% endfor %}
               </optgroup>
               {% endif %}
@@ -518,43 +530,6 @@
   </div>
   {% endif %}
 
-  <!-- Archived Goals (Achieved / Dropped) -->
-  <div class="goal-links archived-section" id="archivedGoalsSection">
-    <div class="goal-links-header" onclick="toggleLinks('archived')">
-      <span>📦 Archived Goals {% if archived_goals %}<span class="count-badge-sm">{{ archived_goals|length }}</span>{% endif %}</span>
-      <span class="chevron" id="chev-archived">▾</span>
-    </div>
-    <div class="goal-links-body" id="links-archived" style="display:none;">
-      {% if not archived_goals %}
-      <div style="color:var(--muted); font-size:0.8rem; padding:4px 0;">
-        No archived goals yet. Goals you mark as Achieved or Drop will show up here, and you can restore them anytime.
-      </div>
-      {% endif %}
-      {% for g in archived_goals %}
-      <div class="archived-row">
-        <div>
-          <div class="archived-name">
-            {{ g.emoji or "⭐" }} {{ g.name }}
-            {% if g.archive_reason == 'achieved' %}
-            <span class="archive-reason-badge archive-reason-achieved">🏆 Achieved</span>
-            {% else %}
-            <span class="archive-reason-badge archive-reason-dropped">Dropped</span>
-            {% endif %}
-          </div>
-          <div class="archived-meta">
-            Target: ₹{{ "{:,.0f}".format(g.target_amt) }} by {{ g.target_year }}
-            {% if g.archived_at %}· Archived {{ g.archived_at.strftime('%d %b %Y') }}{% endif %}
-          </div>
-        </div>
-        <form method="POST" action="/goals/{{ g.id }}/restore" style="margin:0;">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <button type="submit" class="btn-unlink">Restore</button>
-        </form>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
 </div>
 
 <style>
@@ -568,13 +543,13 @@
     transition:opacity 0.2s; white-space:nowrap;
   }
   .btn-accent-pill:hover { opacity:0.88; }
-  .btn-outline-pill {
-    background:none; color:var(--text); border:1px solid var(--border); border-radius:8px;
-    padding:10px 18px; font-weight:600; font-size:0.875rem; cursor:pointer;
+  .btn-archive-pill {
+    background:var(--accent-bg); color:var(--accent); border:1px solid var(--accent);
+    border-radius:8px; padding:10px 18px; font-weight:700; font-size:0.875rem; cursor:pointer;
     transition:all 0.2s; white-space:nowrap; font-family:Inter,sans-serif;
-    display:inline-flex; align-items:center; gap:6px;
+    display:inline-flex; align-items:center; gap:6px; text-decoration:none;
   }
-  .btn-outline-pill:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-bg); }
+  .btn-archive-pill:hover { background:var(--accent); color:#fff; }
 
   /* Panel */
   .panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:28px; margin-bottom:32px; box-shadow:var(--shadow-sm); }
@@ -602,6 +577,7 @@
     padding:16px; text-align:center; box-shadow:var(--shadow-sm);
     cursor:pointer; font-family:Inter,sans-serif; width:100%;
     transition:transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    text-decoration:none; display:block;
   }
   .summary-card:hover { transform:translateY(-2px); box-shadow:var(--shadow-md); border-color:var(--accent); }
   .summary-card:active { transform:translateY(0); }
@@ -739,22 +715,6 @@
   }
   .btn-achieve:hover { border-color:var(--up); color:var(--up); background:var(--up-bg); }
 
-  /* Archived goals */
-  .archived-section { margin-top:24px; border-top:none; }
-  .archived-row {
-    display:flex; align-items:center; justify-content:space-between;
-    padding:10px 0; border-bottom:1px solid var(--border); gap:10px;
-  }
-  .archived-row:last-child { border-bottom:none; }
-  .archived-name { font-size:0.85rem; color:var(--text); font-weight:500; }
-  .archived-meta { font-size:0.75rem; color:var(--muted); margin-top:2px; }
-  .archive-reason-badge {
-    font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em;
-    padding:2px 8px; border-radius:10px; margin-left:8px; vertical-align:middle;
-  }
-  .archive-reason-achieved { background:var(--up-bg); color:var(--up); }
-  .archive-reason-dropped  { background:var(--border); color:var(--muted); }
-
   /* Edit goal panel */
   .edit-goal-panel {
     background:var(--surface2); border:1px solid var(--border); border-radius:10px;
@@ -834,28 +794,32 @@
   function onLinkHoldingChange(sel) {
     const opt = sel.options[sel.selectedIndex];
     const cls = opt.getAttribute("data-class");
-    if (!cls) return;
     const form = sel.closest("form");
-    const classSelect = form.querySelector("select[name='asset_class']");
-    if (classSelect) classSelect.value = cls;
+    if (cls) {
+      const classSelect = form.querySelector("select[name='asset_class']");
+      if (classSelect) classSelect.value = cls;
+    }
+    // Clamp the allocation % input to what's actually still unallocated
+    // for this holding, so the form can never even attempt to request
+    // more than what link_goal_holding() will allow server-side.
+    const remainingAttr = opt.getAttribute("data-remaining");
+    const pctInput = form.querySelector("input[name='allocation_pct']");
+    if (pctInput && remainingAttr) {
+      const remaining = parseFloat(remainingAttr);
+      if (!isNaN(remaining) && remaining > 0) {
+        pctInput.max = remaining;
+        pctInput.value = remaining;
+      }
+    }
   }
 
   // Makes the 4 summary cards (and the "Archived Goals" header button)
   // actually do something on click: jump to and briefly highlight the
   // matching goal card(s), or open the Archived Goals section.
   function focusSummary(kind) {
-    if (kind === "archived") {
-      const body = document.getElementById("links-archived");
-      const chev = document.getElementById("chev-archived");
-      if (body && body.style.display === "none") {
-        body.style.display = "block";
-        if (chev) chev.classList.add("open");
-      }
-      const section = document.getElementById("archivedGoalsSection");
-      if (section) section.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-
+    // "achieved" and "archived" navigate to their own page (/goals/archived)
+    // via a plain <a> now, so this only handles the in-page scroll/highlight
+    // cases: active, near-term, long-term.
     const listSection = document.getElementById("goalsListSection");
     if (kind === "active" || !listSection) {
       if (listSection) listSection.scrollIntoView({ behavior: "smooth", block: "start" });

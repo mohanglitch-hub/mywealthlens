@@ -437,10 +437,22 @@ def import_detailed_cas(cas_data, user_id):
     (fully redeemed/closed folios are skipped, matching the old
     parser's behaviour — not a regression, a known follow-up).
 
-    Returns (holdings_count, transactions_count, portfolio_xirr_pct).
+    Returns (holdings_count, transactions_count, portfolio_xirr_pct,
+    affected_goal_names) — the last covers Goals-page audit Critical #2:
+    every re-upload wipes and reinserts with brand-new MutualFund ids,
+    so any GoalHoldingLink pointing at the old ids would otherwise go
+    silently stale. We snapshot the old ids before the wipe and clean
+    up any links to them, rather than trying to fuzzy-re-match by
+    scheme name/ISIN (rejected — too easy to silently attach a goal to
+    the WRONG fund; a cleared link the user re-links in 10 seconds is
+    safer than a wrong one nobody notices).
     """
+    stale_mf_ids = [row.id for row in
+                     MutualFund.query.filter_by(user_id=user_id).with_entities(MutualFund.id).all()]
     MutualFundTransaction.query.filter_by(user_id=user_id).delete()
     MutualFund.query.filter_by(user_id=user_id).delete()
+    affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
+        user_id, 'mutual_fund', stale_mf_ids)
     db.session.flush()
 
     all_transactions_for_portfolio = []
@@ -493,7 +505,7 @@ def import_detailed_cas(cas_data, user_id):
 
     portfolio_rate = _portfolio_xirr(all_transactions_for_portfolio, total_current_value)
     db.session.commit()
-    return holdings_count, transactions_count, portfolio_rate
+    return holdings_count, transactions_count, portfolio_rate, affected_goal_names
 
 def _clean_stock_name(raw_name):
     """Remove PDF artifacts, page numbers, dates and junk from holding names."""
@@ -642,7 +654,7 @@ def upload_cams():
         flash('No mutual fund holdings found in this PDF.', 'error')
         return redirect(url_for('upload'))
 
-    holdings_count, transactions_count, portfolio_rate = import_detailed_cas(cas_data, current_user.id)
+    holdings_count, transactions_count, portfolio_rate, affected_goal_names = import_detailed_cas(cas_data, current_user.id)
 
     if holdings_count == 0:
         flash('No active mutual fund holdings found in this PDF (all folios may be zero-balance).', 'error')
@@ -662,6 +674,12 @@ def upload_cams():
         flash(f'{len(cas_data.parse_warnings)} scheme(s) had data that didn’t fully '
               f'reconcile against the statement’s own running balance — double-check '
               f'those holdings before relying on their numbers.', 'warning')
+
+    if affected_goal_names:
+        goal_list = ', '.join(affected_goal_names)
+        flash(f'This re-upload replaced your mutual fund holdings with new entries, so '
+              f'{len(affected_goal_names)} goal(s) lost their old holding link(s): {goal_list}. '
+              f'Their shortfall now reflects that — re-link the right holding(s) on the Goals page.', 'warning')
 
     return redirect(url_for('upload'))
 
@@ -686,7 +704,11 @@ def upload_cdsl():
     if not holdings:
         flash('No stock holdings found in this PDF.', 'error')
         return redirect(url_for('upload'))
+    stale_stock_ids = [row.id for row in
+                        Stock.query.filter_by(user_id=current_user.id).with_entities(Stock.id).all()]
     Stock.query.filter_by(user_id=current_user.id).delete()
+    affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
+        current_user.id, 'stock', stale_stock_ids)
     live_fetched = 0
     for h in holdings:
         ticker, live_price = fetch_live_price_by_isin(h['isin'], h['name'])
@@ -703,22 +725,43 @@ def upload_cdsl():
         db.session.add(stock)
     db.session.commit()
     flash(f'Imported {len(holdings)} stocks. Live prices fetched for {live_fetched}.', 'success')
+    if affected_goal_names:
+        goal_list = ', '.join(affected_goal_names)
+        flash(f'This re-upload replaced your stock holdings with new entries, so '
+              f'{len(affected_goal_names)} goal(s) lost their old holding link(s): {goal_list}. '
+              f'Their shortfall now reflects that — re-link the right holding(s) on the Goals page.', 'warning')
     return redirect(url_for('upload'))
 
 @app.route('/upload/delete-mf', methods=['POST'])
 @login_required
 def delete_all_mf():
+    stale_mf_ids = [row.id for row in
+                     MutualFund.query.filter_by(user_id=current_user.id).with_entities(MutualFund.id).all()]
     MutualFund.query.filter_by(user_id=current_user.id).delete()
+    affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
+        current_user.id, 'mutual_fund', stale_mf_ids)
     db.session.commit()
     flash('All mutual fund data cleared.', 'success')
+    if affected_goal_names:
+        goal_list = ', '.join(affected_goal_names)
+        flash(f'This also removed {len(affected_goal_names)} goal(s)\' link(s) to that data: {goal_list} — '
+              f'their shortfall has been updated.', 'warning')
     return redirect(url_for('upload'))
 
 @app.route('/upload/delete-stocks', methods=['POST'])
 @login_required
 def delete_all_stocks():
+    stale_stock_ids = [row.id for row in
+                        Stock.query.filter_by(user_id=current_user.id).with_entities(Stock.id).all()]
     Stock.query.filter_by(user_id=current_user.id).delete()
+    affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
+        current_user.id, 'stock', stale_stock_ids)
     db.session.commit()
     flash('All stock data cleared.', 'success')
+    if affected_goal_names:
+        goal_list = ', '.join(affected_goal_names)
+        flash(f'This also removed {len(affected_goal_names)} goal(s)\' link(s) to that data: {goal_list} — '
+              f'their shortfall has been updated.', 'warning')
     return redirect(url_for('upload'))
 
 
@@ -835,9 +878,18 @@ def import_tradebook(rows, user_id):
     funds). Live price is fetched the same way the CDSL importer does;
     falls back to the last transaction's price if that fails.
 
-    Returns (holdings_count, transactions_count, portfolio_rate).
+    Returns (holdings_count, transactions_count, portfolio_rate,
+    affected_goal_names) — see import_detailed_cas()'s docstring for
+    why the last element exists (Goals-page audit, Sep 2026): new stock
+    rows get new ids on every re-upload, so any GoalHoldingLink to the
+    old tradebook-sourced ids is explicitly cleaned up here rather than
+    left to go stale.
     """
+    stale_stock_ids = [row.id for row in
+        Stock.query.filter_by(user_id=user_id, source='tradebook').with_entities(Stock.id).all()]
     Stock.query.filter_by(user_id=user_id, source='tradebook').delete()
+    affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
+        user_id, 'stock', stale_stock_ids)
     db.session.flush()
 
     groups = {}
@@ -889,7 +941,7 @@ def import_tradebook(rows, user_id):
 
     portfolio_rate = _portfolio_stock_xirr(all_transactions_for_portfolio, total_current_value)
     db.session.commit()
-    return holdings_count, transactions_count, portfolio_rate
+    return holdings_count, transactions_count, portfolio_rate, affected_goal_names
 
 
 @app.route('/upload/tradebook', methods=['POST'])
@@ -915,7 +967,7 @@ def upload_tradebook():
         flash('No valid BUY/SELL rows found in this file.', 'error')
         return redirect(url_for('upload'))
 
-    holdings_count, transactions_count, portfolio_rate = import_tradebook(rows, current_user.id)
+    holdings_count, transactions_count, portfolio_rate, affected_goal_names = import_tradebook(rows, current_user.id)
 
     if holdings_count == 0:
         flash('No open positions found (all holdings in this tradebook may be fully sold).', 'error')
@@ -925,6 +977,11 @@ def upload_tradebook():
     skip_msg = f' ({skipped} row(s) skipped — unrecognised format.)' if skipped else ''
     flash(f'Imported {holdings_count} stock holdings ({transactions_count} transactions).'
           f'{xirr_msg}{skip_msg}', 'success')
+    if affected_goal_names:
+        goal_list = ', '.join(affected_goal_names)
+        flash(f'This re-upload replaced your tradebook stock holdings with new entries, so '
+              f'{len(affected_goal_names)} goal(s) lost their old holding link(s): {goal_list}. '
+              f'Their shortfall now reflects that — re-link the right holding(s) on the Goals page.', 'warning')
     return redirect(url_for('upload'))
 
 def _stepup_sip_future_value(monthly_sip, step_up_pct, annual_return, years):
@@ -1049,6 +1106,48 @@ def _goal_linked_value(goal):
     return linked_value, rows
 
 
+def _holding_allocated_pct(holding_type, holding_id, user_id):
+    """Total allocation_pct already committed to this ONE holding
+    across ALL of the user's goals. A holding is a single pool of
+    real money, so this can never legitimately exceed 100 — enforced
+    in link_goal_holding(), which is the only place new links are
+    created. (Goals-page audit, Sep 2026: previously unenforced, so
+    the same fund could be linked at 100% to two different goals and
+    silently double-counted.)"""
+    rows = (GoalHoldingLink.query
+        .join(Goal, GoalHoldingLink.goal_id == Goal.id)
+        .filter(Goal.user_id == user_id,
+                GoalHoldingLink.holding_type == holding_type,
+                GoalHoldingLink.holding_id == holding_id)
+        .all())
+    return sum(l.allocation_pct for l in rows)
+
+
+def _cleanup_goal_links_for_deleted_holdings(user_id, holding_type, deleted_holding_ids):
+    """Call this right after a holding (or a batch of holdings) of
+    the given type is gone for good — a manual delete, or a bulk
+    wipe-and-reimport (CAS/CDSL/tradebook). Deletes any GoalHoldingLink
+    rows that pointed at those now-gone ids, so a goal's linked value
+    drops (and its shortfall reappears) immediately instead of
+    silently keeping a dead link forever with no way to see or remove
+    it (Goals-page audit, Sep 2026). Returns the sorted list of
+    distinct goal names that were affected, for a flash message —
+    does NOT commit; the caller is expected to already be inside a
+    commit for the holding change itself."""
+    if not deleted_holding_ids:
+        return []
+    links = (GoalHoldingLink.query
+        .join(Goal, GoalHoldingLink.goal_id == Goal.id)
+        .filter(Goal.user_id == user_id,
+                GoalHoldingLink.holding_type == holding_type,
+                GoalHoldingLink.holding_id.in_(deleted_holding_ids))
+        .all())
+    affected_goal_names = sorted({link.goal.name for link in links})
+    for link in links:
+        db.session.delete(link)
+    return affected_goal_names
+
+
 GOAL_REVIEW_PERIOD_DAYS = 90
 
 
@@ -1097,13 +1196,22 @@ def goals():
         else:
             long_term_count += 1
 
+        # "type:id" keys already linked to THIS goal, so its own
+        # "link a holding" dropdown doesn't re-offer them — picking
+        # one again would always be rejected by link_goal_holding()'s
+        # duplicate check, so there's no reason to show it as an
+        # option (it's already visible above, in Linked Holdings).
+        linked_holding_keys = {f'{l.holding_type}:{l.holding_id}' for l in g.links}
+
         goals_data.append({
             'goal': g, 'calc': calc, 'linked_value': linked_value, 'linked_rows': linked_rows,
             'glide_curve': glide_curve, 'rebalance': rebalance, 'drawdown': drawdown,
             'needs_review': needs_review, 'years_left': years_left,
             'is_achieved_suggested': is_achieved_suggested,
+            'linked_holding_keys': linked_holding_keys,
         })
 
+    archived_total_count = Goal.query.filter_by(user_id=current_user.id, is_archived=True).count()
     summary_stats = {
         'active_count': len(user_goals),
         'achieved_count': Goal.query.filter_by(
@@ -1111,26 +1219,43 @@ def goals():
         'near_term_count': near_term_count,
         'long_term_count': long_term_count,
         'achieved_suggested_count': achieved_suggested_count,
+        'archived_total_count': archived_total_count,
     }
 
-    archived_goals = (Goal.query
-        .filter_by(user_id=current_user.id, is_archived=True)
-        .order_by(Goal.archived_at.desc()).all())
+    # For the "link a holding" picker — every holding is listed, but
+    # each is annotated with how much of it is STILL unallocated
+    # across the user's goals (100% minus whatever's already linked
+    # elsewhere), so the dropdown can show e.g. "only ₹8,00,000 (80%)
+    # left" and the form can cap/default to that amount. See
+    # link_goal_holding(), which enforces this same 100% ceiling
+    # server-side (Goals-page audit, Sep 2026 — previously the
+    # comment here claimed this filtering existed and it didn't).
+    def _annotate_availability(items, holding_type, value_attr):
+        for h in items:
+            raw_value = getattr(h, value_attr) or 0
+            already_pct = _holding_allocated_pct(holding_type, h.id, current_user.id)
+            remaining_pct = max(round(100 - already_pct, 2), 0)
+            h.remaining_pct = remaining_pct
+            h.remaining_value = raw_value * (remaining_pct / 100)
+        return items
 
-    # For the "link a holding" picker — only funds not already fully committed are still offered,
-    # allocation is left to the user to keep sensible (same trust level as the existing nominee %
-    # fields elsewhere in the app, which also don't hard-block over-allocation across records).
-    available_funds = MutualFund.query.filter_by(user_id=current_user.id).order_by(MutualFund.scheme).all()
-    available_stocks = Stock.query.filter_by(user_id=current_user.id).order_by(Stock.name).all()
-    available_wealth_assets = (WealthAsset.query
-        .filter_by(user_id=current_user.id, is_archived=False)
-        .order_by(WealthAsset.name).all())
-    available_retirement_schemes = (RetirementScheme.query
-        .filter_by(user_id=current_user.id, is_archived=False)
-        .order_by(RetirementScheme.scheme_type).all())
+    available_funds = _annotate_availability(
+        MutualFund.query.filter_by(user_id=current_user.id).order_by(MutualFund.scheme).all(),
+        'mutual_fund', 'value')
+    available_stocks = _annotate_availability(
+        Stock.query.filter_by(user_id=current_user.id).order_by(Stock.name).all(),
+        'stock', 'value')
+    available_wealth_assets = _annotate_availability(
+        (WealthAsset.query.filter_by(user_id=current_user.id, is_archived=False)
+            .order_by(WealthAsset.name).all()),
+        'wealth_asset', 'current_value')
+    available_retirement_schemes = _annotate_availability(
+        (RetirementScheme.query.filter_by(user_id=current_user.id, is_archived=False)
+            .order_by(RetirementScheme.scheme_type).all()),
+        'retirement_scheme', 'current_balance')
 
     return render_template('goals.html', goals_data=goals_data,
-        summary_stats=summary_stats, archived_goals=archived_goals,
+        summary_stats=summary_stats,
         available_funds=available_funds, available_stocks=available_stocks,
         available_wealth_assets=available_wealth_assets,
         available_retirement_schemes=available_retirement_schemes)
@@ -1287,12 +1412,38 @@ def link_goal_holding(goal_id):
         flash('Please select a valid holding.', 'error')
         return redirect(url_for('goals'))
 
-    holding, _, name = _holding_lookup(holding_type, holding_id)
+    holding, raw_value, name = _holding_lookup(holding_type, holding_id)
     if not holding or not _HOLDING_OWNER_CHECK[holding_type](holding, current_user.id):
         flash('Please select a valid holding.', 'error')
         return redirect(url_for('goals'))
     if allocation_pct <= 0 or allocation_pct > 100:
         flash('Allocation must be between 1% and 100%.', 'error')
+        return redirect(url_for('goals'))
+
+    # A holding can't be linked to the same goal twice — there's no
+    # "edit allocation" flow, so a repeat pick would just add a
+    # second, separate link stacking more value on top of the first
+    # rather than replacing it. Unlink and re-link instead.
+    dup = GoalHoldingLink.query.filter_by(
+        goal_id=goal.id, holding_type=holding_type, holding_id=holding_id).first()
+    if dup:
+        flash(f'{name} is already linked to {goal.name} — unlink it first if you want '
+              f'to change the allocation.', 'error')
+        return redirect(url_for('goals'))
+
+    # A holding is one pool of real money: its allocation across ALL
+    # of the user's goals can never add up to more than 100%, or the
+    # same rupee gets counted toward two goals at once (Goals-page
+    # audit, Sep 2026).
+    already_pct = _holding_allocated_pct(holding_type, holding_id, current_user.id)
+    remaining_pct = round(100 - already_pct, 2)
+    if allocation_pct > remaining_pct + 1e-9:
+        remaining_value = raw_value * (remaining_pct / 100)
+        if remaining_pct <= 0:
+            flash(f'{name} is already fully allocated to other goals — nothing left to link here.', 'error')
+        else:
+            flash(f'Only {remaining_pct:g}% of {name} (₹{remaining_value:,.0f}) is still '
+                  f'unallocated — the rest is already linked to other goals.', 'error')
         return redirect(url_for('goals'))
 
     link = GoalHoldingLink(goal_id=goal.id, holding_type=holding_type,
@@ -1385,7 +1536,20 @@ def restore_goal(goal_id):
     goal.archive_reason = None
     db.session.commit()
     flash(f'{goal.name} restored to active goals.', 'success')
-    return redirect(url_for('goals'))
+    return redirect(request.form.get('next') or url_for('goals'))
+
+
+@app.route('/goals/archived')
+@login_required
+def archived_goals_view():
+    """Dedicated Archived Goals page — its own page rather than a
+    collapsible section at the bottom of /goals, matching the
+    Insurance/Retirement Centre pattern (a separate Archive listing
+    with square info cards, not an inline accordion)."""
+    archived_goals = (Goal.query
+        .filter_by(user_id=current_user.id, is_archived=True)
+        .order_by(Goal.archived_at.desc()).all())
+    return render_template('goals_archive.html', archived_goals=archived_goals)
 
 
 # ── Step 7: Export routes (PDF + Excel) ──────────────────────────────────────

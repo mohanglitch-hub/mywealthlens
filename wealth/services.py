@@ -307,9 +307,9 @@ def delete_asset_permanent(db, asset, user_id):
     direct Active -> Delete path).
     """
     if asset.user_id != user_id:
-        return False, "You do not have permission to delete this asset."
+        return False, "You do not have permission to delete this asset.", []
     if not asset.is_archived:
-        return False, "Only archived assets can be permanently deleted."
+        return False, "Only archived assets can be permanently deleted.", []
 
     # Phase J: entity_id has no formal database-level FK/cascade on
     # wealth_value_snapshot (by design — it's shared across two
@@ -338,9 +338,20 @@ def delete_asset_permanent(db, asset, user_id):
     WealthDocument.query.filter_by(user_id=user_id, asset_id=asset.id) \
         .update({"asset_id": None})
 
+    # Goals-page audit (Sep 2026, Critical #2): a Goal can link straight
+    # to this asset (e.g. an FD backing a goal's "current savings"). If
+    # we let the asset disappear without touching those links, the link
+    # rows go stale — GoalHoldingLink.holding_id points at nothing, and
+    # the goal silently loses that value with no trace. Deleted local to
+    # avoid a module-load-time circular import between the top-level
+    # models module and this blueprint's own .models.
+    from app import _cleanup_goal_links_for_deleted_holdings
+    affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
+        user_id, 'wealth_asset', [asset.id])
+
     db.session.delete(asset)
     db.session.commit()
-    return True, None
+    return True, None, affected_goal_names
 
 
 def get_assets_for_listing(user_id, q=None, category=None, status_filter="active",
