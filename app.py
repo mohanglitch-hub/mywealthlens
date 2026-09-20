@@ -1516,7 +1516,7 @@ def export_pdf():
         mf_data = [['Scheme Name', 'Folio', 'Units', 'NAV (₹)', 'Value (₹)']]
         for m in mfs:
             mf_data.append([
-                m.scheme_name or m.name or '—',
+               m.scheme or '—',
                 getattr(m, 'folio', '—') or '—',
                 f"{getattr(m, 'units', 0) or 0:,.3f}",
                 f"{getattr(m, 'nav', 0) or 0:,.2f}",
@@ -1534,7 +1534,7 @@ def export_pdf():
             sk_data.append([
                 s.name or getattr(s, 'isin', '—') or '—',
                 f"{getattr(s, 'quantity', 0) or 0:,.0f}",
-                f"{getattr(s, 'price', 0) or 0:,.2f}",
+                f"{(s.live_price or s.buy_price or 0):,.2f}",
                 _fmt(s.value),
             ])
         skt = Table(sk_data, colWidths=[W*0.46, W*0.16, W*0.18, W*0.20])
@@ -1574,8 +1574,12 @@ def export_pdf():
     if goals:
         story += _section_header("🎯  Financial Goals & SIP Projections", S)
         for g in goals:
-            calc = calculate_goal(g.target_amt, g.target_year,
-                                  g.current_savings, g.monthly_sip, g.annual_return)
+            linked_value, _ = _goal_linked_value(g)
+            effective_current = (g.current_savings or 0) + linked_value
+            calc = calculate_goal(g.target_amt, g.target_year, effective_current,
+                                  g.monthly_sip, g.annual_return,
+                                  getattr(g, 'inflation_rate', 0) or 0,
+                                  getattr(g, 'step_up_pct', 0) or 0)
             status_color = _GREEN if calc['on_track'] else _RED
             story.append(KeepTogether([
                 Paragraph(f"{g.emoji or '⭐'} {g.name}", S['h3']),
@@ -1591,6 +1595,13 @@ def export_pdf():
                  'Status',
                  'On Track ✓' if calc['on_track'] else f"Shortfall ₹{calc.get('shortfall',0):,.0f}"],
             ]
+            if linked_value > 0 or calc.get('inflation_applied'):
+                extra_row = [
+                    'From Linked Holdings', _fmt(linked_value) if linked_value > 0 else '—',
+                    'Target (Inflation-Adj.)',
+                    _fmt(calc['inflation_adjusted_target']) if calc.get('inflation_applied') else '—',
+                ]
+                g_meta.append(extra_row)
             gmt = Table(g_meta, colWidths=[W*0.22, W*0.28, W*0.22, W*0.28])
             gmt.setStyle(TableStyle([
                 ('BACKGROUND',   (0,0), (-1,-1), _CARD),
@@ -1599,6 +1610,7 @@ def export_pdf():
                 ('TEXTCOLOR',    (2,0), (2,-1),  _MUTED),
                 ('FONTNAME',     (1,0), (1,-1),  'Helvetica-Bold'),
                 ('FONTNAME',     (3,0), (3,-1),  'Helvetica-Bold'),
+                ('TEXTCOLOR',    (3,3), (3,3),   status_color),
                 ('FONTSIZE',     (0,0), (-1,-1),  8),
                 ('GRID',         (0,0), (-1,-1),  0.3, _BORDER),
                 ('LEFTPADDING',  (0,0), (-1,-1),  6),
@@ -1608,8 +1620,8 @@ def export_pdf():
             story += [gmt, Spacer(1, 2*mm)]
 
             # SIP projection table
-            proj = _sip_projection(g.target_amt, g.target_year,
-                                   g.current_savings, g.monthly_sip, g.annual_return)
+             proj = _sip_projection(g.target_amt, g.target_year,
+                                   effective_current, g.monthly_sip, g.annual_return)
             if proj:
                 story.append(Paragraph("SIP Growth Projection", S['h3']))
                 sip_hdr = [['Period', 'Projected Balance (₹)', 'vs Target (₹)', 'Progress %']]
@@ -1801,12 +1813,12 @@ def export_excel():
 
     all_rows = []
     for m in mfs:
-        all_rows.append(['Mutual Fund', m.scheme_name or m.name or '—',
+        all_rows.append(['Mutual Fund', m.scheme or '—',
                          getattr(m, 'amc', '') or '',
                          getattr(m, 'units', '') or '', getattr(m, 'nav', '') or '', m.value])
     for s in stocks:
         all_rows.append(['Stock', s.name or '—', getattr(s, 'isin', '') or '',
-                         getattr(s, 'quantity', '') or '', getattr(s, 'price', '') or '', s.value])
+                         getattr(s, 'quantity', '') or '', (s.live_price or s.buy_price or ''), s.value])
     for a in all_assets_flat:
         all_rows.append([a.category, a.name or '—', a.asset_type or '', '', '', a.current_value])
 
@@ -1831,10 +1843,14 @@ def export_excel():
     _title_cell(ws4, 1, 1, "Goals & SIP Projections", sz=14)
     r4 = 3
 
-    if goals:
+   if goals:
         for g in goals:
-            calc = calculate_goal(g.target_amt, g.target_year,
-                                  g.current_savings, g.monthly_sip, g.annual_return)
+            linked_value, _ = _goal_linked_value(g)
+            effective_current = (g.current_savings or 0) + linked_value
+            calc = calculate_goal(g.target_amt, g.target_year, effective_current,
+                                  g.monthly_sip, g.annual_return,
+                                  getattr(g, 'inflation_rate', 0) or 0,
+                                  getattr(g, 'step_up_pct', 0) or 0)
             _title_cell(ws4, r4, 1, f"{g.emoji or '⭐'} {g.name}", sz=12)
             r4 += 1
             _hdr_row(ws4, r4, ['Target (₹)', 'Target Year', 'Savings (₹)',
@@ -1857,7 +1873,7 @@ def export_excel():
             r4 += 1
 
             proj = _sip_projection(g.target_amt, g.target_year,
-                                   g.current_savings, g.monthly_sip, g.annual_return)
+                                   effective_current, g.monthly_sip, g.annual_return)
             for i, (label, bal, _) in enumerate(proj):
                 delta = bal - g.target_amt
                 progress = min(round(bal / g.target_amt * 100, 1), 100) if g.target_amt else 0
