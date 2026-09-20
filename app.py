@@ -1516,7 +1516,7 @@ def export_pdf():
         mf_data = [['Scheme Name', 'Folio', 'Units', 'NAV (₹)', 'Value (₹)']]
         for m in mfs:
             mf_data.append([
-               m.scheme or '—',
+                m.scheme or '—',
                 getattr(m, 'folio', '—') or '—',
                 f"{getattr(m, 'units', 0) or 0:,.3f}",
                 f"{getattr(m, 'nav', 0) or 0:,.2f}",
@@ -1833,7 +1833,7 @@ def export_excel():
     # ════════════════════════════════════════════════
     # SHEET 3 — Goals + SIP Projections
     # ════════════════════════════════════════════════
-        ws4 = wb.create_sheet("Goals & Projections")
+    ws4 = wb.create_sheet("Goals & Projections")
     _tab_color(ws4, 'F59E0B')
     ws4.sheet_view.showGridLines = False
     for row in ws4.iter_rows(min_row=1, max_row=1000, min_col=1, max_col=8):
