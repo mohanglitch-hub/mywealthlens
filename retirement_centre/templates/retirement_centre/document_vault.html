@@ -33,7 +33,7 @@
   <!-- ── Upload Form ── -->
   <div id="vaultUploadForm" class="ret-schemes-card" style="display:none;">
     <div class="ret-section-label" style="margin-bottom:16px;">Upload Document</div>
-    <form method="POST" action="{{ url_for('retirement_centre.upload_document_vault') }}" enctype="multipart/form-data">
+    <form method="POST" action="{{ url_for('retirement_centre.upload_document_vault') }}" enctype="multipart/form-data" data-mwl-encrypt="true">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div class="ret-inline-grid">
         <div class="form-group">
@@ -122,8 +122,17 @@
               <span class="ret-list-secondary">{{ d.doc_type }} · {{ format_date(d.uploaded_at) }} · {{ d.file_size_display }}</span>
             </div>
             <div class="ret-list-actions">
-              <a href="{{ url_for('retirement_centre.preview_document', doc_id=d.id) }}" target="_blank" class="ret-link-btn">View</a>
-              <a href="{{ url_for('retirement_centre.download_document', doc_id=d.id) }}" class="ret-link-btn">Download</a>
+              {% set ext = d.original_name.rsplit('.', 1)[-1].lower() if '.' in d.original_name else '' %}
+              {% set doc_mimetype = {'pdf':'application/pdf','jpg':'image/jpeg','jpeg':'image/jpeg','png':'image/png'}.get(ext, '') %}
+              <a href="{{ url_for('retirement_centre.preview_document', doc_id=d.id) }}" target="_blank" class="ret-link-btn"
+                 data-mwl-doc="true" data-mode="preview"
+                 data-encrypted="{{ 'true' if d.is_encrypted else 'false' }}"
+                 data-iv="{{ d.iv or '' }}" data-filename="{{ d.original_name }}"
+                 data-mimetype="{{ doc_mimetype }}">View</a>
+              <a href="{{ url_for('retirement_centre.download_document', doc_id=d.id) }}" class="ret-link-btn"
+                 data-mwl-doc="true" data-mode="download"
+                 data-encrypted="{{ 'true' if d.is_encrypted else 'false' }}"
+                 data-iv="{{ d.iv or '' }}" data-filename="{{ d.original_name }}">Download{% if d.is_encrypted %} 🔒{% endif %}</a>
               <form method="POST" action="{{ url_for('retirement_centre.delete_document', doc_id=d.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="next" value="vault" />
@@ -242,6 +251,10 @@
     .ret-filter-bar { flex-direction: column; align-items: stretch; }
   }
 </style>
+
+<script src="{{ url_for('static', filename='js/mwl-crypto.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mwl-doc-encrypt-upload.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mwl-doc-unlock.js') }}"></script>
 
 <script>
   function toggle(id) {

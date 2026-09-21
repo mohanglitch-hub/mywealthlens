@@ -821,7 +821,7 @@ def get_documents_for_scheme(scheme_id):
 
 def save_document_metadata(db, scheme, user_id, doc_type, original_name,
                             stored_name, file_path, file_size, notes=None,
-                            title=None):
+                            title=None, iv=None, is_encrypted=False):
     """Persist a document's metadata after the file itself has already
     been saved to local disk by utils.save_document_file()."""
     doc = RetirementDocument(
@@ -829,6 +829,7 @@ def save_document_metadata(db, scheme, user_id, doc_type, original_name,
         title=title, original_name=original_name,
         stored_name=stored_name, file_path=file_path,
         file_size=file_size, notes=notes,
+        iv=iv or None, is_encrypted=bool(is_encrypted),
     )
     db.session.add(doc)
 

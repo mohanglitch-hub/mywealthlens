@@ -399,7 +399,8 @@
       <form method="POST"
             action="/insurance-centre/policy/{{ policy.id }}/documents/upload"
             enctype="multipart/form-data"
-            id="docUploadForm">
+            id="docUploadForm"
+            data-mwl-encrypt="true">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
         <div class="doc-upload-card">
           <div class="ic-form-grid-2">
@@ -479,18 +480,26 @@
             <td class="doc-actions">
               <!-- Preview -->
               {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+              {% set doc_mimetype = {'pdf':'application/pdf','jpg':'image/jpeg','jpeg':'image/jpeg','png':'image/png'}.get(ext, '') %}
               {% if ext in ['pdf','jpg','jpeg','png'] %}
               <a href="/insurance-centre/documents/{{ doc.id }}/preview"
                  target="_blank" class="doc-btn doc-btn-preview"
-                 title="Preview in new tab">👁 Preview</a>
+                 title="Preview in new tab"
+                 data-mwl-doc="true" data-mode="preview"
+                 data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}"
+                 data-iv="{{ doc.iv or '' }}" data-filename="{{ doc.original_name }}"
+                 data-mimetype="{{ doc_mimetype }}">👁 Preview</a>
               {% else %}
               <span class="doc-btn doc-btn-disabled" title="Preview not available">👁</span>
               {% endif %}
 
               <!-- Download -->
               <a href="/insurance-centre/documents/{{ doc.id }}/download"
-                 class="doc-btn doc-btn-download" title="Download">
-                ⬇ Download
+                 class="doc-btn doc-btn-download" title="Download"
+                 data-mwl-doc="true" data-mode="download"
+                 data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}"
+                 data-iv="{{ doc.iv or '' }}" data-filename="{{ doc.original_name }}">
+                ⬇ Download{% if doc.is_encrypted %} 🔒{% endif %}
               </a>
 
               <!-- Delete -->
@@ -525,10 +534,18 @@
         <div class="doc-date" style="margin-bottom:10px;">{{ format_date(doc.uploaded_at) }}</div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+          {% set doc_mimetype = {'pdf':'application/pdf','jpg':'image/jpeg','jpeg':'image/jpeg','png':'image/png'}.get(ext, '') %}
           {% if ext in ['pdf','jpg','jpeg','png'] %}
-          <a href="/insurance-centre/documents/{{ doc.id }}/preview" target="_blank" class="doc-btn doc-btn-preview">👁 Preview</a>
+          <a href="/insurance-centre/documents/{{ doc.id }}/preview" target="_blank" class="doc-btn doc-btn-preview"
+             data-mwl-doc="true" data-mode="preview"
+             data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}"
+             data-iv="{{ doc.iv or '' }}" data-filename="{{ doc.original_name }}"
+             data-mimetype="{{ doc_mimetype }}">👁 Preview</a>
           {% endif %}
-          <a href="/insurance-centre/documents/{{ doc.id }}/download" class="doc-btn doc-btn-download">⬇ Download</a>
+          <a href="/insurance-centre/documents/{{ doc.id }}/download" class="doc-btn doc-btn-download"
+             data-mwl-doc="true" data-mode="download"
+             data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}"
+             data-iv="{{ doc.iv or '' }}" data-filename="{{ doc.original_name }}">⬇ Download{% if doc.is_encrypted %} 🔒{% endif %}</a>
           <button class="doc-btn doc-btn-delete" onclick="confirmDeleteDoc({{ doc.id }}, '{{ doc.original_name }}')">🗑 Delete</button>
         </div>
       </div>
@@ -718,7 +735,13 @@
   .ic-btn-delete-perm:hover{background:var(--down);color:#fff;}
 </style>
 
-
+<!-- Document Vault client-side encryption — see wealth/templates/wealth
+     for the original build; these two shared scripts (plus
+     mwl-crypto.js) let any upload form/document link opt in via
+     data-mwl-encrypt / data-mwl-doc attributes, no per-page JS. -->
+<script src="{{ url_for('static', filename='js/mwl-crypto.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mwl-doc-encrypt-upload.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mwl-doc-unlock.js') }}"></script>
 
 
 
