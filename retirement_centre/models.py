@@ -533,6 +533,19 @@ class RetirementDocument(db.Model):
 
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    iv           = db.Column(db.String(64), nullable=True)
+    # Per-file AES-256-GCM initialization vector, base64 — NOT secret on
+    # its own (see static/js/mwl-crypto.js and account.encryption_salt
+    # on the User model). Only present when is_encrypted is True.
+    is_encrypted = db.Column(db.Boolean, default=False, nullable=False)
+    # True only for documents uploaded after the user set up their
+    # Document Vault passphrase (Preferences → Security) with an
+    # unlocked session — file bytes on disk are ciphertext, decrypted
+    # client-side only. Documents uploaded before this feature existed,
+    # or while the user hadn't unlocked their session, keep working
+    # exactly as before (is_encrypted=False, plain bytes on disk).
+    # Mirrors InsuranceDocument's identical fields exactly.
+
     def __repr__(self):
         return f"<RetirementDocument {self.doc_type} {self.original_name}>"
 

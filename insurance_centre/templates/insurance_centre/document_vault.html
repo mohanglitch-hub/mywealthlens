@@ -32,7 +32,7 @@
   <!-- ── Upload Form ── -->
   <div id="vaultUploadForm" class="ic-card" style="display:none;">
     <div class="ic-card-title">Upload Document</div>
-    <form method="POST" action="/insurance-centre/documents/upload" enctype="multipart/form-data" id="vaultUploadFormEl">
+    <form method="POST" action="/insurance-centre/documents/upload" enctype="multipart/form-data" id="vaultUploadFormEl" data-mwl-encrypt="true">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <div class="ic-form-grid-2">
         <div class="ic-field">
@@ -148,10 +148,18 @@
             </div>
             <div class="dv-list-actions">
               {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+              {% set doc_mimetype = {'pdf':'application/pdf','jpg':'image/jpeg','jpeg':'image/jpeg','png':'image/png'}.get(ext, '') %}
               {% if ext in ['pdf','jpg','jpeg','png'] %}
-              <a href="/insurance-centre/documents/{{ doc.id }}/preview" target="_blank" class="dv-btn dv-btn-preview">View</a>
+              <a href="/insurance-centre/documents/{{ doc.id }}/preview" target="_blank" class="dv-btn dv-btn-preview"
+                 data-mwl-doc="true" data-mode="preview"
+                 data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}"
+                 data-iv="{{ doc.iv or '' }}" data-filename="{{ doc.original_name }}"
+                 data-mimetype="{{ doc_mimetype }}">View</a>
               {% endif %}
-              <a href="/insurance-centre/documents/{{ doc.id }}/download" class="dv-btn dv-btn-download">Download</a>
+              <a href="/insurance-centre/documents/{{ doc.id }}/download" class="dv-btn dv-btn-download"
+                 data-mwl-doc="true" data-mode="download"
+                 data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}"
+                 data-iv="{{ doc.iv or '' }}" data-filename="{{ doc.original_name }}">Download{% if doc.is_encrypted %} 🔒{% endif %}</a>
               <button class="dv-btn dv-btn-delete" onclick="confirmDeleteDocVault({{ doc.id }}, '{{ doc.display_name }}')">Delete</button>
               <form method="POST" action="/insurance-centre/documents/{{ doc.id }}/delete"
                     id="delDocVaultForm{{ doc.id }}" style="display:none;">
@@ -280,6 +288,10 @@
     .ic-filter-bar  { flex-direction:column; align-items:stretch; }
   }
 </style>
+
+<script src="{{ url_for('static', filename='js/mwl-crypto.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mwl-doc-encrypt-upload.js') }}"></script>
+<script src="{{ url_for('static', filename='js/mwl-doc-unlock.js') }}"></script>
 
 <script>
 function toggleVaultUpload() {

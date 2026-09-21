@@ -447,6 +447,11 @@ def upload_document(scheme_id):
     doc_type = request.form.get("doc_type", "").strip()
     title    = request.form.get("doc_title", "").strip() or None
     notes    = request.form.get("doc_notes", "").strip() or None
+    # Set by static/js/mwl-doc-encrypt-upload.js when the user has an
+    # unlocked encryption passphrase session — see wealth/routes.py's
+    # add_document() for the full explanation of this pattern.
+    doc_iv           = request.form.get("iv", "").strip()
+    doc_is_encrypted = request.form.get("is_encrypted", "").strip() == "1"
 
     errors = validators.validate_document(file, doc_type)
     if errors:
@@ -467,6 +472,7 @@ def upload_document(scheme_id):
         doc_type=doc_type, original_name=file.filename,
         stored_name=stored_name, file_path=file_path,
         file_size=file_size, notes=notes, title=title,
+        iv=doc_iv, is_encrypted=doc_is_encrypted,
     )
     flash("Document uploaded successfully!", "success")
     return redirect(url_for("retirement_centre.scheme_detail",
@@ -624,6 +630,8 @@ def upload_document_vault():
     doc_type = request.form.get("doc_type", "").strip()
     title    = request.form.get("doc_title", "").strip() or None
     notes    = request.form.get("doc_notes", "").strip() or None
+    doc_iv           = request.form.get("iv", "").strip()
+    doc_is_encrypted = request.form.get("is_encrypted", "").strip() == "1"
 
     errors = validators.validate_document(file, doc_type)
     if errors:
@@ -642,6 +650,7 @@ def upload_document_vault():
         doc_type=doc_type, original_name=file.filename,
         stored_name=stored_name, file_path=file_path,
         file_size=file_size, notes=notes, title=title,
+        iv=doc_iv, is_encrypted=doc_is_encrypted,
     )
     flash("Document uploaded successfully!", "success")
     return redirect(url_for("retirement_centre.document_vault"))
