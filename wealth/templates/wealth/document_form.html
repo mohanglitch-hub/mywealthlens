@@ -335,4 +335,76 @@
     }
   });
 </script>
+
+{% if not is_edit %}
+<!-- ── Client-side encryption of Document Vault uploads ──
+     If the user has an unlocked encryption passphrase session
+     (set up / unlocked via Preferences → Security), the file is
+     encrypted with AES-256-GCM right here in the browser BEFORE
+     it is ever sent — the plaintext bytes never leave this device.
+     The server only ever receives ciphertext plus a non-secret IV.
+     If the user hasn't set up encryption, or hasn't unlocked it
+     this session, the file uploads exactly as before (plain
+     bytes) — this feature never blocks a normal upload. ── -->
+<script src="{{ url_for('static', filename='js/mwl-crypto.js') }}"></script>
+<script>
+(function () {
+  const form = document.getElementById('documentForm');
+  if (!form) return;
+
+  form.addEventListener('submit', async function (e) {
+    const fileInput = document.getElementById('document');
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) return; // let native validation handle "required"
+
+    if (!window.MWLCrypto) return; // crypto module failed to load — fall back to plain upload
+
+    await window.MWLCrypto.restoreSessionKey();
+    if (!window.MWLCrypto.hasSessionKey()) return; // not unlocked this session — plain upload, unchanged
+
+    e.preventDefault();
+
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalBtnText = submitBtn ? submitBtn.textContent : '';
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Encrypting…'; }
+
+    try {
+      const originalFile = fileInput.files[0];
+      const key = window.MWLCrypto.getSessionKey();
+      const { blob, ivB64 } = await window.MWLCrypto.encryptFile(key, originalFile);
+      const encryptedFile = new File([blob], originalFile.name, { type: originalFile.type });
+
+      // Swap the file input's contents for the encrypted version —
+      // the rest of the form (title, description, category, etc.)
+      // submits completely unchanged.
+      const dt = new DataTransfer();
+      dt.items.add(encryptedFile);
+      fileInput.files = dt.files;
+
+      // Mark this upload as encrypted, with its per-file IV, so the
+      // server knows to store is_encrypted=1 (see wealth/routes.py).
+      let ivField = form.querySelector('input[name="iv"]');
+      if (!ivField) {
+        ivField = document.createElement('input');
+        ivField.type = 'hidden'; ivField.name = 'iv';
+        form.appendChild(ivField);
+      }
+      ivField.value = ivB64;
+
+      let encField = form.querySelector('input[name="is_encrypted"]');
+      if (!encField) {
+        encField = document.createElement('input');
+        encField.type = 'hidden'; encField.name = 'is_encrypted';
+        form.appendChild(encField);
+      }
+      encField.value = '1';
+
+      form.submit();
+    } catch (err) {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = originalBtnText; }
+      alert('Could not encrypt this file before upload: ' + err.message);
+    }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

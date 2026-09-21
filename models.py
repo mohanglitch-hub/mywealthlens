@@ -53,6 +53,23 @@ class User(UserMixin, db.Model):
     name     = db.Column(db.String(150), nullable=False)
     email    = db.Column(db.String(150), unique=True, nullable=False)
     password = db.Column(db.String(256), nullable=False)
+
+    # Document Vault client-side (zero-knowledge) encryption — Sep 2026
+    # production-readiness work. None of these three values are secret
+    # on their own (that's the point): encryption_salt is combined with
+    # the user's separate encryption passphrase — which is NEVER sent to
+    # or stored on this server, in this column or any other — entirely
+    # in the browser to derive the real key via PBKDF2. The verifier
+    # pair lets the app confirm a re-entered passphrase is correct
+    # without the server ever learning the key itself: it's a known
+    # constant encrypted client-side at setup time, and checking it
+    # again just means decrypting it client-side and comparing the
+    # result. See static/js/mwl-crypto.js for the actual cryptography.
+    encryption_salt           = db.Column(db.String(64),  nullable=True)
+    encryption_verifier       = db.Column(db.Text,        nullable=True)
+    encryption_verifier_iv    = db.Column(db.String(64),  nullable=True)
+    encryption_enabled_at     = db.Column(db.DateTime,    nullable=True)
+
     mutual_funds = db.relationship("MutualFund", backref="owner", lazy=True, cascade="all, delete-orphan")
     mf_transactions = db.relationship("MutualFundTransaction", backref="owner", lazy=True, cascade="all, delete-orphan")
     stocks       = db.relationship("Stock",      backref="owner", lazy=True, cascade="all, delete-orphan")

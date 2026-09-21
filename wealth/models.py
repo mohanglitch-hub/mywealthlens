@@ -778,6 +778,16 @@ class WealthDocument(db.Model):
     mime_type      = db.Column(db.String(100), nullable=True)
     file_size      = db.Column(db.Integer, nullable=True)
 
+    # Client-side (zero-knowledge) encryption — Sep 2026. `iv` is the
+    # per-file AES-GCM initialization vector (base64, NOT secret —
+    # safe stored in plain text alongside the ciphertext on disk).
+    # is_encrypted distinguishes documents uploaded before this
+    # feature existed (plain bytes, False) from ones encrypted client
+    # side in the browser before upload (True) — both are served the
+    # same way; the viewer just also needs to decrypt when True.
+    iv           = db.Column(db.String(64),  nullable=True)
+    is_encrypted = db.Column(db.Boolean, default=False, nullable=False)
+
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at  = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -1,4 +1,4 @@
-from flask import Flask, render_template, redirect, url_for, request, flash, session
+from flask import Flask, render_template, redirect, url_for, request, flash, session, jsonify
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
@@ -2230,6 +2230,69 @@ def change_password():
     db.session.commit()
     flash('Password changed successfully!', 'success')
     return redirect(url_for('preferences'))
+
+
+@app.route('/account/encryption/setup', methods=['POST'])
+@login_required
+@limiter.limit('10 per hour')
+def encryption_setup():
+    """
+    Records a user's Document Vault encryption setup. This endpoint
+    NEVER receives the passphrase itself — only the salt (random,
+    not secret) and a "verifier" (a known constant encrypted with the
+    key derived from the passphrase, also not secret on its own) that
+    were both computed entirely client-side in static/js/mwl-crypto.js.
+    That's what makes "the server never sees the key" a checkable
+    fact rather than a promise: this function has no way to derive
+    the key even if it wanted to, since it never receives the
+    passphrase.
+
+    Deliberately one-shot: if a user already has encryption set up,
+    this refuses rather than silently overwriting the salt — doing so
+    would orphan every already-encrypted document (they were encrypted
+    under the OLD salt's key; a new salt derives a different key that
+    can't decrypt them). Changing/resetting the passphrase safely
+    (re-encrypting existing documents under a new key) isn't built
+    yet — that's tracked as a known follow-up, not silently ignored.
+    """
+    if current_user.encryption_salt:
+        return jsonify(error="Encryption is already set up for your account. "
+                              "Changing your passphrase isn't supported yet — "
+                              "contact support before doing anything that assumes it is."), 409
+
+    data = request.get_json(silent=True) or {}
+    salt         = (data.get('salt') or '').strip()
+    verifier     = (data.get('verifier') or '').strip()
+    verifier_iv  = (data.get('verifier_iv') or '').strip()
+
+    if not salt or not verifier or not verifier_iv:
+        return jsonify(error="Missing encryption setup data."), 400
+    if len(salt) > 64 or len(verifier_iv) > 64:
+        return jsonify(error="Invalid encryption setup data."), 400
+
+    current_user.encryption_salt        = salt
+    current_user.encryption_verifier    = verifier
+    current_user.encryption_verifier_iv = verifier_iv
+    current_user.encryption_enabled_at  = dt.utcnow()
+    db.session.commit()
+    return jsonify(ok=True)
+
+
+@app.route('/account/encryption/status')
+@login_required
+def encryption_status():
+    """
+    Non-secret setup data a page needs to unlock the current session
+    (derive the key client-side and confirm it's correct via the
+    verifier) — salt/verifier/verifier_iv are all safe to expose to
+    their own owner exactly as safe as they are to store server-side.
+    """
+    return jsonify(
+        enabled=bool(current_user.encryption_salt),
+        salt=current_user.encryption_salt,
+        verifier=current_user.encryption_verifier,
+        verifier_iv=current_user.encryption_verifier_iv,
+    )
 
 app.register_blueprint(insurance_bp)
 app.register_blueprint(retirement_bp)

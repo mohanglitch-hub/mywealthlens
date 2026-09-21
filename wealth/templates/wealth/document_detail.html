@@ -18,13 +18,21 @@
       <div style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.08em; margin-bottom:4px;">
         {{ doc.category }} · {{ doc.document_type }}
       </div>
-      <h1 style="font-size:1.4rem; font-weight:700; color:var(--text);">{{ doc.display_name }}</h1>
+      <h1 style="font-size:1.4rem; font-weight:700; color:var(--text);">{{ doc.display_name }}
+        {% if doc.is_encrypted %}<span title="This file is end-to-end encrypted — only decryptable with your passphrase" style="font-size:0.7rem; font-weight:700; color:var(--accent2); background:var(--accent-bg); border:1px solid var(--accent); border-radius:6px; padding:2px 8px; vertical-align:middle; margin-left:8px;">🔒 Encrypted</span>{% endif %}
+      </h1>
     </div>
     <div style="display:flex; gap:8px; flex-wrap:wrap;">
       {% if is_previewable %}
-      <a href="{{ url_for('wealth.preview_document', document_id=doc.id) }}" target="_blank" class="wealth-btn-primary-outline">View</a>
+      <a id="doc-preview-link" href="{{ url_for('wealth.preview_document', document_id=doc.id) }}"
+         data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}" data-iv="{{ doc.iv or '' }}"
+         data-filename="{{ doc.original_name }}" data-mimetype="{{ preview_mimetype or '' }}"
+         target="_blank" class="wealth-btn-primary-outline">View</a>
       {% endif %}
-      <a href="{{ url_for('wealth.download_document', document_id=doc.id) }}" class="wealth-btn-primary-outline">Download</a>
+      <a id="doc-download-link" href="{{ url_for('wealth.download_document', document_id=doc.id) }}"
+         data-encrypted="{{ 'true' if doc.is_encrypted else 'false' }}" data-iv="{{ doc.iv or '' }}"
+         data-filename="{{ doc.original_name }}"
+         class="wealth-btn-primary-outline">Download</a>
       <a href="{{ url_for('wealth.edit_document', document_id=doc.id) }}" class="wealth-btn-neutral-outline">Edit</a>
       <form method="POST" action="{{ url_for('wealth.delete_document', document_id=doc.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
@@ -137,5 +145,143 @@
   @media (max-width: 600px) {
     .wealth-detail-grid { grid-template-columns: 1fr; }
   }
+
+  #doc-unlock-box {
+    display: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px 22px; margin-bottom: 16px;
+  }
+  #doc-unlock-box.show { display: block; }
+  #doc-unlock-box input[type="password"] {
+    width: 100%; max-width: 320px; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+    font-size: 0.88rem; margin: 8px 0;
+  }
+  #doc-unlock-error { color: var(--down); font-size: 0.82rem; margin-top: 4px; display: none; }
 </style>
+
+{% if doc.is_encrypted %}
+<div id="doc-unlock-box">
+  <div style="font-weight:700; font-size:0.9rem; color:var(--text); margin-bottom:4px;">Enter your Document Vault passphrase</div>
+  <div style="font-size:0.82rem; color:var(--muted); margin-bottom:4px;">This file is end-to-end encrypted. Your passphrase never leaves your browser.</div>
+  <input type="password" id="doc-unlock-passphrase" placeholder="Passphrase" autocomplete="off" />
+  <div id="doc-unlock-error"></div>
+  <div style="display:flex; gap:8px; margin-top:6px;">
+    <button type="button" class="wealth-btn-primary-outline" id="doc-unlock-submit">Unlock</button>
+    <button type="button" class="wealth-btn-neutral-outline" id="doc-unlock-cancel">Cancel</button>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/mwl-crypto.js') }}"></script>
+<script>
+(function () {
+  const previewLink  = document.getElementById('doc-preview-link');
+  const downloadLink = document.getElementById('doc-download-link');
+  const unlockBox     = document.getElementById('doc-unlock-box');
+  const unlockInput    = document.getElementById('doc-unlock-passphrase');
+  const unlockError    = document.getElementById('doc-unlock-error');
+  const unlockSubmit   = document.getElementById('doc-unlock-submit');
+  const unlockCancel   = document.getElementById('doc-unlock-cancel');
+
+  let pendingAction = null; // 'preview' | 'download', set while the unlock box is open
+
+  function csrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.content : '';
+  }
+
+  function showUnlockError(msg) {
+    unlockError.textContent = msg;
+    unlockError.style.display = 'block';
+  }
+
+  async function ensureUnlocked() {
+    await window.MWLCrypto.restoreSessionKey();
+    if (window.MWLCrypto.hasSessionKey()) return true;
+
+    return new Promise((resolve) => {
+      unlockBox.classList.add('show');
+      unlockInput.value = '';
+      unlockError.style.display = 'none';
+      unlockInput.focus();
+
+      const cleanup = () => {
+        unlockBox.classList.remove('show');
+        unlockSubmit.onclick = null;
+        unlockCancel.onclick = null;
+      };
+
+      unlockCancel.onclick = () => { cleanup(); resolve(false); };
+
+      unlockSubmit.onclick = async () => {
+        const passphrase = unlockInput.value;
+        if (!passphrase) { showUnlockError('Enter your passphrase.'); return; }
+        try {
+          const statusRes = await fetch('/account/encryption/status');
+          const status = await statusRes.json();
+          if (!status.enabled) { showUnlockError('Encryption is not set up on this account.'); return; }
+          const key = await window.MWLCrypto.deriveKey(passphrase, status.salt);
+          const ok = await window.MWLCrypto.checkVerifier(key, status.verifier, status.verifier_iv);
+          if (!ok) { showUnlockError('Incorrect passphrase.'); return; }
+          await window.MWLCrypto.unlockSession(passphrase, status.salt);
+          cleanup();
+          resolve(true);
+        } catch (e) {
+          showUnlockError('Something went wrong. Please try again.');
+        }
+      };
+    });
+  }
+
+  async function fetchAndDecrypt(url, ivB64) {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('Download failed (' + res.status + ')');
+    const ciphertext = await res.arrayBuffer();
+    return window.MWLCrypto.decryptFile(window.MWLCrypto.getSessionKey(), ciphertext, ivB64);
+  }
+
+  async function handleEncryptedClick(link, mode) {
+    const unlocked = await ensureUnlocked();
+    if (!unlocked) return;
+
+    const url      = link.getAttribute('href');
+    const iv       = link.dataset.iv;
+    const filename = link.dataset.filename;
+
+    try {
+      const plainBuf = await fetchAndDecrypt(url, iv);
+      const mimetype = link.dataset.mimetype || 'application/octet-stream';
+      const blob = new Blob([plainBuf], { type: mode === 'preview' ? mimetype : 'application/octet-stream' });
+      const objectUrl = URL.createObjectURL(blob);
+
+      if (mode === 'preview') {
+        window.open(objectUrl, '_blank');
+      } else {
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    } catch (e) {
+      alert('Could not decrypt this file: ' + e.message);
+    }
+  }
+
+  if (previewLink && previewLink.dataset.encrypted === 'true') {
+    previewLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      handleEncryptedClick(previewLink, 'preview');
+    });
+  }
+  if (downloadLink && downloadLink.dataset.encrypted === 'true') {
+    downloadLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      handleEncryptedClick(downloadLink, 'download');
+    });
+  }
+})();
+</script>
+{% endif %}
 {% endblock %}
