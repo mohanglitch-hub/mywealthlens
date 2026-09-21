@@ -149,6 +149,72 @@
             </button>
           </form>
         </div>
+
+        <div class="settings-card" style="margin-top:16px;" id="enc-card">
+          <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Document Vault Encryption</div>
+          <div style="color:var(--muted); font-size:0.875rem; margin-bottom:16px;">
+            Files you upload to any Document Vault are encrypted in your own browser
+            before they ever reach our servers. We store only the encrypted bytes —
+            nobody, including us, can open them without your passphrase below.
+          </div>
+
+          <div id="enc-loading" style="color:var(--muted); font-size:0.85rem;">Checking status…</div>
+
+          <!-- Not set up yet -->
+          <div id="enc-setup-panel" style="display:none;">
+            <div class="form-group">
+              <label for="enc_passphrase">Data Encryption Passphrase</label>
+              <div class="input-wrapper">
+                <input type="password" id="enc_passphrase" placeholder="At least 10 characters — different from your login password" />
+                <button type="button" class="toggle-pw" onclick="togglePw('enc_passphrase',this)">Show</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="enc_passphrase_confirm">Confirm Passphrase</label>
+              <div class="input-wrapper">
+                <input type="password" id="enc_passphrase_confirm" placeholder="Repeat the passphrase" />
+                <button type="button" class="toggle-pw" onclick="togglePw('enc_passphrase_confirm',this)">Show</button>
+              </div>
+            </div>
+            <div style="background:var(--warning-bg); border:1px solid var(--warning); border-radius:8px; padding:12px 14px; margin:12px 0; font-size:0.82rem; color:var(--text);">
+              <strong>There is no way to recover this passphrase — not by us, not by anyone.</strong>
+              If you forget it, any documents encrypted with it become permanently unreadable.
+              You would need to delete and re-upload them with a new passphrase.
+            </div>
+            <label style="display:flex; align-items:flex-start; gap:8px; font-size:0.82rem; color:var(--text); margin-bottom:14px; cursor:pointer;">
+              <input type="checkbox" id="enc_ack" style="margin-top:2px;" />
+              I understand this passphrase cannot be recovered if I forget it.
+            </label>
+            <div class="field-error" id="enc-setup-error"></div>
+            <button type="button" class="btn-primary" id="enc-setup-btn" style="width:auto; padding:10px 28px;" onclick="setupEncryption()">
+              Set Up Encryption
+            </button>
+          </div>
+
+          <!-- Set up, this browser session locked -->
+          <div id="enc-unlock-panel" style="display:none;">
+            <div style="color:var(--up); font-size:0.85rem; font-weight:600; margin-bottom:10px;">✓ Encryption is set up on your account</div>
+            <div class="form-group">
+              <label for="enc_unlock_passphrase">Enter your passphrase to unlock Document Vault uploads/downloads for this session</label>
+              <div class="input-wrapper">
+                <input type="password" id="enc_unlock_passphrase" placeholder="Your data encryption passphrase" />
+                <button type="button" class="toggle-pw" onclick="togglePw('enc_unlock_passphrase',this)">Show</button>
+              </div>
+            </div>
+            <div class="field-error" id="enc-unlock-error"></div>
+            <button type="button" class="btn-primary" id="enc-unlock-btn" style="width:auto; padding:10px 28px;" onclick="unlockEncryption()">
+              Unlock
+            </button>
+          </div>
+
+          <!-- Set up, this browser session already unlocked -->
+          <div id="enc-active-panel" style="display:none;">
+            <div style="color:var(--up); font-size:0.85rem; font-weight:600;">✓ Encryption is set up and unlocked for this session</div>
+            <div style="color:var(--muted); font-size:0.8rem; margin-top:4px;">
+              You can upload and view encrypted documents. This unlock lasts until you close this browser tab.
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ═══ Appearance ═══ -->
@@ -633,5 +699,133 @@
     document.getElementById('themeLight').classList.toggle('active', t === 'light');
     document.getElementById('themeDark').classList.toggle('active', t === 'dark');
   }
+</script>
+<script src="{{ url_for('static', filename='js/mwl-crypto.js') }}"></script>
+<script>
+  /* ── Document Vault Encryption (Preferences → Security) ── */
+  function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]').content;
+  }
+
+  async function refreshEncryptionPanel() {
+    const loading = document.getElementById('enc-loading');
+    const setupPanel = document.getElementById('enc-setup-panel');
+    const unlockPanel = document.getElementById('enc-unlock-panel');
+    const activePanel = document.getElementById('enc-active-panel');
+
+    let status;
+    try {
+      const resp = await fetch('/account/encryption/status');
+      status = await resp.json();
+    } catch (err) {
+      loading.textContent = 'Could not check encryption status — try reloading the page.';
+      return;
+    }
+    loading.style.display = 'none';
+
+    if (!status.enabled) {
+      setupPanel.style.display = 'block';
+      unlockPanel.style.display = 'none';
+      activePanel.style.display = 'none';
+      return;
+    }
+
+    // Encryption is set up on the account. Restore a cached key from
+    // this tab's sessionStorage if present (MWLCrypto handles that);
+    // otherwise this browser session needs the passphrase re-entered.
+    const restored = await MWLCrypto.restoreSessionKey();
+    if (restored) {
+      setupPanel.style.display = 'none';
+      unlockPanel.style.display = 'none';
+      activePanel.style.display = 'block';
+    } else {
+      setupPanel.style.display = 'none';
+      unlockPanel.style.display = 'block';
+      activePanel.style.display = 'none';
+      // stash for unlockEncryption() to use
+      window._mwlEncStatus = status;
+    }
+  }
+
+  async function setupEncryption() {
+    const errEl = document.getElementById('enc-setup-error');
+    errEl.textContent = '';
+    const pass = document.getElementById('enc_passphrase').value;
+    const confirm = document.getElementById('enc_passphrase_confirm').value;
+    const ack = document.getElementById('enc_ack').checked;
+
+    if (pass.length < 10) {
+      errEl.textContent = 'Passphrase must be at least 10 characters.';
+      return;
+    }
+    if (pass !== confirm) {
+      errEl.textContent = 'Passphrases do not match.';
+      return;
+    }
+    if (!ack) {
+      errEl.textContent = 'Please confirm you understand this passphrase cannot be recovered.';
+      return;
+    }
+
+    const btn = document.getElementById('enc-setup-btn');
+    btn.disabled = true;
+    btn.textContent = 'Setting up…';
+    try {
+      const salt = MWLCrypto.generateSalt();
+      const key = await MWLCrypto.deriveKey(pass, salt);
+      const { verifierCiphertext, verifierIv } = await MWLCrypto.makeVerifier(key);
+
+      const resp = await fetch('/account/encryption/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+        body: JSON.stringify({ salt: salt, verifier: verifierCiphertext, verifier_iv: verifierIv }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) {
+        errEl.textContent = result.error || 'Something went wrong setting up encryption.';
+        btn.disabled = false;
+        btn.textContent = 'Set Up Encryption';
+        return;
+      }
+      await MWLCrypto.unlockSession(pass, salt);
+      document.getElementById('enc-setup-panel').style.display = 'none';
+      document.getElementById('enc-active-panel').style.display = 'block';
+    } catch (err) {
+      errEl.textContent = 'Something went wrong — please try again.';
+      btn.disabled = false;
+      btn.textContent = 'Set Up Encryption';
+    }
+  }
+
+  async function unlockEncryption() {
+    const errEl = document.getElementById('enc-unlock-error');
+    errEl.textContent = '';
+    const pass = document.getElementById('enc_unlock_passphrase').value;
+    const status = window._mwlEncStatus;
+    if (!status) return;
+
+    const btn = document.getElementById('enc-unlock-btn');
+    btn.disabled = true;
+    btn.textContent = 'Unlocking…';
+    try {
+      const key = await MWLCrypto.deriveKey(pass, status.salt);
+      const correct = await MWLCrypto.checkVerifier(key, status.verifier, status.verifier_iv);
+      if (!correct) {
+        errEl.textContent = 'Incorrect passphrase.';
+        btn.disabled = false;
+        btn.textContent = 'Unlock';
+        return;
+      }
+      await MWLCrypto.unlockSession(pass, status.salt);
+      document.getElementById('enc-unlock-panel').style.display = 'none';
+      document.getElementById('enc-active-panel').style.display = 'block';
+    } catch (err) {
+      errEl.textContent = 'Something went wrong — please try again.';
+      btn.disabled = false;
+      btn.textContent = 'Unlock';
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', refreshEncryptionPanel);
 </script>
 {% endblock %}

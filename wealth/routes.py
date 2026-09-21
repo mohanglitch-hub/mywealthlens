@@ -999,6 +999,16 @@ def add_document():
         description   = request.form.get("description", "").strip()
         related_raw   = request.form.get("related_id", "").strip()
 
+        # Set by static/js/mwl-crypto.js when the user has an unlocked
+        # encryption passphrase session: the file bytes in `document`
+        # are already AES-256-GCM ciphertext by the time they reach
+        # this route (encrypted in-browser, before submit) and `iv`
+        # is that file's per-file initialization vector — not secret
+        # on its own, see models.py. Neither this route nor anything
+        # server-side ever sees the passphrase or the derived key.
+        doc_iv          = request.form.get("iv", "").strip()
+        doc_is_encrypted = request.form.get("is_encrypted", "").strip() == "1"
+
         # Scoped mode submits hidden category/related_id fields the
         # user never sees; general mode now leads with "which
         # existing Asset/Liability" (Section: matching
@@ -1045,6 +1055,7 @@ def add_document():
             file_path=file_path, file_size=file_size,
             title=title, description=description,
             asset_id=asset_id, liability_id=liability_id,
+            iv=doc_iv, is_encrypted=doc_is_encrypted,
         )
         if error:
             utils.delete_document_file(file_path)
@@ -1093,6 +1104,7 @@ def document_detail(document_id):
         related_asset=related_asset,
         related_liability=related_liability,
         is_previewable=utils.is_previewable(doc.original_name),
+        preview_mimetype=utils.get_preview_mimetype(doc.original_name) if utils.is_previewable(doc.original_name) else None,
         format_date=format_date,
     )
 

@@ -50,7 +50,8 @@ def _validate_relationships(user_id, asset_id, liability_id):
 def save_document_metadata(db, user_id, category, document_type,
                            original_name, stored_name, file_path,
                            file_size=None, title=None, description=None,
-                           asset_id=None, liability_id=None):
+                           asset_id=None, liability_id=None,
+                           iv=None, is_encrypted=False):
     """
     Record document metadata AFTER the physical file has already been
     saved to disk (Section 17/18 — file save happens first at the
@@ -81,6 +82,8 @@ def save_document_metadata(db, user_id, category, document_type,
         file_path     = file_path,
         file_extension= ext,
         file_size     = file_size,
+        iv            = iv or None,
+        is_encrypted  = bool(is_encrypted),
     )
     db.session.add(doc)
     db.session.commit()
