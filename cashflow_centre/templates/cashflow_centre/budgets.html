@@ -11,12 +11,29 @@
 </div>
 
 <h1 class="cf-title" style="margin-bottom:6px;">Budgets</h1>
-<p class="cf-subtitle" style="margin-bottom:20px;">Monthly spending limits per category. Progress shown is for {{ month_display }}.</p>
+<p class="cf-subtitle" style="margin-bottom:16px;">Budgets are month-specific — set for {{ month_display }} only.</p>
+
+<div class="cf-month-nav">
+  <a href="{{ url_for('cashflow_centre.budgets', month=prev_month) }}" class="cf-month-arrow" title="Previous month" aria-label="Previous month">‹</a>
+  <span class="cf-month-label">{{ month_display }}</span>
+  {% if is_current_month %}
+  <span class="cf-month-arrow cf-month-arrow-disabled" title="Future months aren't available" aria-label="Future months aren't available" aria-disabled="true">›</span>
+  {% else %}
+  <a href="{{ url_for('cashflow_centre.budgets', month=next_month) }}" class="cf-month-arrow" title="Next month" aria-label="Next month">›</a>
+  {% endif %}
+</div>
+
+{% if has_prev_month_budgets %}
+<form method="POST" action="{{ url_for('cashflow_centre.copy_last_month_budgets', month=month_key) }}" style="margin-bottom:16px;">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+  <button type="submit" class="cf-btn-neutral-outline">Copy last month's budgets</button>
+</form>
+{% endif %}
 
 {% if available_categories %}
 <div class="cf-card" style="margin-bottom:16px;">
-  <div class="cf-card-heading">Set a New Budget</div>
-  <form method="POST" action="{{ url_for('cashflow_centre.save_budget') }}" class="cf-budget-add-form">
+  <div class="cf-card-heading">Set a New Budget for {{ month_display }}</div>
+  <form method="POST" action="{{ url_for('cashflow_centre.save_budget', month=month_key) }}" class="cf-budget-add-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     <select name="category" class="cf-select-full" required>
       <option value="">— Select category —</option>
@@ -31,7 +48,7 @@
 {% endif %}
 
 <div class="cf-card">
-  <div class="cf-card-heading">Your Budgets</div>
+  <div class="cf-card-heading">Your Budgets — {{ month_display }}</div>
   {% if budgets %}
     <div class="cf-cat-list">
       {% for b in budgets %}
@@ -40,26 +57,49 @@
           <div class="cf-cat-row-top">
             <span class="cf-cat-name">{{ b.category }}</span>
             <span class="cf-cat-amount {{ 'cf-down' if b.status == 'over' else '' }}">
-              {{ format_inr(b.spent) }} / {{ format_inr(b.monthly_limit) }}
+              <span class="cf-remaining-label">{{ format_inr(b.remaining) if b.remaining >= 0 else format_inr(0) }} left</span>
+              &nbsp;&middot;&nbsp;
+              <span id="cf-limit-display-{{ b.id }}">{{ format_inr(b.spent) }} / {{ format_inr(b.monthly_limit) }}</span>
               {% if b.status == 'over' %}<span class="cf-over-tag">Over</span>{% endif %}
             </span>
           </div>
           <div class="cf-bar-track">
             <div class="cf-bar-fill cf-bar-{{ b.status }}" style="width: {{ b.pct }}%;"></div>
           </div>
+
+          <form method="POST" action="{{ url_for('cashflow_centre.save_budget', month=month_key) }}"
+                id="cf-edit-form-{{ b.id }}" class="cf-inline-edit" style="display:none;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <input type="hidden" name="category" value="{{ b.category }}" />
+            <input type="number" name="monthly_limit" class="cf-input cf-inline-edit-input"
+                   value="{{ b.monthly_limit }}" min="1" step="1" required />
+            <button type="submit" class="cf-btn-primary cf-inline-edit-save">Save</button>
+            <button type="button" class="cf-btn-neutral-outline" onclick="cfToggleEdit({{ b.id }})">Cancel</button>
+          </form>
         </div>
-        <form method="POST" action="{{ url_for('cashflow_centre.delete_budget', budget_id=b.id) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-          <button type="button" class="cf-btn-neutral-outline"
-                  onclick="confirmAction(this.form, 'Remove Budget?', 'This will remove the monthly limit for ' + {{ b.category | tojson }} + '. Past spending data is unaffected.', 'Remove Budget')">
-            Remove
-          </button>
-        </form>
+        <div class="cf-budget-actions">
+          <button type="button" class="cf-btn-neutral-outline" onclick="cfToggleEdit({{ b.id }})">Edit limit</button>
+          <form method="POST" action="{{ url_for('cashflow_centre.apply_budget_future', budget_id=b.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="submit" class="cf-btn-neutral-outline" title="Carry this limit forward into future months">Apply to future</button>
+          </form>
+          <form method="POST" action="{{ url_for('cashflow_centre.delete_budget', budget_id=b.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="button" class="cf-btn-neutral-outline cf-btn-outline-danger"
+                    onclick="confirmAction(this.form, 'Remove Budget?', 'This will remove the monthly limit for ' + {{ b.category | tojson }} + ' for {{ month_display }}. Past spending data is unaffected.', 'Remove Budget')">
+              Remove
+            </button>
+          </form>
+        </div>
       </div>
       {% endfor %}
     </div>
   {% else %}
-    <div class="cf-empty">No budgets set yet. Pick a category above to start tracking against a monthly limit.</div>
+    <div class="cf-empty">
+      No budgets set for {{ month_display }} yet.
+      {% if has_prev_month_budgets %}Copy last month's budgets above, or pick{% else %}Pick{% endif %}
+      a category above to start tracking against a monthly limit.
+    </div>
   {% endif %}
 </div>
 
@@ -99,7 +139,24 @@
     padding:8px 14px; font-size:0.8rem; font-weight:600; color:var(--text2);
     font-family:var(--font-ui); cursor:pointer;
   }
-  .cf-btn-neutral-outline:hover { border-color:var(--down); color:var(--down); }
+  .cf-btn-neutral-outline:hover { border-color:var(--accent); color:var(--accent); }
+  .cf-btn-outline-danger:hover { border-color:var(--down); color:var(--down); }
+
+  .cf-month-nav { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
+  .cf-month-arrow {
+    width:30px; height:30px; border-radius:8px; border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; color:var(--text2);
+    text-decoration:none; font-size:1.1rem; background:var(--surface);
+  }
+  .cf-month-arrow:hover { border-color:var(--accent); color:var(--accent); }
+  .cf-month-arrow-disabled { opacity:0.4; cursor:not-allowed; }
+  .cf-month-arrow-disabled:hover { border-color:var(--border); color:var(--text2); }
+  .cf-month-label { font-size:0.95rem; font-weight:700; color:var(--text); min-width:140px; text-align:center; }
+
+  .cf-remaining-label { color:var(--muted); font-weight:500; font-size:0.8rem; }
+  .cf-budget-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .cf-inline-edit { display:flex; gap:8px; align-items:center; margin-top:10px; }
+  .cf-inline-edit-input { max-width:140px; }
 
   .cf-cat-list { display:flex; flex-direction:column; gap:16px; }
   .cf-budget-row { display:flex; align-items:center; gap:16px; }
@@ -124,4 +181,17 @@
     .cf-budget-row { flex-direction:column; align-items:stretch; }
   }
 </style>
+
+<script>
+  function cfToggleEdit(budgetId) {
+    const form = document.getElementById('cf-edit-form-' + budgetId);
+    if (!form) return;
+    const showing = form.style.display !== 'none';
+    form.style.display = showing ? 'none' : 'flex';
+    if (!showing) {
+      const input = form.querySelector('input[name="monthly_limit"]');
+      if (input) { input.focus(); input.select(); }
+    }
+  }
+</script>
 {% endblock %}

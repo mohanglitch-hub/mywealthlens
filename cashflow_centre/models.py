@@ -95,16 +95,26 @@ class Transaction(db.Model):
 
 
 class Budget(db.Model):
-    """One monthly spending limit per (user, expense category)."""
+    """
+    One monthly spending limit per (user, expense category, year, month).
+    Budgets are month-bound — a limit set for September does not
+    silently apply to October; each month gets its own row, created
+    fresh (optionally by copying the prior month) or carried forward
+    explicitly via "Apply to future months".
+    """
     __tablename__ = "cashflow_budget"
     __table_args__ = (
-        db.UniqueConstraint("user_id", "category", name="uq_cf_budget_user_category"),
+        db.UniqueConstraint("user_id", "category", "year", "month",
+                             name="uq_cf_budget_user_category_month"),
+        db.Index("ix_cf_budget_user_month", "user_id", "year", "month"),
     )
 
     id      = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
 
     category      = db.Column(db.String(50), nullable=False)  # from ExpenseCategory.ALL
+    year          = db.Column(db.Integer, nullable=False)
+    month         = db.Column(db.Integer, nullable=False)      # 1-12
     monthly_limit = db.Column(db.Float, nullable=False)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -112,4 +122,9 @@ class Budget(db.Model):
                            onupdate=datetime.utcnow)
 
     def __repr__(self):
-        return f"<Budget {self.category} {self.monthly_limit}>"
+        return f"<Budget {self.category} {self.year}-{self.month:02d} {self.monthly_limit}>"
+
+    @property
+    def month_key(self):
+        """'YYYY-MM' for this budget's month."""
+        return f"{self.year:04d}-{self.month:02d}"

@@ -1,7 +1,7 @@
 {# ── Reusable confirmation modal — mirrors wealth's proven pattern ── #}
 
 <div id="confirmModalOverlay" class="cf-modal-overlay" style="display:none;">
-  <div class="cf-modal">
+  <div class="cf-modal" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle" aria-describedby="confirmModalMessage">
     <div class="cf-modal-title" id="confirmModalTitle"></div>
     <div class="cf-modal-message" id="confirmModalMessage"></div>
     <div class="cf-modal-actions">
@@ -40,19 +40,27 @@
 
 <script>
   let _cfPendingConfirmForm = null;
+  let _cfLastFocusedEl = null;
 
   function confirmAction(formEl, title, message, confirmLabel) {
     _cfPendingConfirmForm = formEl;
+    _cfLastFocusedEl = document.activeElement;
     document.getElementById('confirmModalTitle').textContent = title;
     document.getElementById('confirmModalMessage').textContent = message;
     document.getElementById('confirmModalConfirmBtn').textContent = confirmLabel || 'Confirm';
     document.getElementById('confirmModalOverlay').style.display = 'flex';
+    const cancelBtn = document.querySelector('#confirmModalOverlay .cf-modal-cancel');
+    if (cancelBtn) cancelBtn.focus();
     return false;
   }
 
   function closeConfirmModal() {
     document.getElementById('confirmModalOverlay').style.display = 'none';
     _cfPendingConfirmForm = null;
+    if (_cfLastFocusedEl && typeof _cfLastFocusedEl.focus === 'function') {
+      _cfLastFocusedEl.focus();
+    }
+    _cfLastFocusedEl = null;
   }
 
   document.addEventListener('DOMContentLoaded', function () {
@@ -67,6 +75,23 @@
     if (overlay) {
       overlay.addEventListener('click', function (e) {
         if (e.target === overlay) closeConfirmModal();
+      });
+      overlay.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          closeConfirmModal();
+          return;
+        }
+        // Simple focus trap: keep Tab cycling between the two buttons.
+        if (e.key === 'Tab') {
+          const cancelBtn = overlay.querySelector('.cf-modal-cancel');
+          const confirmBtnEl = overlay.querySelector('.cf-modal-confirm');
+          if (!cancelBtn || !confirmBtnEl) return;
+          if (e.shiftKey && document.activeElement === cancelBtn) {
+            e.preventDefault(); confirmBtnEl.focus();
+          } else if (!e.shiftKey && document.activeElement === confirmBtnEl) {
+            e.preventDefault(); cancelBtn.focus();
+          }
+        }
       });
     }
   });

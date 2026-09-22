@@ -1,0 +1,204 @@
+{# ── Quick Add transaction modal — compact entry without leaving the dashboard ── #}
+
+<div id="qaModalOverlay" class="qa-modal-overlay" style="display:none;">
+  <div class="qa-modal" role="dialog" aria-modal="true" aria-labelledby="qaModalTitle">
+    <div class="qa-modal-header">
+      <span id="qaModalTitle" class="qa-modal-title">Add Entry</span>
+      <button type="button" class="qa-modal-close" onclick="cfCloseQuickAdd()" aria-label="Close">&times;</button>
+    </div>
+
+    <form method="POST" action="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" id="qaForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+      <div class="qa-type-toggle" role="group" aria-label="Transaction type">
+        <button type="button" id="qa-type-expense" class="qa-type-btn qa-type-btn-active" onclick="qaSetType('expense')">Expense</button>
+        <button type="button" id="qa-type-income" class="qa-type-btn" onclick="qaSetType('income')">Income</button>
+      </div>
+      <input type="hidden" name="type" id="qa-type" value="expense" />
+
+      <div id="qa-frequent-cats" class="qa-chip-row"></div>
+
+      <div class="qa-field-row">
+        <div class="qa-field">
+          <label class="qa-label" for="qa-category">Category <span class="qa-required">*</span></label>
+          <select name="category" id="qa-category" class="qa-select" required tabindex="1"></select>
+        </div>
+        <div class="qa-field">
+          <label class="qa-label" for="qa-amount">Amount (₹) <span class="qa-required">*</span></label>
+          <input type="number" name="amount" id="qa-amount" class="qa-input" required min="0.01" step="0.01"
+                 placeholder="0.00" tabindex="2" />
+        </div>
+      </div>
+
+      <div class="qa-field-row">
+        <div class="qa-field">
+          <label class="qa-label" for="qa-date">Date <span class="qa-required">*</span></label>
+          <input type="date" name="date" id="qa-date" class="qa-input" required
+                 value="{{ today_ist }}" max="{{ today_ist }}" tabindex="3" />
+        </div>
+        <div class="qa-field">
+          <label class="qa-label" for="qa-payment_method">Payment Method</label>
+          <select name="payment_method" id="qa-payment_method" class="qa-select" tabindex="4">
+            <option value="">— Not specified —</option>
+            {% for pm in payment_methods %}
+            <option value="{{ pm }}" {{ 'selected' if quick_add.last_payment_method == pm }}>{{ pm }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="qa-field">
+        <label class="qa-label" for="qa-description">Description (optional)</label>
+        <input type="text" name="description" id="qa-description" class="qa-input"
+               placeholder="e.g. Swiggy order" tabindex="5" />
+      </div>
+
+      <div class="qa-modal-actions">
+        <button type="button" class="qa-btn-cancel" onclick="cfCloseQuickAdd()" tabindex="7">Cancel</button>
+        <button type="submit" class="qa-btn-save" tabindex="6">Save Entry</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  .qa-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 500;
+    padding: 20px;
+  }
+  .qa-modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 22px; max-width: 440px; width: 100%;
+    box-shadow: var(--shadow-lg);
+  }
+  .qa-modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+  .qa-modal-title { font-weight:700; font-size:1.05rem; color:var(--text); }
+  .qa-modal-close {
+    background:none; border:none; font-size:1.4rem; line-height:1; color:var(--muted);
+    cursor:pointer; padding:2px 6px;
+  }
+  .qa-modal-close:hover { color:var(--text); }
+
+  .qa-type-toggle { display:flex; gap:8px; margin-bottom:12px; }
+  .qa-type-btn {
+    flex:1; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:9px; font-size:0.85rem; font-weight:600; color:var(--text2); font-family:var(--font-ui);
+    cursor:pointer;
+  }
+  .qa-type-btn-active { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  .qa-chip-row { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; min-height:0; }
+  .qa-chip {
+    background:var(--surface2); border:1px solid var(--border); border-radius:16px;
+    padding:5px 12px; font-size:0.76rem; font-weight:600; color:var(--text2);
+    font-family:var(--font-ui); cursor:pointer;
+  }
+  .qa-chip:hover { border-color:var(--accent); color:var(--accent); }
+  .qa-chip-active { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  .qa-field-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .qa-field { margin-bottom:12px; }
+  .qa-label { display:block; font-size:0.78rem; font-weight:600; color:var(--text2); margin-bottom:5px; }
+  .qa-required { color:var(--down); }
+  .qa-input, .qa-select {
+    width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:9px 10px; color:var(--text); font-family:var(--font-ui); font-size:0.88rem; outline:none;
+  }
+  .qa-input:focus, .qa-select:focus { border-color:var(--accent); }
+
+  .qa-modal-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:6px; }
+  .qa-btn-cancel {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:9px 16px; font-size:0.85rem; color:var(--text2); cursor:pointer; font-family:var(--font-ui);
+  }
+  .qa-btn-save {
+    background:var(--accent); border:1px solid var(--accent); border-radius:8px;
+    padding:9px 18px; font-size:0.85rem; font-weight:700; color:#fff; cursor:pointer; font-family:var(--font-ui);
+  }
+  .qa-btn-save:hover { opacity:0.88; }
+
+  @media (max-width:480px) {
+    .qa-field-row { grid-template-columns:1fr; }
+  }
+</style>
+
+<script>
+  const QA_EXPENSE_CATEGORIES = {{ expense_categories | tojson }};
+  const QA_INCOME_CATEGORIES  = {{ income_categories | tojson }};
+  const QA_FREQUENT = {
+    expense: {{ quick_add.frequent_expense_categories | tojson }},
+    income:  {{ quick_add.frequent_income_categories | tojson }},
+  };
+  let _qaLastFocusedEl = null;
+
+  function qaSetType(type) {
+    document.getElementById('qa-type').value = type;
+    document.getElementById('qa-type-expense').classList.toggle('qa-type-btn-active', type === 'expense');
+    document.getElementById('qa-type-income').classList.toggle('qa-type-btn-active', type === 'income');
+    qaPopulateCategories(type);
+    qaPopulateChips(type);
+  }
+
+  function qaPopulateCategories(type, preselect) {
+    const catSelect = document.getElementById('qa-category');
+    const categories = type === 'income' ? QA_INCOME_CATEGORIES : QA_EXPENSE_CATEGORIES;
+    catSelect.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = ''; opt0.textContent = '— Select category —';
+    catSelect.appendChild(opt0);
+    categories.forEach(function (c) {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      if (c === preselect) opt.selected = true;
+      catSelect.appendChild(opt);
+    });
+  }
+
+  function qaPopulateChips(type) {
+    const row = document.getElementById('qa-frequent-cats');
+    row.innerHTML = '';
+    const frequent = QA_FREQUENT[type] || [];
+    frequent.forEach(function (c) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'qa-chip';
+      chip.textContent = c;
+      chip.onclick = function () {
+        document.getElementById('qa-category').value = c;
+        row.querySelectorAll('.qa-chip').forEach(function (el) { el.classList.remove('qa-chip-active'); });
+        chip.classList.add('qa-chip-active');
+      };
+      row.appendChild(chip);
+    });
+  }
+
+  function cfOpenQuickAdd() {
+    _qaLastFocusedEl = document.activeElement;
+    document.getElementById('qa-date').value = "{{ today_ist }}";
+    qaSetType('expense');
+    document.getElementById('qaModalOverlay').style.display = 'flex';
+    document.getElementById('qa-category').focus();
+  }
+
+  function cfCloseQuickAdd() {
+    document.getElementById('qaModalOverlay').style.display = 'none';
+    if (_qaLastFocusedEl && typeof _qaLastFocusedEl.focus === 'function') {
+      _qaLastFocusedEl.focus();
+    }
+    _qaLastFocusedEl = null;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    qaPopulateCategories('expense');
+    const overlay = document.getElementById('qaModalOverlay');
+    if (overlay) {
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) cfCloseQuickAdd();
+      });
+      overlay.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') cfCloseQuickAdd();
+      });
+    }
+  });
+</script>

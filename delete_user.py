@@ -145,6 +145,7 @@ def delete_user(user_id):
             "wealth_asset", "wealth_liability", "wealth_value_snapshot",
             "wealth_snapshot", "wealth_snapshot_log", "wealth_document",
             "insurance_policy", "retirement_scheme",
+            "cashflow_transaction", "cashflow_budget",
         ]
         for t in direct_tables:
             n = db.session.execute(
