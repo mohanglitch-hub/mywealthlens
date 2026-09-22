@@ -12,11 +12,50 @@
 
 <div class="cf-header">
   <h1 class="cf-title">Transactions</h1>
-  <a href="{{ url_for('cashflow_centre.add_transaction') }}" class="cf-btn-primary">+ Add Transaction</a>
+  <a href="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" class="cf-btn-primary">+ Add Transaction</a>
 </div>
 
+<div class="cf-range-tabs">
+  <a href="{{ url_for('cashflow_centre.transactions', month=month_key, category=selected_category, type=selected_type) }}"
+     class="cf-range-tab {{ 'cf-range-tab-active' if range_preset == 'month' }}">This Month</a>
+  <a href="{{ url_for('cashflow_centre.transactions', range='last3', category=selected_category, type=selected_type) }}"
+     class="cf-range-tab {{ 'cf-range-tab-active' if range_preset == 'last3' }}">Last 3 Months</a>
+  <a href="{{ url_for('cashflow_centre.transactions', range='fy', category=selected_category, type=selected_type) }}"
+     class="cf-range-tab {{ 'cf-range-tab-active' if range_preset == 'fy' }}">This FY</a>
+  <button type="button" class="cf-range-tab {{ 'cf-range-tab-active' if range_preset == 'custom' }}" onclick="cfToggleCustomRange()">Custom</button>
+</div>
+
+{% if range_preset == 'month' %}
+<div class="cf-month-nav">
+  <a href="{{ url_for('cashflow_centre.transactions', month=prev_month, category=selected_category, type=selected_type) }}" class="cf-month-arrow" title="Previous month" aria-label="Previous month">‹</a>
+  <span class="cf-month-label">{{ month_display }}</span>
+  {% if is_current_month %}
+  <span class="cf-month-arrow cf-month-arrow-disabled" title="Future months aren't available" aria-label="Future months aren't available" aria-disabled="true">›</span>
+  {% else %}
+  <a href="{{ url_for('cashflow_centre.transactions', month=next_month, category=selected_category, type=selected_type) }}" class="cf-month-arrow" title="Next month" aria-label="Next month">›</a>
+  {% endif %}
+</div>
+{% endif %}
+
+<form method="GET" id="cfCustomRangeForm" class="cf-filter-bar" style="{{ '' if range_preset == 'custom' else 'display:none;' }}">
+  <input type="hidden" name="range" value="custom" />
+  <label class="cf-hint">From <input type="date" name="from" class="cf-input" value="{{ request.args.get('from', '') }}" required /></label>
+  <label class="cf-hint">To <input type="date" name="to" class="cf-input" max="{{ today_ist }}" value="{{ request.args.get('to', '') }}" required /></label>
+  {% if selected_type %}<input type="hidden" name="type" value="{{ selected_type }}" />{% endif %}
+  {% if selected_category %}<input type="hidden" name="category" value="{{ selected_category }}" />{% endif %}
+  <button type="submit" class="cf-btn-primary">Apply</button>
+</form>
+
 <form method="GET" class="cf-filter-bar">
-  <input type="hidden" name="month" value="{{ month_key }}" />
+  {% if is_range_view %}
+    <input type="hidden" name="range" value="{{ range_preset }}" />
+    {% if range_preset == 'custom' %}
+      <input type="hidden" name="from" value="{{ request.args.get('from', '') }}" />
+      <input type="hidden" name="to" value="{{ request.args.get('to', '') }}" />
+    {% endif %}
+  {% else %}
+    <input type="hidden" name="month" value="{{ month_key }}" />
+  {% endif %}
   <select name="type" class="cf-select" onchange="this.form.submit()">
     <option value="">All Types</option>
     <option value="income" {{ 'selected' if selected_type == 'income' }}>Income</option>
@@ -29,7 +68,7 @@
     {% endfor %}
   </select>
   {% if selected_type or selected_category %}
-  <a href="{{ url_for('cashflow_centre.transactions', month=month_key) }}" class="cf-link">Clear filters</a>
+  <a href="{{ clear_filters_url }}" class="cf-link">Clear filters</a>
   {% endif %}
 </form>
 
@@ -50,18 +89,18 @@
         <tbody>
           {% for t in transactions %}
           <tr>
-            <td>{{ format_date(t.date) }}</td>
-            <td><span class="cf-type-badge cf-type-{{ t.type }}">{{ t.category }}</span></td>
-            <td class="cf-muted-cell">{{ t.description or '—' }}</td>
-            <td class="cf-muted-cell">{{ t.payment_method or '—' }}</td>
-            <td style="text-align:right;" class="{{ 'cf-up' if t.type == 'income' else 'cf-down' }}">
+            <td data-label="Date">{{ format_date(t.date) }}</td>
+            <td data-label="Category"><span class="cf-type-badge cf-type-{{ t.type }}">{{ t.category }}</span></td>
+            <td class="cf-muted-cell" data-label="Description">{{ t.description or '—' }}</td>
+            <td class="cf-muted-cell" data-label="Payment">{{ t.payment_method or '—' }}</td>
+            <td style="text-align:right;" class="{{ 'cf-up' if t.type == 'income' else 'cf-down' }}" data-label="Amount">
               {{ '+' if t.type == 'income' else '-' }}{{ format_inr(t.amount) }}
             </td>
-            <td class="cf-row-actions">
-              <a href="{{ url_for('cashflow_centre.edit_transaction', txn_id=t.id) }}" class="cf-icon-btn" title="Edit">✏️</a>
-              <form method="POST" action="{{ url_for('cashflow_centre.delete_transaction', txn_id=t.id) }}" style="display:inline;">
+            <td class="cf-row-actions" data-label="Actions">
+              <a href="{{ url_for('cashflow_centre.edit_transaction', txn_id=t.id, next=self_url) }}" class="cf-icon-btn" title="Edit" aria-label="Edit transaction">✏️</a>
+              <form method="POST" action="{{ url_for('cashflow_centre.delete_transaction', txn_id=t.id, next=self_url) }}" style="display:inline;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                <button type="button" class="cf-icon-btn" title="Delete"
+                <button type="button" class="cf-icon-btn" title="Delete" aria-label="Delete transaction"
                         onclick="confirmAction(this.form, 'Delete Transaction?', 'This transaction will be permanently removed.', 'Delete')">🗑️</button>
               </form>
             </td>
@@ -70,9 +109,18 @@
         </tbody>
       </table>
     </div>
-    <div class="cf-table-total">Total: <strong>{{ format_inr(total) }}</strong> across {{ transactions|length }} transaction{{ 's' if transactions|length != 1 else '' }}</div>
+    <div class="cf-table-total">
+      Income: <strong class="cf-up">{{ format_inr(total_income) }}</strong>
+      &nbsp;·&nbsp; Expenses: <strong class="cf-down">{{ format_inr(total_expense) }}</strong>
+      &nbsp;·&nbsp; Net: <strong class="{{ 'cf-up' if net >= 0 else 'cf-down' }}">{{ format_inr(net) }}</strong>
+      &nbsp;·&nbsp; {{ transactions|length }} transaction{{ 's' if transactions|length != 1 else '' }}
+    </div>
   {% else %}
-    <div class="cf-empty">No transactions match these filters for {{ month_display }}.</div>
+    {% if selected_type or selected_category %}
+    <div class="cf-empty">No transactions match these filters for {{ month_display }}. <a href="{{ clear_filters_url }}" class="cf-link">Clear filters</a> to see everything for this period.</div>
+    {% else %}
+    <div class="cf-empty">No transactions recorded for {{ month_display }}. <a href="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" class="cf-link">Add your first one</a>.</div>
+    {% endif %}
   {% endif %}
 </div>
 
@@ -129,5 +177,58 @@
   .cf-table-total { margin-top:14px; font-size:0.85rem; color:var(--text2); text-align:right; }
   .cf-up { color:var(--up); }
   .cf-down { color:var(--down); }
+
+  .cf-range-tabs { display:flex; gap:6px; margin-bottom:14px; flex-wrap:wrap; }
+  .cf-range-tab {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:7px 14px; font-size:0.8rem; font-weight:600; color:var(--text2);
+    font-family:var(--font-ui); text-decoration:none; cursor:pointer;
+  }
+  .cf-range-tab:hover { border-color:var(--accent); color:var(--accent); }
+  .cf-range-tab-active { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .cf-range-tab-active:hover { color:#fff; }
+
+  .cf-month-nav { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
+  .cf-month-arrow {
+    width:30px; height:30px; border-radius:8px; border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; color:var(--text2);
+    text-decoration:none; font-size:1.1rem; background:var(--surface);
+  }
+  .cf-month-arrow:hover { border-color:var(--accent); color:var(--accent); }
+  .cf-month-arrow-disabled { opacity:0.4; cursor:not-allowed; }
+  .cf-month-arrow-disabled:hover { border-color:var(--border); color:var(--text2); }
+  .cf-month-label { font-size:0.95rem; font-weight:700; color:var(--text); min-width:140px; text-align:center; }
+
+  .cf-hint { font-size:0.8rem; color:var(--muted); display:flex; align-items:center; gap:6px; }
+
+  @media (max-width:640px) {
+    .cf-range-tabs { width:100%; }
+
+    /* Stacked-card layout for the transaction table on small screens */
+    .cf-table thead { display:none; }
+    .cf-table, .cf-table tbody, .cf-table tr, .cf-table td { display:block; width:100%; }
+    .cf-table tr {
+      border:1px solid var(--border); border-radius:10px; padding:10px 12px;
+      margin-bottom:12px; background:var(--surface2);
+    }
+    .cf-table td {
+      border-bottom:none; padding:6px 0; display:flex; justify-content:space-between;
+      align-items:center; gap:10px; text-align:right;
+    }
+    .cf-table td[style*="text-align:right"] { text-align:right; }
+    .cf-table td::before {
+      content: attr(data-label); font-weight:600; color:var(--muted);
+      font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; text-align:left;
+    }
+    .cf-table td.cf-row-actions { justify-content:flex-end; }
+    .cf-table td.cf-row-actions::before { content:none; }
+  }
 </style>
+
+<script>
+  function cfToggleCustomRange() {
+    const form = document.getElementById('cfCustomRangeForm');
+    if (form) form.style.display = (form.style.display === 'none') ? 'flex' : 'none';
+  }
+</script>
 {% endblock %}

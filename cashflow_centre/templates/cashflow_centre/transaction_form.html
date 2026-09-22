@@ -2,7 +2,7 @@
 {% block title %}{{ 'Edit' if is_edit else 'Add' }} Transaction — Cashflow — MyWealthLens{% endblock %}
 
 {% block content %}
-<div style="max-width:600px; margin:0 auto;">
+<div style="max-width:800px; margin:0 auto;">
   <div class="cf-breadcrumb">
     <a href="{{ url_for('cashflow_centre.dashboard') }}">Cashflow</a>
     <span class="cf-breadcrumb-sep">›</span>
@@ -13,6 +13,7 @@
 
   <form method="POST" id="txnForm" class="cf-card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    {% if next %}<input type="hidden" name="next" value="{{ next }}" />{% endif %}
 
     <div class="cf-form-grid-2">
       <div class="cf-field">
@@ -24,7 +25,8 @@
       </div>
       <div class="cf-field">
         <label class="cf-label">Date <span class="cf-required">*</span></label>
-        <input type="date" name="date" id="date" class="cf-input" required value="{{ values.date or '' }}" />
+        <input type="date" name="date" id="date" class="cf-input" required value="{{ values.date or '' }}" max="{{ today_ist }}" />
+        <span class="cf-hint">Dates after today (IST) aren't allowed.</span>
       </div>
     </div>
 
@@ -58,7 +60,7 @@
 
     <div style="display:flex; gap:10px; margin-top:20px;">
       <button type="submit" class="cf-btn-primary">{{ 'Save Changes' if is_edit else 'Add Transaction' }}</button>
-      <a href="{{ url_for('cashflow_centre.dashboard') }}" class="cf-btn-cancel">Cancel</a>
+      <a href="{{ next or url_for('cashflow_centre.dashboard') }}" class="cf-btn-cancel">Cancel</a>
     </div>
   </form>
 </div>
@@ -78,6 +80,7 @@
   .cf-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   .cf-field { margin-bottom:14px; }
   .cf-label { display:block; font-size:0.82rem; font-weight:600; color:var(--text2); margin-bottom:6px; }
+  .cf-hint { display:block; font-size:0.75rem; color:var(--muted2); margin-top:4px; }
   .cf-required { color:var(--down); }
   .cf-input, .cf-select-full {
     width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px;

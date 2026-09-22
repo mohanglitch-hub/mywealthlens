@@ -55,6 +55,8 @@ def inventory(user_id):
             ("wealth_document", "user_id"),
             ("insurance_policy", "user_id"),
             ("retirement_scheme", "user_id"),
+            ("cashflow_transaction", "user_id"),
+            ("cashflow_budget", "user_id"),
         ]
 
         print("\n── Directly-owned rows ──")

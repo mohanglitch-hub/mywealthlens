@@ -7,13 +7,22 @@
     <h1 class="cf-title">Cashflow</h1>
     <p class="cf-subtitle">Where your money actually goes, month by month.</p>
   </div>
-  <a href="{{ url_for('cashflow_centre.add_transaction') }}" class="cf-btn-primary">+ Add Transaction</a>
+  <div style="display:flex; gap:10px;">
+    <button type="button" class="cf-btn-primary" onclick="cfOpenQuickAdd()">+ Add Entry</button>
+    <a href="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" class="cf-btn-secondary">Full form</a>
+  </div>
 </div>
 
+{% include "cashflow_centre/_quick_add_modal.html" %}
+
 <div class="cf-month-nav">
-  <a href="{{ url_for('cashflow_centre.dashboard', month=prev_month) }}" class="cf-month-arrow" title="Previous month">‹</a>
+  <a href="{{ url_for('cashflow_centre.dashboard', month=prev_month) }}" class="cf-month-arrow" title="Previous month" aria-label="Previous month">‹</a>
   <span class="cf-month-label">{{ month_display }}</span>
-  <a href="{{ url_for('cashflow_centre.dashboard', month=next_month) }}" class="cf-month-arrow" title="Next month">›</a>
+  {% if is_current_month %}
+  <span class="cf-month-arrow cf-month-arrow-disabled" title="Future months aren't available" aria-label="Future months aren't available" aria-disabled="true">›</span>
+  {% else %}
+  <a href="{{ url_for('cashflow_centre.dashboard', month=next_month) }}" class="cf-month-arrow" title="Next month" aria-label="Next month">›</a>
+  {% endif %}
 </div>
 
 <div class="cf-summary-grid">
@@ -58,7 +67,7 @@
   <div class="cf-card">
     <div class="cf-card-heading" style="display:flex; justify-content:space-between; align-items:center;">
       <span>Budget Progress</span>
-      <a href="{{ url_for('cashflow_centre.budgets') }}" class="cf-link">Manage budgets</a>
+      <a href="{{ url_for('cashflow_centre.budgets', month=month_key) }}" class="cf-link">Manage budgets</a>
     </div>
     {% if budgets %}
       <div class="cf-cat-list">
@@ -77,7 +86,7 @@
         {% endfor %}
       </div>
     {% else %}
-      <div class="cf-empty">No budgets set yet. <a href="{{ url_for('cashflow_centre.budgets') }}" class="cf-link">Set one up</a> to track spend against a monthly limit.</div>
+      <div class="cf-empty">No budgets set for {{ month_display }}. <a href="{{ url_for('cashflow_centre.budgets', month=month_key) }}" class="cf-link">Set one up</a> to track spend against a monthly limit.</div>
     {% endif %}
   </div>
 </div>
@@ -106,7 +115,7 @@
       {% endfor %}
     </div>
   {% else %}
-    <div class="cf-empty">No transactions recorded for {{ month_display }} yet. <a href="{{ url_for('cashflow_centre.add_transaction') }}" class="cf-link">Add your first one</a>.</div>
+    <div class="cf-empty">No transactions recorded for {{ month_display }} yet. <a href="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" class="cf-link">Add your first one</a>.</div>
   {% endif %}
 </div>
 
@@ -121,6 +130,12 @@
     text-decoration:none; cursor:pointer; transition:opacity 0.2s;
   }
   .cf-btn-primary:hover { opacity:0.88; }
+  .cf-btn-secondary {
+    background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 18px; font-size:0.85rem; font-weight:600; font-family:var(--font-ui);
+    text-decoration:none; cursor:pointer;
+  }
+  .cf-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
 
   .cf-month-nav {
     display:flex; align-items:center; gap:14px; margin:18px 0 20px;
@@ -131,6 +146,8 @@
     text-decoration:none; font-size:1.1rem; background:var(--surface);
   }
   .cf-month-arrow:hover { border-color:var(--accent); color:var(--accent); }
+  .cf-month-arrow-disabled { opacity:0.4; cursor:not-allowed; }
+  .cf-month-arrow-disabled:hover { border-color:var(--border); color:var(--text2); }
   .cf-month-label { font-size:0.95rem; font-weight:700; color:var(--text); min-width:140px; text-align:center; }
 
   .cf-summary-grid {
