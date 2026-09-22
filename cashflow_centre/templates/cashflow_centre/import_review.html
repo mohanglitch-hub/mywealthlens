@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Review Import — Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:900px; margin:0 auto;">
+  <div class="cf-breadcrumb">
+    <a href="{{ url_for('cashflow_centre.dashboard') }}">Cashflow</a>
+    <span class="cf-breadcrumb-sep">›</span>
+    <a href="{{ url_for('cashflow_centre.import_transactions') }}">Import CSV</a>
+    <span class="cf-breadcrumb-sep">›</span>
+    <span class="cf-breadcrumb-current">Review</span>
+  </div>
+
+  <h1 class="cf-title" style="margin-bottom:6px;">Review Before Importing</h1>
+  <p class="cf-subtitle" style="margin-bottom:20px;">
+    {{ ok_rows|length }} row(s) ready to import
+    {% if dup_count %}, {{ dup_count }} flagged as possible duplicate{{ 's' if dup_count != 1 }}{% endif %}
+    {% if error_rows %}, {{ error_rows|length }} row(s) skipped (couldn't be read){% endif %}.
+    Nothing is saved until you click Confirm Import below.
+  </p>
+
+  <form method="POST" action="{{ url_for('cashflow_centre.import_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    {% if ok_rows %}
+    <div class="cf-card" style="margin-bottom:16px; overflow-x:auto;">
+      <div class="cf-card-heading">Ready to Import</div>
+      <table class="cf-review-table">
+        <thead>
+          <tr>
+            <th></th><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Description</th><th>Payment Method</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in ok_rows %}
+          <tr class="{{ 'cf-row-dup' if row.is_duplicate }}">
+            <td>
+              <input type="checkbox" name="include_row" value="{{ row.row_num }}"
+                     {{ 'checked' if not row.is_duplicate }} />
+              <input type="hidden" name="date_{{ row.row_num }}" value="{{ row.date.isoformat() }}" />
+              <input type="hidden" name="type_{{ row.row_num }}" value="{{ row.type }}" />
+              <input type="hidden" name="amount_{{ row.row_num }}" value="{{ row.amount }}" />
+              <input type="hidden" name="description_{{ row.row_num }}" value="{{ row.description or '' }}" />
+            </td>
+            <td>{{ format_date(row.date) }}</td>
+            <td>{{ 'Income' if row.type == 'income' else 'Expense' }}
+              {% if row.is_duplicate %}<span class="cf-dup-tag">Possible duplicate</span>{% endif %}
+            </td>
+            <td>
+              <select name="category_{{ row.row_num }}" class="cf-select-sm">
+                {% for c in (income_categories if row.type == 'income' else expense_categories) %}
+                <option value="{{ c }}" {{ 'selected' if c == 'Other' or c == 'Other Income' }}>{{ c }}</option>
+                {% endfor %}
+              </select>
+            </td>
+            <td>{{ format_inr(row.amount) }}</td>
+            <td class="cf-desc-cell">{{ row.description or '—' }}</td>
+            <td>
+              <select name="payment_method_{{ row.row_num }}" class="cf-select-sm">
+                <option value="">— Not specified —</option>
+                {% for pm in payment_methods %}
+                <option value="{{ pm }}">{{ pm }}</option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if error_rows %}
+    <div class="cf-card" style="margin-bottom:16px; overflow-x:auto;">
+      <div class="cf-card-heading">Skipped Rows ({{ error_rows|length }})</div>
+      <table class="cf-review-table">
+        <thead><tr><th>Row</th><th>Reason</th></tr></thead>
+        <tbody>
+          {% for row in error_rows %}
+          <tr><td>{{ row.row_num }}</td><td class="cf-error-text">{{ row.error }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="cf-hint" style="margin-top:10px;">These rows weren't imported. Fix them in the source file and re-upload if needed.</p>
+    </div>
+    {% endif %}
+
+    {% if ok_rows %}
+    <div style="display:flex; gap:10px;">
+      <button type="submit" class="cf-btn-primary">Confirm Import</button>
+      <a href="{{ url_for('cashflow_centre.import_transactions') }}" class="cf-btn-cancel">Start Over</a>
+    </div>
+    {% else %}
+    <div class="cf-card">
+      <div class="cf-empty">No rows could be read from this file. <a href="{{ url_for('cashflow_centre.import_transactions') }}" class="cf-link">Try a different file</a>.</div>
+    </div>
+    {% endif %}
+  </form>
+</div>
+
+<style>
+  .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
+  .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-breadcrumb a:hover { color:var(--accent); }
+  .cf-breadcrumb-sep { color:var(--muted2); margin:0 6px; }
+  .cf-breadcrumb-current { color:var(--text); font-weight:700; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+  .cf-subtitle { font-size:0.85rem; color:var(--muted); line-height:1.6; }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; box-shadow:var(--shadow-sm);
+  }
+  .cf-card-heading { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:12px; }
+
+  .cf-review-table { border-collapse:collapse; width:100%; font-size:0.82rem; }
+  .cf-review-table th, .cf-review-table td { padding:8px 10px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+  .cf-review-table th { color:var(--muted); font-weight:600; font-size:0.75rem; text-transform:uppercase; letter-spacing:0.04em; }
+  .cf-review-table td { color:var(--text2); }
+  .cf-desc-cell { white-space:normal; max-width:220px; }
+  .cf-row-dup { background:var(--warning-bg, rgba(234,179,8,0.08)); }
+  .cf-dup-tag {
+    background:var(--warning-bg, rgba(234,179,8,0.15)); color:var(--warning, #b45309); font-size:0.68rem; font-weight:700;
+    padding:2px 6px; border-radius:5px; margin-left:6px; white-space:nowrap;
+  }
+  .cf-error-text { color:var(--down); }
+  .cf-select-sm {
+    background:var(--surface2); border:1px solid var(--border); border-radius:6px;
+    padding:5px 8px; color:var(--text); font-family:var(--font-ui); font-size:0.8rem; outline:none;
+  }
+  .cf-hint { font-size:0.78rem; color:var(--muted2); }
+  .cf-link { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-empty { font-size:0.85rem; color:var(--muted); }
+
+  .cf-btn-primary {
+    background:var(--accent); border:1px solid var(--accent); border-radius:8px;
+    padding:10px 22px; font-size:0.85rem; font-weight:700; color:#fff;
+    font-family:var(--font-ui); cursor:pointer;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+  .cf-btn-cancel {
+    display:inline-flex; align-items:center; padding:10px 20px;
+    color:var(--text); background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; text-decoration:none; font-size:0.9rem; font-weight:600;
+  }
+  .cf-btn-cancel:hover { border-color:var(--muted2); }
+</style>
+{% endblock %}

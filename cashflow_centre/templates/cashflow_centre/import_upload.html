@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Import Transactions — Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:800px; margin:0 auto;">
+  <div class="cf-breadcrumb">
+    <a href="{{ url_for('cashflow_centre.dashboard') }}">Cashflow</a>
+    <span class="cf-breadcrumb-sep">›</span>
+    <span class="cf-breadcrumb-current">Import CSV</span>
+  </div>
+
+  <h1 class="cf-title" style="margin-bottom:6px;">Import Transactions from CSV</h1>
+  <p class="cf-subtitle" style="margin-bottom:20px;">
+    Upload a bank or card statement exported as CSV. You'll map the columns and review
+    every row before anything is saved.
+  </p>
+
+  <form method="POST" enctype="multipart/form-data" class="cf-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="cf-field">
+      <label class="cf-label">CSV file</label>
+      <input type="file" name="csv_file" accept=".csv,text/csv" required class="cf-input" style="padding:8px 12px;" />
+      <span class="cf-hint">Plain CSV only (not Excel or PDF). Up to 2 MB, up to 2,000 rows.</span>
+    </div>
+    <div style="display:flex; gap:10px; margin-top:16px;">
+      <button type="submit" class="cf-btn-primary">Continue</button>
+      <a href="{{ url_for('cashflow_centre.transactions') }}" class="cf-btn-cancel">Cancel</a>
+    </div>
+  </form>
+
+  <div class="cf-card" style="margin-top:16px;">
+    <div class="cf-card-heading">What happens next</div>
+    <ol class="cf-steps">
+      <li>Tell us which column is the date, description and amount.</li>
+      <li>Review every row — possible duplicates and unreadable rows are flagged, nothing is hidden.</li>
+      <li>Confirm to import. Nothing is saved until that final step.</li>
+    </ol>
+  </div>
+</div>
+
+<style>
+  .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
+  .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-breadcrumb a:hover { color:var(--accent); }
+  .cf-breadcrumb-sep { color:var(--muted2); margin:0 6px; }
+  .cf-breadcrumb-current { color:var(--text); font-weight:700; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+  .cf-subtitle { font-size:0.85rem; color:var(--muted); }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; box-shadow:var(--shadow-sm);
+  }
+  .cf-card-heading { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:12px; }
+  .cf-field { margin-bottom:14px; }
+  .cf-label { display:block; font-size:0.82rem; font-weight:600; color:var(--text2); margin-bottom:6px; }
+  .cf-hint { display:block; font-size:0.75rem; color:var(--muted2); margin-top:6px; }
+  .cf-input {
+    width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; color:var(--text); font-family:var(--font-ui); font-size:0.9rem; outline:none;
+  }
+  .cf-btn-primary {
+    background:var(--accent); border:1px solid var(--accent); border-radius:8px;
+    padding:10px 22px; font-size:0.85rem; font-weight:700; color:#fff;
+    font-family:var(--font-ui); cursor:pointer;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+  .cf-btn-cancel {
+    display:inline-flex; align-items:center; padding:10px 20px;
+    color:var(--text); background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; text-decoration:none; font-size:0.9rem; font-weight:600;
+  }
+  .cf-btn-cancel:hover { border-color:var(--muted2); }
+  .cf-steps { margin:0; padding-left:20px; font-size:0.85rem; color:var(--text2); line-height:1.8; }
+</style>
+{% endblock %}

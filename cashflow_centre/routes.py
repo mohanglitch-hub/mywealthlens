@@ -4,6 +4,7 @@ Cashflow Centre — Routes
 Thin handlers — all logic lives in services.py. Every query filtered
 by current_user.id (IDOR check), matching every other module.
 """
+import base64
 from datetime import datetime
 
 from flask import render_template, request, redirect, url_for, flash
@@ -13,7 +14,7 @@ from cashflow_centre import cashflow_bp
 from cashflow_centre.models import (
     Transaction, Budget, TransactionType, ExpenseCategory, IncomeCategory, PaymentMethod,
 )
-from cashflow_centre import services
+from cashflow_centre import services, csv_import
 from cashflow_centre.utils import (
     format_inr, format_date, current_month_key, parse_month_key,
     month_label, adjacent_month_key, last_n_months_bounds, fy_bounds, fy_label,
@@ -243,6 +244,131 @@ def delete_transaction(txn_id):
     success, error = services.delete_transaction(_db(), txn, current_user.id)
     flash(error, "error") if error else flash("Transaction deleted.", "success")
     return redirect(return_to)
+
+
+# ── CSV Import ────────────────────────────────────────────────────────────────
+# Three steps, each a plain POST carrying the raw CSV text forward in a
+# hidden field — no server-side temp files, nothing left on disk
+# between requests. See csv_import.py for the parsing/dedup logic and
+# the "Cashflow CSV Import" design doc for the reasoning.
+
+def _b64_encode(text):
+    return base64.b64encode(text.encode("utf-8")).decode("ascii")
+
+
+def _b64_decode(value):
+    return base64.b64decode(value.encode("ascii"))
+
+
+@cashflow_bp.route("/transactions/import", methods=["GET", "POST"])
+@login_required
+def import_transactions():
+    if request.method == "GET":
+        return render_template("cashflow_centre/import_upload.html")
+
+    file = request.files.get("csv_file")
+    if not file or not file.filename:
+        flash("Please choose a CSV file to import.", "error")
+        return render_template("cashflow_centre/import_upload.html")
+
+    file_bytes = file.read()
+    try:
+        header_info = csv_import.parse_csv_header(file_bytes)
+    except csv_import.CsvImportError as e:
+        flash(str(e), "error")
+        return render_template("cashflow_centre/import_upload.html")
+
+    return render_template(
+        "cashflow_centre/import_map.html",
+        headers=header_info["headers"],
+        sample_rows=header_info["sample_rows"],
+        row_count=header_info["row_count"],
+        guessed_mapping=header_info["guessed_mapping"],
+        guessed_date_format=header_info["guessed_date_format"],
+        date_format_choices=csv_import.DATE_FORMAT_CHOICES,
+        csv_b64=_b64_encode(file_bytes.decode("utf-8-sig")),
+    )
+
+
+@cashflow_bp.route("/transactions/import/review", methods=["POST"])
+@login_required
+def import_review():
+    csv_b64 = request.form.get("csv_b64", "")
+    if not csv_b64:
+        flash("Your import session expired — please upload the file again.", "error")
+        return redirect(url_for("cashflow_centre.import_transactions"))
+
+    def _int_or_none(v):
+        return int(v) if v not in (None, "",) else None
+
+    mapping = {
+        "date_col":   _int_or_none(request.form.get("date_col")),
+        "desc_col":   _int_or_none(request.form.get("desc_col")),
+        "mode":       request.form.get("mode", "single"),
+        "amount_col": _int_or_none(request.form.get("amount_col")),
+        "debit_col":  _int_or_none(request.form.get("debit_col")),
+        "credit_col": _int_or_none(request.form.get("credit_col")),
+        "negative_is_expense": request.form.get("negative_is_expense") == "on",
+    }
+    date_format = request.form.get("date_format") or csv_import.DATE_FORMAT_CHOICES[0]
+
+    if mapping["date_col"] is None or (mapping["mode"] == "single" and mapping["amount_col"] is None) \
+            or (mapping["mode"] == "split" and (mapping["debit_col"] is None or mapping["credit_col"] is None)):
+        flash("Please map every required column before continuing.", "error")
+        return redirect(url_for("cashflow_centre.import_transactions"))
+
+    file_bytes = _b64_decode(csv_b64)
+    candidates = csv_import.parse_csv_rows(file_bytes, mapping, date_format)
+    csv_import.mark_duplicates(current_user.id, candidates)
+
+    ok_rows = [c for c in candidates if not c["error"]]
+    error_rows = [c for c in candidates if c["error"]]
+    dup_count = sum(1 for c in ok_rows if c.get("is_duplicate"))
+
+    return render_template(
+        "cashflow_centre/import_review.html",
+        candidates=candidates, ok_rows=ok_rows, error_rows=error_rows,
+        dup_count=dup_count, total_count=len(candidates),
+        expense_categories=ExpenseCategory.ALL, income_categories=IncomeCategory.ALL,
+        payment_methods=PaymentMethod.ALL,
+        csv_b64=csv_b64, mapping=mapping, date_format=date_format,
+        format_inr=format_inr, format_date=format_date,
+    )
+
+
+@cashflow_bp.route("/transactions/import/confirm", methods=["POST"])
+@login_required
+def import_confirm():
+    row_nums = request.form.getlist("include_row")
+    if not row_nums:
+        flash("No rows were selected to import.", "warning")
+        return redirect(url_for("cashflow_centre.import_transactions"))
+
+    rows = []
+    for row_num in row_nums:
+        rows.append({
+            "row_num":        row_num,
+            "date":           request.form.get(f"date_{row_num}", ""),
+            "type":           request.form.get(f"type_{row_num}", ""),
+            "category":       request.form.get(f"category_{row_num}", ""),
+            "amount":         request.form.get(f"amount_{row_num}", ""),
+            "payment_method": request.form.get(f"payment_method_{row_num}", ""),
+            "description":    request.form.get(f"description_{row_num}", ""),
+        })
+
+    created_count, errors = services.bulk_create_transactions(_db(), current_user.id, rows)
+
+    if errors:
+        for e in errors[:5]:
+            flash(f"Row {e['row_num']}: {e['message']}", "error")
+        if len(errors) > 5:
+            flash(f"...and {len(errors) - 5} more row(s) with errors. Nothing was imported — please fix and retry.", "error")
+        else:
+            flash("Nothing was imported — please fix the flagged row(s) and retry.", "error")
+        return redirect(url_for("cashflow_centre.import_transactions"))
+
+    flash(f"Imported {created_count} transaction{'s' if created_count != 1 else ''}.", "success")
+    return redirect(url_for("cashflow_centre.transactions"))
 
 
 # ── Budgets ───────────────────────────────────────────────────────────────────

@@ -105,6 +105,47 @@ def get_transactions(user_id, year=None, month=None, category=None, txn_type=Non
     return query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
 
 
+def bulk_create_transactions(db, user_id, rows):
+    """
+    Insert several transactions from CSV import in one commit.
+    `rows` is a list of dicts with date/type/category/amount/
+    payment_method/description already in the same string-keyed shape
+    create_transaction() expects — every row is still run through
+    validate_transaction() (via create_transaction's own checks) so
+    imported data can never bypass the rules manual entry enforces.
+    Returns (created_count, errors) where errors is a list of
+    {row_num, message} for rows that failed validation; nothing is
+    written to the database unless the whole batch validates —
+    partial imports would leave the user guessing what actually landed.
+    """
+    validated = []
+    errors = []
+    for row in rows:
+        row_errors = validate_transaction(row)
+        if row_errors:
+            errors.append({"row_num": row.get("row_num"), "message": row_errors[0]})
+        else:
+            validated.append(row)
+
+    if errors:
+        return 0, errors
+
+    for row in validated:
+        db.session.add(Transaction(
+            user_id        = user_id,
+            date           = _parse_date(row["date"].strip()),
+            type           = row["type"].strip(),
+            category       = row["category"].strip(),
+            amount         = float(row["amount"]),
+            payment_method = (row.get("payment_method") or "").strip() or None,
+            description    = (row.get("description") or "").strip() or None,
+        ))
+    error = _commit(db)
+    if error:
+        return 0, [{"row_num": None, "message": error}]
+    return len(validated), []
+
+
 def get_quick_add_defaults(user_id):
     """
     Smart defaults for the dashboard's Quick Add modal, derived purely
