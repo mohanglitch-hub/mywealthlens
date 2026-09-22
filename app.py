@@ -16,6 +16,7 @@ from retirement_centre import retirement_bp
 from wealth import wealth_bp
 from family_centre import family_bp
 from backup import backup_bp
+from cashflow_centre import cashflow_bp
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory, WealthAsset
 from retirement_centre.models import RetirementScheme
@@ -2299,6 +2300,7 @@ app.register_blueprint(retirement_bp)
 app.register_blueprint(wealth_bp)
 app.register_blueprint(family_bp)
 app.register_blueprint(backup_bp)
+app.register_blueprint(cashflow_bp)
 
 # Phase I — Automatic Wealth Snapshots. Registers `flask wealth
 # snapshot`, invoked by Windows Task Scheduler (see the Phase I

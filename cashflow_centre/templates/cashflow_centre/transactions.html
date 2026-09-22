@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Transactions — Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "cashflow_centre/_confirm_modal.html" %}
+
+<div class="cf-breadcrumb">
+  <a href="{{ url_for('cashflow_centre.dashboard', month=month_key) }}">Cashflow</a>
+  <span class="cf-breadcrumb-sep">›</span>
+  <span class="cf-breadcrumb-current">Transactions — {{ month_display }}</span>
+</div>
+
+<div class="cf-header">
+  <h1 class="cf-title">Transactions</h1>
+  <a href="{{ url_for('cashflow_centre.add_transaction') }}" class="cf-btn-primary">+ Add Transaction</a>
+</div>
+
+<form method="GET" class="cf-filter-bar">
+  <input type="hidden" name="month" value="{{ month_key }}" />
+  <select name="type" class="cf-select" onchange="this.form.submit()">
+    <option value="">All Types</option>
+    <option value="income" {{ 'selected' if selected_type == 'income' }}>Income</option>
+    <option value="expense" {{ 'selected' if selected_type == 'expense' }}>Expense</option>
+  </select>
+  <select name="category" class="cf-select" onchange="this.form.submit()">
+    <option value="">All Categories</option>
+    {% for c in expense_categories + income_categories %}
+    <option value="{{ c }}" {{ 'selected' if selected_category == c }}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  {% if selected_type or selected_category %}
+  <a href="{{ url_for('cashflow_centre.transactions', month=month_key) }}" class="cf-link">Clear filters</a>
+  {% endif %}
+</form>
+
+<div class="cf-card">
+  {% if transactions %}
+    <div class="cf-table-wrap">
+      <table class="cf-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Category</th>
+            <th>Description</th>
+            <th>Payment</th>
+            <th style="text-align:right;">Amount</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in transactions %}
+          <tr>
+            <td>{{ format_date(t.date) }}</td>
+            <td><span class="cf-type-badge cf-type-{{ t.type }}">{{ t.category }}</span></td>
+            <td class="cf-muted-cell">{{ t.description or '—' }}</td>
+            <td class="cf-muted-cell">{{ t.payment_method or '—' }}</td>
+            <td style="text-align:right;" class="{{ 'cf-up' if t.type == 'income' else 'cf-down' }}">
+              {{ '+' if t.type == 'income' else '-' }}{{ format_inr(t.amount) }}
+            </td>
+            <td class="cf-row-actions">
+              <a href="{{ url_for('cashflow_centre.edit_transaction', txn_id=t.id) }}" class="cf-icon-btn" title="Edit">✏️</a>
+              <form method="POST" action="{{ url_for('cashflow_centre.delete_transaction', txn_id=t.id) }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <button type="button" class="cf-icon-btn" title="Delete"
+                        onclick="confirmAction(this.form, 'Delete Transaction?', 'This transaction will be permanently removed.', 'Delete')">🗑️</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="cf-table-total">Total: <strong>{{ format_inr(total) }}</strong> across {{ transactions|length }} transaction{{ 's' if transactions|length != 1 else '' }}</div>
+  {% else %}
+    <div class="cf-empty">No transactions match these filters for {{ month_display }}.</div>
+  {% endif %}
+</div>
+
+<style>
+  .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
+  .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-breadcrumb a:hover { color:var(--accent); }
+  .cf-breadcrumb-sep { color:var(--muted2); margin:0 6px; }
+  .cf-breadcrumb-current { color:var(--text); font-weight:700; }
+
+  .cf-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:12px; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+  .cf-btn-primary {
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:10px 20px; font-size:0.85rem; font-weight:700; font-family:var(--font-ui);
+    text-decoration:none; cursor:pointer;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+
+  .cf-filter-bar { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+  .cf-select {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:8px 12px; color:var(--text); font-family:var(--font-ui); font-size:0.85rem;
+  }
+  .cf-link { font-size:0.8rem; color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-link:hover { text-decoration:underline; }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; box-shadow:var(--shadow-sm);
+  }
+  .cf-empty { font-size:0.85rem; color:var(--muted); line-height:1.6; padding:8px 0; }
+
+  .cf-table-wrap { overflow-x:auto; }
+  .cf-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .cf-table th {
+    text-align:left; padding:10px 12px; color:var(--muted); font-weight:600;
+    font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em;
+    border-bottom:1px solid var(--border);
+  }
+  .cf-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); }
+  .cf-muted-cell { color:var(--muted); }
+  .cf-type-badge {
+    font-size:0.78rem; font-weight:600; padding:3px 10px; border-radius:6px;
+    background:var(--surface2); color:var(--text2);
+  }
+  .cf-type-income { background:var(--up-bg); color:var(--up); }
+  .cf-type-expense { background:var(--down-bg); color:var(--down); }
+  .cf-row-actions { white-space:nowrap; }
+  .cf-icon-btn {
+    background:none; border:none; cursor:pointer; font-size:0.9rem;
+    padding:4px 6px; text-decoration:none;
+  }
+  .cf-table-total { margin-top:14px; font-size:0.85rem; color:var(--text2); text-align:right; }
+  .cf-up { color:var(--up); }
+  .cf-down { color:var(--down); }
+</style>
+{% endblock %}

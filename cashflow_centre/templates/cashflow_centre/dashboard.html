@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="cf-header">
+  <div>
+    <h1 class="cf-title">Cashflow</h1>
+    <p class="cf-subtitle">Where your money actually goes, month by month.</p>
+  </div>
+  <a href="{{ url_for('cashflow_centre.add_transaction') }}" class="cf-btn-primary">+ Add Transaction</a>
+</div>
+
+<div class="cf-month-nav">
+  <a href="{{ url_for('cashflow_centre.dashboard', month=prev_month) }}" class="cf-month-arrow" title="Previous month">‹</a>
+  <span class="cf-month-label">{{ month_display }}</span>
+  <a href="{{ url_for('cashflow_centre.dashboard', month=next_month) }}" class="cf-month-arrow" title="Next month">›</a>
+</div>
+
+<div class="cf-summary-grid">
+  <div class="cf-summary-card">
+    <div class="cf-summary-label">Income</div>
+    <div class="cf-summary-value cf-up">{{ format_inr(summary.total_income) }}</div>
+  </div>
+  <div class="cf-summary-card">
+    <div class="cf-summary-label">Expenses</div>
+    <div class="cf-summary-value cf-down">{{ format_inr(summary.total_expense) }}</div>
+  </div>
+  <div class="cf-summary-card">
+    <div class="cf-summary-label">Net</div>
+    <div class="cf-summary-value {{ 'cf-up' if summary.net >= 0 else 'cf-down' }}">{{ format_inr(summary.net) }}</div>
+  </div>
+</div>
+
+<div class="cf-two-col">
+  <!-- ── Spend by category ── -->
+  <div class="cf-card">
+    <div class="cf-card-heading">Spend by Category</div>
+    {% if summary.by_category %}
+      <div class="cf-cat-list">
+        {% for cat, amount in summary.by_category.items() %}
+        <div class="cf-cat-row">
+          <div class="cf-cat-row-top">
+            <span class="cf-cat-name">{{ cat }}</span>
+            <span class="cf-cat-amount">{{ format_inr(amount) }}</span>
+          </div>
+          <div class="cf-bar-track">
+            <div class="cf-bar-fill" style="width: {{ (amount / summary.total_expense * 100) if summary.total_expense else 0 }}%;"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="cf-empty">No expenses recorded for {{ month_display }} yet.</div>
+    {% endif %}
+  </div>
+
+  <!-- ── Budget progress ── -->
+  <div class="cf-card">
+    <div class="cf-card-heading" style="display:flex; justify-content:space-between; align-items:center;">
+      <span>Budget Progress</span>
+      <a href="{{ url_for('cashflow_centre.budgets') }}" class="cf-link">Manage budgets</a>
+    </div>
+    {% if budgets %}
+      <div class="cf-cat-list">
+        {% for b in budgets %}
+        <div class="cf-cat-row">
+          <div class="cf-cat-row-top">
+            <span class="cf-cat-name">{{ b.category }}</span>
+            <span class="cf-cat-amount {{ 'cf-down' if b.status == 'over' else '' }}">
+              {{ format_inr(b.spent) }} / {{ format_inr(b.monthly_limit) }}
+            </span>
+          </div>
+          <div class="cf-bar-track">
+            <div class="cf-bar-fill cf-bar-{{ b.status }}" style="width: {{ b.pct }}%;"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="cf-empty">No budgets set yet. <a href="{{ url_for('cashflow_centre.budgets') }}" class="cf-link">Set one up</a> to track spend against a monthly limit.</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Recent transactions ── -->
+<div class="cf-card">
+  <div class="cf-card-heading" style="display:flex; justify-content:space-between; align-items:center;">
+    <span>Recent Transactions</span>
+    <a href="{{ url_for('cashflow_centre.transactions', month=month_key) }}" class="cf-link">View all</a>
+  </div>
+  {% if recent %}
+    <div class="cf-txn-list">
+      {% for t in recent %}
+      <div class="cf-txn-row">
+        <div class="cf-txn-left">
+          <span class="cf-txn-cat">{{ t.category }}</span>
+          {% if t.description %}<span class="cf-txn-desc">{{ t.description }}</span>{% endif %}
+        </div>
+        <div class="cf-txn-right">
+          <span class="cf-txn-date">{{ format_date(t.date) }}</span>
+          <span class="cf-txn-amount {{ 'cf-up' if t.type == 'income' else 'cf-down' }}">
+            {{ '+' if t.type == 'income' else '-' }}{{ format_inr(t.amount) }}
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="cf-empty">No transactions recorded for {{ month_display }} yet. <a href="{{ url_for('cashflow_centre.add_transaction') }}" class="cf-link">Add your first one</a>.</div>
+  {% endif %}
+</div>
+
+<style>
+  .cf-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; flex-wrap:wrap; gap:12px; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+  .cf-subtitle { font-size:0.85rem; color:var(--muted); margin-top:2px; }
+
+  .cf-btn-primary {
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:10px 20px; font-size:0.85rem; font-weight:700; font-family:var(--font-ui);
+    text-decoration:none; cursor:pointer; transition:opacity 0.2s;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+
+  .cf-month-nav {
+    display:flex; align-items:center; gap:14px; margin:18px 0 20px;
+  }
+  .cf-month-arrow {
+    width:30px; height:30px; border-radius:8px; border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; color:var(--text2);
+    text-decoration:none; font-size:1.1rem; background:var(--surface);
+  }
+  .cf-month-arrow:hover { border-color:var(--accent); color:var(--accent); }
+  .cf-month-label { font-size:0.95rem; font-weight:700; color:var(--text); min-width:140px; text-align:center; }
+
+  .cf-summary-grid {
+    display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));
+    gap:14px; margin-bottom:20px;
+  }
+  .cf-summary-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:18px 20px; box-shadow:var(--shadow-sm);
+  }
+  .cf-summary-label { font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; }
+  .cf-summary-value { font-size:1.4rem; font-weight:700; }
+  .cf-up { color:var(--up); }
+  .cf-down { color:var(--down); }
+
+  .cf-two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; margin-bottom:16px; box-shadow:var(--shadow-sm);
+  }
+  .cf-card-heading { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:16px; }
+  .cf-link { font-size:0.8rem; color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-link:hover { text-decoration:underline; }
+
+  .cf-cat-list { display:flex; flex-direction:column; gap:14px; }
+  .cf-cat-row-top { display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:6px; }
+  .cf-cat-name { color:var(--text2); font-weight:600; }
+  .cf-cat-amount { color:var(--text); font-weight:600; font-family:var(--font-data); }
+
+  .cf-bar-track { height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; }
+  .cf-bar-fill { height:100%; background:var(--accent2); border-radius:4px; }
+  .cf-bar-ok { background:var(--up); }
+  .cf-bar-warning { background:var(--warning); }
+  .cf-bar-over { background:var(--down); }
+
+  .cf-empty { font-size:0.85rem; color:var(--muted); line-height:1.6; padding:8px 0; }
+
+  .cf-txn-list { display:flex; flex-direction:column; }
+  .cf-txn-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 0; border-bottom:1px solid var(--border);
+  }
+  .cf-txn-row:last-child { border-bottom:none; }
+  .cf-txn-left { display:flex; flex-direction:column; gap:2px; }
+  .cf-txn-cat { font-size:0.88rem; font-weight:600; color:var(--text); }
+  .cf-txn-desc { font-size:0.78rem; color:var(--muted); }
+  .cf-txn-right { display:flex; align-items:center; gap:14px; }
+  .cf-txn-date { font-size:0.78rem; color:var(--muted); }
+  .cf-txn-amount { font-size:0.9rem; font-weight:700; font-family:var(--font-data); }
+
+  @media (max-width:768px) {
+    .cf-two-col { grid-template-columns:1fr; }
+  }
+</style>
+{% endblock %}

@@ -1,0 +1,73 @@
+{# ── Reusable confirmation modal — mirrors wealth's proven pattern ── #}
+
+<div id="confirmModalOverlay" class="cf-modal-overlay" style="display:none;">
+  <div class="cf-modal">
+    <div class="cf-modal-title" id="confirmModalTitle"></div>
+    <div class="cf-modal-message" id="confirmModalMessage"></div>
+    <div class="cf-modal-actions">
+      <button type="button" class="cf-modal-cancel" onclick="closeConfirmModal()">Cancel</button>
+      <button type="button" class="cf-modal-confirm" id="confirmModalConfirmBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .cf-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 500;
+    padding: 20px;
+  }
+  .cf-modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; max-width: 380px; width: 100%;
+    box-shadow: var(--shadow-lg);
+  }
+  .cf-modal-title { font-weight: 700; font-size: 1rem; color: var(--text); margin-bottom: 8px; }
+  .cf-modal-message { font-size: 0.88rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; white-space: pre-line; }
+  .cf-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .cf-modal-cancel {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: var(--text2); cursor: pointer; font-family: var(--font-ui);
+  }
+  .cf-modal-cancel:hover { border-color: var(--muted2); }
+  .cf-modal-confirm {
+    background: var(--down); border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: #fff; font-weight: 600;
+    cursor: pointer; font-family: var(--font-ui);
+  }
+  .cf-modal-confirm:hover { opacity: 0.9; }
+</style>
+
+<script>
+  let _cfPendingConfirmForm = null;
+
+  function confirmAction(formEl, title, message, confirmLabel) {
+    _cfPendingConfirmForm = formEl;
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+    document.getElementById('confirmModalConfirmBtn').textContent = confirmLabel || 'Confirm';
+    document.getElementById('confirmModalOverlay').style.display = 'flex';
+    return false;
+  }
+
+  function closeConfirmModal() {
+    document.getElementById('confirmModalOverlay').style.display = 'none';
+    _cfPendingConfirmForm = null;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const confirmBtn = document.getElementById('confirmModalConfirmBtn');
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', function () {
+        if (_cfPendingConfirmForm) _cfPendingConfirmForm.submit();
+        closeConfirmModal();
+      });
+    }
+    const overlay = document.getElementById('confirmModalOverlay');
+    if (overlay) {
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) closeConfirmModal();
+      });
+    }
+  });
+</script>
