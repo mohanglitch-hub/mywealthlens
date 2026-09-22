@@ -10,6 +10,7 @@
   <div style="display:flex; gap:10px;">
     <button type="button" class="cf-btn-primary" onclick="cfOpenQuickAdd()">+ Add Entry</button>
     <a href="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" class="cf-btn-secondary">Full form</a>
+    <a href="{{ url_for('cashflow_centre.import_transactions') }}" class="cf-btn-secondary">Import CSV</a>
   </div>
 </div>
 

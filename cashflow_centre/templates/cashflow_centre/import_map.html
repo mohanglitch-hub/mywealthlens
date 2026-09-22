@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Map Columns — Import — Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:800px; margin:0 auto;">
+  <div class="cf-breadcrumb">
+    <a href="{{ url_for('cashflow_centre.dashboard') }}">Cashflow</a>
+    <span class="cf-breadcrumb-sep">›</span>
+    <a href="{{ url_for('cashflow_centre.import_transactions') }}">Import CSV</a>
+    <span class="cf-breadcrumb-sep">›</span>
+    <span class="cf-breadcrumb-current">Map Columns</span>
+  </div>
+
+  <h1 class="cf-title" style="margin-bottom:6px;">Map Your Columns</h1>
+  <p class="cf-subtitle" style="margin-bottom:20px;">{{ row_count }} row(s) found. Tell us which column is which.</p>
+
+  <div class="cf-card" style="margin-bottom:16px; overflow-x:auto;">
+    <div class="cf-card-heading">Preview</div>
+    <table class="cf-preview-table">
+      <thead>
+        <tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in sample_rows %}
+        <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <form method="POST" action="{{ url_for('cashflow_centre.import_review') }}" class="cf-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="csv_b64" value="{{ csv_b64 }}" />
+
+    <div class="cf-form-grid-2">
+      <div class="cf-field">
+        <label class="cf-label">Date column <span class="cf-required">*</span></label>
+        <select name="date_col" class="cf-select-full" required>
+          <option value="">— Select —</option>
+          {% for h in headers %}
+          <option value="{{ loop.index0 }}" {{ 'selected' if guessed_mapping.date_col == loop.index0 }}>{{ h }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Date format <span class="cf-required">*</span></label>
+        <select name="date_format" class="cf-select-full" required>
+          {% for fmt in date_format_choices %}
+          <option value="{{ fmt }}" {{ 'selected' if (guessed_date_format or date_format_choices[0]) == fmt }}>{{ fmt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="cf-field">
+      <label class="cf-label">Description column</label>
+      <select name="desc_col" class="cf-select-full">
+        <option value="">— None —</option>
+        {% for h in headers %}
+        <option value="{{ loop.index0 }}" {{ 'selected' if guessed_mapping.desc_col == loop.index0 }}>{{ h }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="cf-field">
+      <label class="cf-label">Amount is in</label>
+      <div style="display:flex; gap:20px; margin-top:6px;">
+        <label class="cf-radio-label">
+          <input type="radio" name="mode" value="single" {{ 'checked' if guessed_mapping.mode == 'single' }} onchange="cfToggleMode()" /> One column (signed)
+        </label>
+        <label class="cf-radio-label">
+          <input type="radio" name="mode" value="split" {{ 'checked' if guessed_mapping.mode == 'split' }} onchange="cfToggleMode()" /> Separate Debit / Credit columns
+        </label>
+      </div>
+    </div>
+
+    <div id="cfSingleAmountFields" class="cf-form-grid-2">
+      <div class="cf-field">
+        <label class="cf-label">Amount column</label>
+        <select name="amount_col" class="cf-select-full">
+          <option value="">— Select —</option>
+          {% for h in headers %}
+          <option value="{{ loop.index0 }}" {{ 'selected' if guessed_mapping.amount_col == loop.index0 }}>{{ h }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Negative amounts mean</label>
+        <select name="negative_is_expense" class="cf-select-full">
+          <option value="on" selected>Expense (typical for bank exports)</option>
+          <option value="">Income</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="cfSplitAmountFields" class="cf-form-grid-2" style="display:none;">
+      <div class="cf-field">
+        <label class="cf-label">Debit column (expenses)</label>
+        <select name="debit_col" class="cf-select-full">
+          <option value="">— Select —</option>
+          {% for h in headers %}
+          <option value="{{ loop.index0 }}" {{ 'selected' if guessed_mapping.debit_col == loop.index0 }}>{{ h }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Credit column (income)</label>
+        <select name="credit_col" class="cf-select-full">
+          <option value="">— Select —</option>
+          {% for h in headers %}
+          <option value="{{ loop.index0 }}" {{ 'selected' if guessed_mapping.credit_col == loop.index0 }}>{{ h }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:20px;">
+      <button type="submit" class="cf-btn-primary">Review Rows</button>
+      <a href="{{ url_for('cashflow_centre.import_transactions') }}" class="cf-btn-cancel">Start Over</a>
+    </div>
+  </form>
+</div>
+
+<style>
+  .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
+  .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-breadcrumb a:hover { color:var(--accent); }
+  .cf-breadcrumb-sep { color:var(--muted2); margin:0 6px; }
+  .cf-breadcrumb-current { color:var(--text); font-weight:700; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+  .cf-subtitle { font-size:0.85rem; color:var(--muted); }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; box-shadow:var(--shadow-sm);
+  }
+  .cf-card-heading { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:12px; }
+
+  .cf-preview-table { border-collapse:collapse; width:100%; font-size:0.8rem; white-space:nowrap; }
+  .cf-preview-table th, .cf-preview-table td { padding:6px 10px; border-bottom:1px solid var(--border); text-align:left; }
+  .cf-preview-table th { color:var(--muted); font-weight:600; }
+  .cf-preview-table td { color:var(--text2); }
+
+  .cf-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .cf-field { margin-bottom:14px; }
+  .cf-label { display:block; font-size:0.82rem; font-weight:600; color:var(--text2); margin-bottom:6px; }
+  .cf-required { color:var(--down); }
+  .cf-radio-label { display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text2); font-weight:500; }
+  .cf-select-full {
+    width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; color:var(--text); font-family:var(--font-ui); font-size:0.9rem; outline:none;
+  }
+  .cf-btn-primary {
+    background:var(--accent); border:1px solid var(--accent); border-radius:8px;
+    padding:10px 22px; font-size:0.85rem; font-weight:700; color:#fff;
+    font-family:var(--font-ui); cursor:pointer;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+  .cf-btn-cancel {
+    display:inline-flex; align-items:center; padding:10px 20px;
+    color:var(--text); background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; text-decoration:none; font-size:0.9rem; font-weight:600;
+  }
+  .cf-btn-cancel:hover { border-color:var(--muted2); }
+
+  @media (max-width:600px) { .cf-form-grid-2 { grid-template-columns:1fr; } }
+</style>
+
+<script>
+  function cfToggleMode() {
+    const mode = document.querySelector('input[name="mode"]:checked').value;
+    document.getElementById('cfSingleAmountFields').style.display = mode === 'single' ? 'grid' : 'none';
+    document.getElementById('cfSplitAmountFields').style.display = mode === 'split' ? 'grid' : 'none';
+  }
+  document.addEventListener('DOMContentLoaded', cfToggleMode);
+</script>
+{% endblock %}
