@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if is_edit else 'Add' }} Transaction — Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:600px; margin:0 auto;">
+  <div class="cf-breadcrumb">
+    <a href="{{ url_for('cashflow_centre.dashboard') }}">Cashflow</a>
+    <span class="cf-breadcrumb-sep">›</span>
+    <span class="cf-breadcrumb-current">{{ 'Edit Transaction' if is_edit else 'Add Transaction' }}</span>
+  </div>
+
+  <h1 class="cf-title" style="margin-bottom:20px;">{{ 'Edit Transaction' if is_edit else 'Add Transaction' }}</h1>
+
+  <form method="POST" id="txnForm" class="cf-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <div class="cf-form-grid-2">
+      <div class="cf-field">
+        <label class="cf-label">Type <span class="cf-required">*</span></label>
+        <select name="type" id="type" class="cf-select-full" required onchange="populateCategories()">
+          <option value="expense" {{ 'selected' if values.type == 'expense' }}>Expense</option>
+          <option value="income" {{ 'selected' if values.type == 'income' }}>Income</option>
+        </select>
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Date <span class="cf-required">*</span></label>
+        <input type="date" name="date" id="date" class="cf-input" required value="{{ values.date or '' }}" />
+      </div>
+    </div>
+
+    <div class="cf-form-grid-2">
+      <div class="cf-field">
+        <label class="cf-label">Category <span class="cf-required">*</span></label>
+        <select name="category" id="category" class="cf-select-full" required></select>
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Amount (₹) <span class="cf-required">*</span></label>
+        <input type="number" name="amount" id="amount" class="cf-input" required min="0.01" step="0.01"
+               value="{{ values.amount or '' }}" />
+      </div>
+    </div>
+
+    <div class="cf-field">
+      <label class="cf-label">Payment Method (optional)</label>
+      <select name="payment_method" class="cf-select-full">
+        <option value="">— Not specified —</option>
+        {% for pm in payment_methods %}
+        <option value="{{ pm }}" {{ 'selected' if values.payment_method == pm }}>{{ pm }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="cf-field">
+      <label class="cf-label">Description / Payee (optional)</label>
+      <input type="text" name="description" class="cf-input" placeholder="e.g. Swiggy order, Electricity bill"
+             value="{{ values.description or '' }}" />
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:20px;">
+      <button type="submit" class="cf-btn-primary">{{ 'Save Changes' if is_edit else 'Add Transaction' }}</button>
+      <a href="{{ url_for('cashflow_centre.dashboard') }}" class="cf-btn-cancel">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<style>
+  .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
+  .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-breadcrumb a:hover { color:var(--accent); }
+  .cf-breadcrumb-sep { color:var(--muted2); margin:0 6px; }
+  .cf-breadcrumb-current { color:var(--text); font-weight:700; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; box-shadow:var(--shadow-sm);
+  }
+  .cf-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .cf-field { margin-bottom:14px; }
+  .cf-label { display:block; font-size:0.82rem; font-weight:600; color:var(--text2); margin-bottom:6px; }
+  .cf-required { color:var(--down); }
+  .cf-input, .cf-select-full {
+    width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; color:var(--text); font-family:var(--font-ui); font-size:0.9rem; outline:none;
+  }
+  .cf-input:focus, .cf-select-full:focus { border-color:var(--accent); }
+
+  .cf-btn-primary {
+    background:var(--accent); border:1px solid var(--accent); border-radius:8px;
+    padding:10px 22px; font-size:0.85rem; font-weight:700; color:#fff;
+    font-family:var(--font-ui); cursor:pointer;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+  .cf-btn-cancel {
+    display:inline-flex; align-items:center; padding:10px 20px;
+    color:var(--text); background:var(--surface2); border:1px solid var(--border);
+    border-radius:8px; text-decoration:none; font-size:0.9rem; font-weight:600;
+  }
+  .cf-btn-cancel:hover { border-color:var(--muted2); }
+
+  @media (max-width:600px) { .cf-form-grid-2 { grid-template-columns:1fr; } }
+</style>
+
+<script>
+  const EXPENSE_CATEGORIES = {{ expense_categories | tojson }};
+  const INCOME_CATEGORIES  = {{ income_categories | tojson }};
+  const CURRENT_CATEGORY   = {{ (values.category or '') | tojson }};
+
+  function populateCategories() {
+    const typeSelect = document.getElementById('type');
+    const catSelect = document.getElementById('category');
+    const categories = typeSelect.value === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    catSelect.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = ''; opt0.textContent = '— Select category —';
+    catSelect.appendChild(opt0);
+    categories.forEach(function (c) {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      if (c === CURRENT_CATEGORY) opt.selected = true;
+      catSelect.appendChild(opt);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', populateCategories);
+</script>
+{% endblock %}

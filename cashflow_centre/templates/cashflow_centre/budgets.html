@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Budgets — Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "cashflow_centre/_confirm_modal.html" %}
+
+<div class="cf-breadcrumb">
+  <a href="{{ url_for('cashflow_centre.dashboard', month=month_key) }}">Cashflow</a>
+  <span class="cf-breadcrumb-sep">›</span>
+  <span class="cf-breadcrumb-current">Budgets</span>
+</div>
+
+<h1 class="cf-title" style="margin-bottom:6px;">Budgets</h1>
+<p class="cf-subtitle" style="margin-bottom:20px;">Monthly spending limits per category. Progress shown is for {{ month_display }}.</p>
+
+{% if available_categories %}
+<div class="cf-card" style="margin-bottom:16px;">
+  <div class="cf-card-heading">Set a New Budget</div>
+  <form method="POST" action="{{ url_for('cashflow_centre.save_budget') }}" class="cf-budget-add-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <select name="category" class="cf-select-full" required>
+      <option value="">— Select category —</option>
+      {% for c in available_categories %}
+      <option value="{{ c }}">{{ c }}</option>
+      {% endfor %}
+    </select>
+    <input type="number" name="monthly_limit" class="cf-input" placeholder="Monthly limit (₹)" required min="1" step="1" />
+    <button type="submit" class="cf-btn-primary">Set Budget</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="cf-card">
+  <div class="cf-card-heading">Your Budgets</div>
+  {% if budgets %}
+    <div class="cf-cat-list">
+      {% for b in budgets %}
+      <div class="cf-budget-row">
+        <div style="flex:1;">
+          <div class="cf-cat-row-top">
+            <span class="cf-cat-name">{{ b.category }}</span>
+            <span class="cf-cat-amount {{ 'cf-down' if b.status == 'over' else '' }}">
+              {{ format_inr(b.spent) }} / {{ format_inr(b.monthly_limit) }}
+              {% if b.status == 'over' %}<span class="cf-over-tag">Over</span>{% endif %}
+            </span>
+          </div>
+          <div class="cf-bar-track">
+            <div class="cf-bar-fill cf-bar-{{ b.status }}" style="width: {{ b.pct }}%;"></div>
+          </div>
+        </div>
+        <form method="POST" action="{{ url_for('cashflow_centre.delete_budget', budget_id=b.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="button" class="cf-btn-neutral-outline"
+                  onclick="confirmAction(this.form, 'Remove Budget?', 'This will remove the monthly limit for ' + {{ b.category | tojson }} + '. Past spending data is unaffected.', 'Remove Budget')">
+            Remove
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="cf-empty">No budgets set yet. Pick a category above to start tracking against a monthly limit.</div>
+  {% endif %}
+</div>
+
+<style>
+  .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
+  .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-breadcrumb a:hover { color:var(--accent); }
+  .cf-breadcrumb-sep { color:var(--muted2); margin:0 6px; }
+  .cf-breadcrumb-current { color:var(--text); font-weight:700; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+  .cf-subtitle { font-size:0.85rem; color:var(--muted); }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; box-shadow:var(--shadow-sm);
+  }
+  .cf-card-heading { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:16px; }
+
+  .cf-budget-add-form { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .cf-budget-add-form .cf-select-full { flex:2; min-width:200px; }
+  .cf-budget-add-form .cf-input { flex:1; min-width:140px; }
+
+  .cf-input, .cf-select-full {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; color:var(--text); font-family:var(--font-ui); font-size:0.9rem; outline:none;
+  }
+  .cf-input:focus, .cf-select-full:focus { border-color:var(--accent); }
+
+  .cf-btn-primary {
+    background:var(--accent); border:1px solid var(--accent); border-radius:8px;
+    padding:10px 20px; font-size:0.85rem; font-weight:700; color:#fff;
+    font-family:var(--font-ui); cursor:pointer; white-space:nowrap;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+  .cf-btn-neutral-outline {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:8px 14px; font-size:0.8rem; font-weight:600; color:var(--text2);
+    font-family:var(--font-ui); cursor:pointer;
+  }
+  .cf-btn-neutral-outline:hover { border-color:var(--down); color:var(--down); }
+
+  .cf-cat-list { display:flex; flex-direction:column; gap:16px; }
+  .cf-budget-row { display:flex; align-items:center; gap:16px; }
+  .cf-cat-row-top { display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:6px; }
+  .cf-cat-name { color:var(--text2); font-weight:600; }
+  .cf-cat-amount { color:var(--text); font-weight:600; font-family:var(--font-data); }
+  .cf-over-tag {
+    background:var(--down-bg); color:var(--down); font-size:0.7rem; font-weight:700;
+    padding:2px 8px; border-radius:6px; margin-left:8px; font-family:var(--font-ui);
+  }
+
+  .cf-bar-track { height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; }
+  .cf-bar-fill { height:100%; border-radius:4px; }
+  .cf-bar-ok { background:var(--up); }
+  .cf-bar-warning { background:var(--warning); }
+  .cf-bar-over { background:var(--down); }
+
+  .cf-empty { font-size:0.85rem; color:var(--muted); line-height:1.6; padding:8px 0; }
+
+  @media (max-width:640px) {
+    .cf-budget-add-form { flex-direction:column; align-items:stretch; }
+    .cf-budget-row { flex-direction:column; align-items:stretch; }
+  }
+</style>
+{% endblock %}
