@@ -2,6 +2,7 @@
 {% block title %}Cashflow — MyWealthLens{% endblock %}
 
 {% block content %}
+<div class="cf-page-wrap">
 <div class="cf-header">
   <div>
     <h1 class="cf-title">Cashflow</h1>
@@ -9,7 +10,6 @@
   </div>
   <div style="display:flex; gap:10px;">
     <button type="button" class="cf-btn-primary" onclick="cfOpenQuickAdd()">+ Add Entry</button>
-    <a href="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" class="cf-btn-secondary">Full form</a>
     <a href="{{ url_for('cashflow_centre.import_transactions') }}" class="cf-btn-secondary">Import CSV</a>
   </div>
 </div>
@@ -117,10 +117,12 @@
     </div>
   {% else %}
     <div class="cf-empty">No transactions recorded for {{ month_display }} yet. <a href="{{ url_for('cashflow_centre.add_transaction', next=self_url) }}" class="cf-link">Add your first one</a>.</div>
-  {% endif %}
+   {% endif %}
+</div>
 </div>
 
 <style>
+  .cf-page-wrap { max-width:1100px; margin:0 auto; }
   .cf-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; flex-wrap:wrap; gap:12px; }
   .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
   .cf-subtitle { font-size:0.85rem; color:var(--muted); margin-top:2px; }

@@ -29,10 +29,31 @@ Run from project root: py cashflow_centre/migrate_month_bound_budgets.py
 """
 
 import sys, os
+from datetime import datetime
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import app, db
+
+
+def _parse_dt(value):
+    """
+    Raw SQL (used to read the old table below) hands back created_at/
+    updated_at as plain text, not Python datetime objects, since SQLite
+    stores DATETIME as text and only the ORM layer decodes it. Passing
+    that string straight into a DateTime column fails — parse it back
+    into a real datetime, or fall back to now if it's missing/odd.
+    """
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+            try:
+                return datetime.strptime(value, fmt)
+            except ValueError:
+                continue
+    return datetime.utcnow()
 
 
 def run_migration():
@@ -47,36 +68,54 @@ def run_migration():
         inspector = inspect(db.engine)
         tables = inspector.get_table_names()
 
-        if "cashflow_budget" not in tables:
-            print("\ncashflow_budget table not found — creating fresh schema.")
+        # A previous run of this script can be interrupted after renaming
+        # the old table and creating the new one, but before the rows
+        # were copied across (that's exactly what happened here) — resume
+        # from Step 4 in that case, using the backup table, rather than
+        # treating "cashflow_budget already has year/month" as "done".
+        resuming = "cashflow_budget_old_premonth" in tables
+
+        if not resuming:
+            if "cashflow_budget" not in tables:
+                print("\ncashflow_budget table not found — creating fresh schema.")
+                db.create_all()
+                print("✅ Migration complete (no existing data to migrate).")
+                return True
+
+            existing_cols = {c["name"] for c in inspector.get_columns("cashflow_budget")}
+            if "year" in existing_cols and "month" in existing_cols:
+                print("\n✓ cashflow_budget already has year/month columns — nothing to do.")
+                return True
+
+            print("\nStep 1: Backing up existing cashflow_budget rows...")
+            with db.engine.connect() as conn:
+                old_rows = [dict(r._mapping) for r in conn.execute(
+                    text("SELECT * FROM cashflow_budget")).fetchall()]
+            print(f"  Found {len(old_rows)} existing budget row(s).")
+
+            print("\nStep 2: Renaming old table out of the way...")
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE cashflow_budget RENAME TO cashflow_budget_old_premonth"))
+                conn.commit()
+            print("  ✓ cashflow_budget -> cashflow_budget_old_premonth")
+
+            print("\nStep 3: Creating new month-bound cashflow_budget table...")
             db.create_all()
-            print("✅ Migration complete (no existing data to migrate).")
-            return True
-
-        existing_cols = {c["name"] for c in inspector.get_columns("cashflow_budget")}
-        if "year" in existing_cols and "month" in existing_cols:
-            print("\n✓ cashflow_budget already has year/month columns — nothing to do.")
-            return True
-
-        print("\nStep 1: Backing up existing cashflow_budget rows...")
-        with db.engine.connect() as conn:
-            old_rows = [dict(r._mapping) for r in conn.execute(
-                text("SELECT * FROM cashflow_budget")).fetchall()]
-        print(f"  Found {len(old_rows)} existing budget row(s).")
-
-        print("\nStep 2: Renaming old table out of the way...")
-        with db.engine.connect() as conn:
-            conn.execute(text("ALTER TABLE cashflow_budget RENAME TO cashflow_budget_old_premonth"))
-            conn.commit()
-        print("  ✓ cashflow_budget -> cashflow_budget_old_premonth")
-
-        print("\nStep 3: Creating new month-bound cashflow_budget table...")
-        db.create_all()
-        inspector = inspect(db.engine)
-        if "cashflow_budget" not in inspector.get_table_names():
-            print("  ✗ New table was not created. Aborting.")
-            return False
-        print("  ✓ cashflow_budget (new schema)")
+            inspector = inspect(db.engine)
+            if "cashflow_budget" not in inspector.get_table_names():
+                print("  ✗ New table was not created. Aborting.")
+                return False
+            print("  ✓ cashflow_budget (new schema)")
+        else:
+            print("\n↻ Resuming an interrupted migration (found cashflow_budget_old_premonth")
+            print("  left over from a previous attempt — your data is safe in it).")
+            with db.engine.connect() as conn:
+                old_rows = [dict(r._mapping) for r in conn.execute(
+                    text("SELECT * FROM cashflow_budget_old_premonth")).fetchall()]
+            print(f"  Found {len(old_rows)} backed-up budget row(s) to migrate.")
+            with db.engine.connect() as conn:
+                conn.execute(text("DELETE FROM cashflow_budget"))
+                conn.commit()
 
         print("\nStep 4: Migrating rows into the current IST month...")
         year, month = today_ist().year, today_ist().month
@@ -87,7 +126,8 @@ def run_migration():
                 user_id=row["user_id"], category=row["category"],
                 year=year, month=month,
                 monthly_limit=row["monthly_limit"],
-                created_at=row.get("created_at"), updated_at=row.get("updated_at"),
+                created_at=_parse_dt(row.get("created_at")),
+                updated_at=_parse_dt(row.get("updated_at")),
             )
             db.session.add(b)
             migrated += 1

@@ -4,6 +4,7 @@
 {% block content %}
 {% include "cashflow_centre/_confirm_modal.html" %}
 
+<div class="cf-page-wrap">
 <div class="cf-breadcrumb">
   <a href="{{ url_for('cashflow_centre.dashboard', month=month_key) }}">Cashflow</a>
   <span class="cf-breadcrumb-sep">›</span>
@@ -102,8 +103,10 @@
     </div>
   {% endif %}
 </div>
+</div>
 
 <style>
+  .cf-page-wrap { max-width:1100px; margin:0 auto; }
   .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
   .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
   .cf-breadcrumb a:hover { color:var(--accent); }
