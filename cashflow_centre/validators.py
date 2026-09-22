@@ -10,6 +10,7 @@ from datetime import datetime
 from cashflow_centre.models import (
     TransactionType, ExpenseCategory, IncomeCategory, PaymentMethod,
 )
+from wealth.timezone_utils import today_ist
 
 
 def _parse_date(value):
@@ -43,7 +44,7 @@ def validate_transaction(data):
     parsed_date = _parse_date(date_str)
     if not parsed_date:
         errors.append("Please enter a valid date.")
-    elif parsed_date > datetime.utcnow().date():
+    elif parsed_date > today_ist():
         errors.append("Transaction date cannot be in the future.")
 
     amount_raw = (data.get("amount") or "").strip()

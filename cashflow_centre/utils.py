@@ -10,6 +10,8 @@ per-module utils.py convention.
 import calendar
 from datetime import date, datetime as _dt
 
+from wealth.timezone_utils import today_ist
+
 
 # ── Display Helpers ───────────────────────────────────────────────────────────
 
@@ -45,8 +47,8 @@ def format_date(d, fmt="%d %b %Y"):
 # ── Month helpers ─────────────────────────────────────────────────────────────
 
 def current_month_key():
-    """'YYYY-MM' for the current calendar month."""
-    return date.today().strftime("%Y-%m")
+    """'YYYY-MM' for the current calendar month, IST-aware."""
+    return today_ist().strftime("%Y-%m")
 
 
 def parse_month_key(month_key):
@@ -84,3 +86,38 @@ def adjacent_month_key(year, month, delta):
     total = year * 12 + (month - 1) + delta
     new_year, new_month = divmod(total, 12)
     return f"{new_year:04d}-{new_month + 1:02d}"
+
+
+# ── Date-range presets ────────────────────────────────────────────────────────
+
+def last_n_months_bounds(anchor_date, n):
+    """
+    (first_day, last_day) covering the current calendar month and the
+    (n-1) months before it, e.g. n=3 on 22 Sep 2026 -> (1 Jul 2026, 30 Sep 2026).
+    """
+    end_year, end_month = anchor_date.year, anchor_date.month
+    start_key = adjacent_month_key(end_year, end_month, -(n - 1))
+    start_year, start_month = parse_month_key(start_key)
+    first_day, _ = month_bounds(start_year, start_month)
+    _, last_day = month_bounds(end_year, end_month)
+    return first_day, last_day
+
+
+def fy_bounds(anchor_date):
+    """
+    (first_day, last_day) of the Indian financial year (1 Apr - 31 Mar)
+    containing `anchor_date`.
+    """
+    if anchor_date.month >= 4:
+        start_year = anchor_date.year
+    else:
+        start_year = anchor_date.year - 1
+    first_day = date(start_year, 4, 1)
+    last_day = date(start_year + 1, 3, 31)
+    return first_day, last_day
+
+
+def fy_label(anchor_date):
+    """'FY 2026-27' style label for the financial year containing `anchor_date`."""
+    first_day, _ = fy_bounds(anchor_date)
+    return f"FY {first_day.year}-{str(first_day.year + 1)[-2:]}"

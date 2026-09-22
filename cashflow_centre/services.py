@@ -8,12 +8,26 @@ Every query is filtered by user_id (IDOR check).
 from datetime import datetime
 
 from cashflow_centre.models import Transaction, Budget, TransactionType
-from cashflow_centre.utils import month_bounds
+from cashflow_centre.utils import month_bounds, adjacent_month_key, parse_month_key
 from cashflow_centre.validators import validate_transaction, validate_budget
 
 
 def _parse_date(value):
     return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _commit(db):
+    """
+    Commit the current transaction, rolling back cleanly on any DB
+    exception so a failed write never leaves a partial row behind.
+    Returns an error string on failure, None on success.
+    """
+    try:
+        db.session.commit()
+        return None
+    except Exception:
+        db.session.rollback()
+        return "Something went wrong saving your changes. Please try again."
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────
@@ -34,7 +48,9 @@ def create_transaction(db, user_id, data):
         description    = (data.get("description") or "").strip() or None,
     )
     db.session.add(txn)
-    db.session.commit()
+    error = _commit(db)
+    if error:
+        return None, error
     return txn, None
 
 
@@ -52,7 +68,9 @@ def update_transaction(db, txn, user_id, data):
     txn.amount         = float(data["amount"])
     txn.payment_method = (data.get("payment_method") or "").strip() or None
     txn.description    = (data.get("description") or "").strip() or None
-    db.session.commit()
+    error = _commit(db)
+    if error:
+        return None, error
     return txn, None
 
 
@@ -60,17 +78,24 @@ def delete_transaction(db, txn, user_id):
     if txn.user_id != user_id:
         return False, "You do not have permission to delete this transaction."
     db.session.delete(txn)
-    db.session.commit()
+    error = _commit(db)
+    if error:
+        return False, error
     return True, None
 
 
-def get_transactions(user_id, year=None, month=None, category=None, txn_type=None):
+def get_transactions(user_id, year=None, month=None, category=None, txn_type=None,
+                      from_date=None, to_date=None):
     """
-    Transactions for a user, optionally filtered by month (year+month
-    both given), category, and/or type. Ordered newest-first.
+    Transactions for a user, optionally filtered by an explicit date
+    range (from_date/to_date, both given — takes priority) or by a
+    single month (year+month, both given), plus category and/or type.
+    Ordered newest-first.
     """
     query = Transaction.query.filter_by(user_id=user_id)
-    if year and month:
+    if from_date and to_date:
+        query = query.filter(Transaction.date >= from_date, Transaction.date <= to_date)
+    elif year and month:
         first_day, last_day = month_bounds(year, month)
         query = query.filter(Transaction.date >= first_day, Transaction.date <= last_day)
     if category:
@@ -78,6 +103,45 @@ def get_transactions(user_id, year=None, month=None, category=None, txn_type=Non
     if txn_type:
         query = query.filter_by(type=txn_type)
     return query.order_by(Transaction.date.desc(), Transaction.id.desc()).all()
+
+
+def get_quick_add_defaults(user_id):
+    """
+    Smart defaults for the dashboard's Quick Add modal, derived purely
+    from the user's own transaction history (no extra storage needed):
+      - last_payment_method: payment method on their most recent
+        transaction that set one.
+      - frequent_expense_categories / frequent_income_categories: the
+        4 most-used categories of each type in the last 90 days, most
+        frequent first, so common entries are one click away.
+    """
+    last_txn = Transaction.query.filter_by(user_id=user_id) \
+        .filter(Transaction.payment_method.isnot(None)) \
+        .order_by(Transaction.date.desc(), Transaction.id.desc()).first()
+    last_payment_method = last_txn.payment_method if last_txn else None
+
+    cutoff = today_ist_minus_days(90)
+    recent = Transaction.query.filter_by(user_id=user_id) \
+        .filter(Transaction.date >= cutoff).all()
+
+    def top_categories(txn_type, limit=4):
+        counts = {}
+        for t in recent:
+            if t.type == txn_type:
+                counts[t.category] = counts.get(t.category, 0) + 1
+        return [c for c, _ in sorted(counts.items(), key=lambda kv: kv[1], reverse=True)][:limit]
+
+    return {
+        "last_payment_method": last_payment_method,
+        "frequent_expense_categories": top_categories(TransactionType.EXPENSE),
+        "frequent_income_categories": top_categories(TransactionType.INCOME),
+    }
+
+
+def today_ist_minus_days(days):
+    from wealth.timezone_utils import today_ist
+    from datetime import timedelta
+    return today_ist() - timedelta(days=days)
 
 
 def get_month_summary(user_id, year, month):
@@ -109,8 +173,8 @@ def get_month_summary(user_id, year, month):
 
 # ── Budgets ───────────────────────────────────────────────────────────────────
 
-def upsert_budget(db, user_id, data):
-    """Create or update the budget for a category (one row per category)."""
+def upsert_budget(db, user_id, year, month, data):
+    """Create or update the budget for a category, scoped to one month."""
     errors = validate_budget(data)
     if errors:
         return None, errors[0]
@@ -118,13 +182,17 @@ def upsert_budget(db, user_id, data):
     category = data["category"].strip()
     limit    = float(data["monthly_limit"])
 
-    budget = Budget.query.filter_by(user_id=user_id, category=category).first()
+    budget = Budget.query.filter_by(user_id=user_id, category=category,
+                                     year=year, month=month).first()
     if budget:
         budget.monthly_limit = limit
     else:
-        budget = Budget(user_id=user_id, category=category, monthly_limit=limit)
+        budget = Budget(user_id=user_id, category=category, year=year, month=month,
+                         monthly_limit=limit)
         db.session.add(budget)
-    db.session.commit()
+    error = _commit(db)
+    if error:
+        return None, error
     return budget, None
 
 
@@ -132,19 +200,22 @@ def delete_budget(db, budget, user_id):
     if budget.user_id != user_id:
         return False, "You do not have permission to delete this budget."
     db.session.delete(budget)
-    db.session.commit()
+    error = _commit(db)
+    if error:
+        return False, error
     return True, None
 
 
 def get_budgets_with_progress(user_id, year, month):
     """
-    One row per budget the user has set, with this month's actual
-    spend against it:
+    One row per budget the user has set FOR THIS MONTH, with this
+    month's actual spend against it:
     [{category, monthly_limit, spent, remaining, pct, status}, ...]
     status: 'ok' (<80%), 'warning' (80-100%), 'over' (>100%)
     Sorted by pct descending (closest to/over budget first).
     """
-    budgets = Budget.query.filter_by(user_id=user_id).order_by(Budget.category).all()
+    budgets = Budget.query.filter_by(user_id=user_id, year=year, month=month) \
+                          .order_by(Budget.category).all()
     summary = get_month_summary(user_id, year, month)
     spend_by_category = summary["by_category"]
 
@@ -167,6 +238,68 @@ def get_budgets_with_progress(user_id, year, month):
     return rows
 
 
-def budgeted_categories(user_id):
-    """Category names the user already has a budget for (to grey out in the form)."""
-    return {b.category for b in Budget.query.filter_by(user_id=user_id).all()}
+def budgeted_categories(user_id, year, month):
+    """Category names the user already has a budget for THIS month (to grey out in the form)."""
+    return {b.category for b in Budget.query.filter_by(user_id=user_id, year=year, month=month).all()}
+
+
+def copy_last_month_budgets(db, user_id, year, month):
+    """
+    Copy every budget from the previous month into (year, month),
+    skipping categories that already have a budget this month.
+    Returns (count_copied, error).
+    """
+    prev_year, prev_month = parse_month_key(adjacent_month_key(year, month, -1))
+    prev_budgets = Budget.query.filter_by(user_id=user_id, year=prev_year, month=prev_month).all()
+    if not prev_budgets:
+        return 0, "No budgets found for last month to copy."
+
+    already = budgeted_categories(user_id, year, month)
+    copied = 0
+    for b in prev_budgets:
+        if b.category in already:
+            continue
+        db.session.add(Budget(user_id=user_id, category=b.category, year=year, month=month,
+                               monthly_limit=b.monthly_limit))
+        copied += 1
+
+    if copied == 0:
+        return 0, "Every category from last month is already budgeted this month."
+
+    error = _commit(db)
+    if error:
+        return 0, error
+    return copied, None
+
+
+def apply_budget_to_future_months(db, budget, user_id, num_months=12):
+    """
+    Carry one budget's limit forward into the next `num_months`
+    months, creating a row for any month that doesn't already have a
+    budget for that category (existing future budgets for that
+    category are left untouched, never silently overwritten).
+    Returns (count_applied, error).
+    """
+    if budget.user_id != user_id:
+        return 0, "You do not have permission to modify this budget."
+
+    year, month = budget.year, budget.month
+    applied = 0
+    for i in range(1, num_months + 1):
+        target_year, target_month = parse_month_key(adjacent_month_key(year, month, i))
+        existing = Budget.query.filter_by(user_id=user_id, category=budget.category,
+                                           year=target_year, month=target_month).first()
+        if existing:
+            continue
+        db.session.add(Budget(user_id=user_id, category=budget.category,
+                               year=target_year, month=target_month,
+                               monthly_limit=budget.monthly_limit))
+        applied += 1
+
+    if applied == 0:
+        return 0, "Every future month already has a budget for this category."
+
+    error = _commit(db)
+    if error:
+        return 0, error
+    return applied, None
