@@ -3,6 +3,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, c
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_migrate import Migrate
 import bcrypt, pdfplumber, io, re, os, secrets, csv, yfinance as yf
 import casparser
 from datetime import datetime as dt, timedelta, date as _date_cls
@@ -73,7 +74,34 @@ def _get_or_create_secret_key():
     return key
 
 app.config["SECRET_KEY"] = _get_or_create_secret_key()
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///mywealthlens.db"
+
+
+def _resolve_database_uri():
+    """
+    Postgres/Alembic migration (Sep 2026): DATABASE_URL, when set,
+    points this app at Postgres instead of the local SQLite file —
+    the first step of the agreed production-readiness plan (Postgres
+    + Alembic first, since encryption-aware schema changes are much
+    safer to design and roll out with real migrations than with the
+    plain "check state, create_all()" scripts SQLite got by with).
+
+    Unset (the default on Mohan's own machine today), this resolves
+    to the exact same sqlite:///mywealthlens.db as before — nothing
+    changes for him until he deliberately sets DATABASE_URL himself.
+
+    Some hosts (Heroku and a few others) still hand out a
+    "postgres://" URL; SQLAlchemy 1.4+ requires "postgresql://" for
+    the same thing, so that one substitution is normalized here.
+    """
+    url = os.environ.get("DATABASE_URL", "").strip()
+    if not url:
+        return "sqlite:///mywealthlens.db"
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://"):]
+    return url
+
+
+app.config["SQLALCHEMY_DATABASE_URI"] = _resolve_database_uri()
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25MB upload limit
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
@@ -89,6 +117,13 @@ app.config["WTF_CSRF_TIME_LIMIT"] = 3600
 # already used for HOST/PORT at the bottom of this file).
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get('MWL_HTTPS', '0') == '1'
 db.init_app(app)
+# Flask-Migrate/Alembic — the actual schema-change tool going forward on
+# Postgres. `migrations/` (created by `flask db init`, run once) holds the
+# version history; `flask db migrate` autogenerates a new revision from
+# model changes, `flask db upgrade` applies pending revisions. This does
+# NOT replace db.create_all() below for SQLite users who never set
+# DATABASE_URL — that path is untouched and keeps working exactly as before.
+migrate = Migrate(app, db)
 
 csrf = CSRFProtect(app)
 
@@ -130,7 +165,14 @@ def refresh_session():
 
 
 with app.app_context():
-    db.create_all()
+    # SQLite (the default, unset-DATABASE_URL path): unchanged behavior —
+    # db.create_all() only fills in tables that don't exist yet, matching
+    # every module's own "new table needs no migration, just a restart"
+    # convention. On Postgres, schema is managed entirely through Alembic
+    # (`flask db upgrade`) from here on — create_all() is skipped there so
+    # it can never race ahead of or diverge from the migration history.
+    if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
+        db.create_all()
 
 def safe_float(val, default=0.0):
     try:
