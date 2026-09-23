@@ -77,6 +77,10 @@ def dashboard():
     recent  = summary["transactions"][:8]
     is_current_month = month_key == current_month_key()
     quick_add = services.get_quick_add_defaults(current_user.id)
+    # No transaction history yet to learn a "last used" payment method
+    # from — fall back to UPI, the most common day-to-day payment
+    # method for Indian users, rather than leaving it unset.
+    quick_add["last_payment_method"] = quick_add["last_payment_method"] or PaymentMethod.UPI
 
     self_url = url_for("cashflow_centre.dashboard", month=month_key)
 
@@ -192,11 +196,18 @@ def add_transaction():
         return redirect(return_to)
 
     return_to = _safe_next(default_return)
+    # Default payment method: the user's own last-used one (learned per-
+    # user, same logic Quick Add uses), falling back to UPI — the most
+    # common day-to-day payment method for Indian users — rather than
+    # leaving new transactions with no payment method pre-filled.
+    default_payment_method = (services.get_quick_add_defaults(current_user.id)["last_payment_method"]
+                               or PaymentMethod.UPI)
     return render_template(
         "cashflow_centre/transaction_form.html", is_edit=False, txn=None,
         expense_categories=ExpenseCategory.ALL, income_categories=IncomeCategory.ALL,
         payment_methods=PaymentMethod.ALL,
-        values={"date": today_ist().strftime("%Y-%m-%d"), "type": TransactionType.EXPENSE},
+        values={"date": today_ist().strftime("%Y-%m-%d"), "type": TransactionType.EXPENSE,
+                "payment_method": default_payment_method},
         today_ist=today_ist().strftime("%Y-%m-%d"), next=return_to,
     )
 
