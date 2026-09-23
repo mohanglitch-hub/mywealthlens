@@ -79,3 +79,44 @@ def validate_budget(data):
         errors.append("Please enter a valid monthly limit.")
 
     return errors
+
+
+def validate_recurring(data):
+    """data: flat dict with keys name, type, category, amount, day_of_month."""
+    errors = []
+
+    name = (data.get("name") or "").strip()
+    if not name:
+        errors.append("Please enter a name for this recurring payment.")
+    elif len(name) > 100:
+        errors.append("Name must be under 100 characters.")
+
+    txn_type = (data.get("type") or TransactionType.EXPENSE).strip()
+    if txn_type not in TransactionType.ALL:
+        errors.append("Please select whether this is income or an expense.")
+        txn_type = None
+
+    category = (data.get("category") or "").strip()
+    valid_categories = (ExpenseCategory.ALL if txn_type == TransactionType.EXPENSE
+                        else IncomeCategory.ALL if txn_type == TransactionType.INCOME
+                        else [])
+    if txn_type and category not in valid_categories:
+        errors.append("Please select a valid category.")
+
+    amount_raw = (data.get("amount") or "").strip()
+    try:
+        amount = float(amount_raw)
+        if amount <= 0:
+            errors.append("Amount must be greater than zero.")
+    except ValueError:
+        errors.append("Please enter a valid amount.")
+
+    day_raw = (data.get("day_of_month") or "").strip()
+    try:
+        day = int(day_raw)
+        if not (1 <= day <= 31):
+            errors.append("Day of month must be between 1 and 31.")
+    except ValueError:
+        errors.append("Please enter a valid day of month.")
+
+    return errors

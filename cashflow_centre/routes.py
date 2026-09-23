@@ -12,12 +12,13 @@ from flask_login import login_required, current_user
 
 from cashflow_centre import cashflow_bp
 from cashflow_centre.models import (
-    Transaction, Budget, TransactionType, ExpenseCategory, IncomeCategory, PaymentMethod,
+    Transaction, Budget, RecurringPayment, TransactionType, ExpenseCategory, IncomeCategory, PaymentMethod,
 )
 from cashflow_centre import services, csv_import
 from cashflow_centre.utils import (
     format_inr, format_date, current_month_key, parse_month_key,
     month_label, adjacent_month_key, last_n_months_bounds, fy_bounds, fy_label,
+    category_color, CATEGORY_COLORS,
 )
 from wealth.timezone_utils import today_ist
 
@@ -86,6 +87,18 @@ def dashboard():
 
     year_trend = services.get_year_trend(current_user.id, year)
 
+    # ── P2 Insights ──
+    savings_rate   = services.get_savings_rate(summary["total_income"], summary["total_expense"])
+    safe_to_spend  = services.get_safe_to_spend(current_user.id, year, month)
+    prev_month_cmp = services.get_prev_month_comparison(current_user.id, year, month,
+                                                          summary["total_income"], summary["total_expense"])
+    top_expenses   = services.get_top_expenses(current_user.id, year, month)
+    unbudgeted     = services.get_unbudgeted_categories(current_user.id, year, month)
+    avg_monthly_expense = services.get_average_monthly_expense(current_user.id, today_ist())
+    forecast       = services.get_month_forecast(current_user.id, year, month,
+                                                    summary["total_income"], summary["total_expense"])
+    upcoming = services.get_upcoming_recurring(current_user.id, days=30)
+
     return render_template(
         "cashflow_centre/dashboard.html",
         summary=summary, budgets=budgets, recent=recent,
@@ -94,10 +107,15 @@ def dashboard():
         next_month=adjacent_month_key(year, month, 1),
         is_current_month=is_current_month, self_url=self_url,
         quick_add=quick_add, year_trend=year_trend, trend_year=year,
+        savings_rate=savings_rate, safe_to_spend=safe_to_spend,
+        prev_month_cmp=prev_month_cmp, top_expenses=top_expenses,
+        unbudgeted=unbudgeted, avg_monthly_expense=avg_monthly_expense,
+        forecast=forecast, upcoming=upcoming,
         expense_categories=ExpenseCategory.ALL, income_categories=IncomeCategory.ALL,
         payment_methods=PaymentMethod.ALL,
         today_ist=today_ist().strftime("%Y-%m-%d"),
-        format_inr=format_inr, format_date=format_date,
+        format_inr=format_inr, format_date=format_date, category_color=category_color,
+        category_colors=CATEGORY_COLORS,
     )
 
 
@@ -452,3 +470,63 @@ def delete_budget(budget_id):
     success, error = services.delete_budget(_db(), budget, current_user.id)
     flash(error, "error") if error else flash("Budget removed.", "success")
     return redirect(url_for("cashflow_centre.budgets", month=month_key))
+
+
+# ── Recurring payments (SIP/EMI/subscriptions) ──────────────────────────────────
+
+def _get_recurring_or_404(rp_id):
+    from flask import abort
+    rp = RecurringPayment.query.filter_by(id=rp_id, user_id=current_user.id).first()
+    if not rp:
+        abort(404)
+    return rp
+
+
+@cashflow_bp.route("/recurring")
+@login_required
+def recurring():
+    items = services.get_recurring_payments(current_user.id)
+    return render_template(
+        "cashflow_centre/recurring.html",
+        items=items,
+        expense_categories=ExpenseCategory.ALL, income_categories=IncomeCategory.ALL,
+        format_inr=format_inr,
+    )
+
+
+@cashflow_bp.route("/recurring/add", methods=["POST"])
+@login_required
+def add_recurring():
+    rp, error = services.create_recurring(_db(), current_user.id, request.form)
+    flash(error, "error") if error else flash(f"Added {rp.name}.", "success")
+    return redirect(url_for("cashflow_centre.recurring"))
+
+
+@cashflow_bp.route("/recurring/<int:rp_id>/edit", methods=["POST"])
+@login_required
+def edit_recurring(rp_id):
+    rp = _get_recurring_or_404(rp_id)
+    rp, error = services.update_recurring(_db(), rp, current_user.id, request.form)
+    flash(error, "error") if error else flash("Recurring payment updated.", "success")
+    return redirect(url_for("cashflow_centre.recurring"))
+
+
+@cashflow_bp.route("/recurring/<int:rp_id>/toggle", methods=["POST"])
+@login_required
+def toggle_recurring(rp_id):
+    rp = _get_recurring_or_404(rp_id)
+    success, error = services.toggle_recurring_active(_db(), rp, current_user.id)
+    if error:
+        flash(error, "error")
+    else:
+        flash(("Paused " if not rp.active else "Resumed ") + rp.name + ".", "success")
+    return redirect(url_for("cashflow_centre.recurring"))
+
+
+@cashflow_bp.route("/recurring/<int:rp_id>/delete", methods=["POST"])
+@login_required
+def delete_recurring(rp_id):
+    rp = _get_recurring_or_404(rp_id)
+    success, error = services.delete_recurring(_db(), rp, current_user.id)
+    flash(error, "error") if error else flash("Recurring payment removed.", "success")
+    return redirect(url_for("cashflow_centre.recurring"))

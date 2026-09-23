@@ -7,9 +7,9 @@ Every query is filtered by user_id (IDOR check).
 """
 from datetime import datetime
 
-from cashflow_centre.models import Transaction, Budget, TransactionType
-from cashflow_centre.utils import month_bounds, adjacent_month_key, parse_month_key
-from cashflow_centre.validators import validate_transaction, validate_budget
+from cashflow_centre.models import Transaction, Budget, RecurringPayment, TransactionType
+from cashflow_centre.utils import month_bounds, adjacent_month_key, parse_month_key, month_label
+from cashflow_centre.validators import validate_transaction, validate_budget, validate_recurring
 
 
 def _parse_date(value):
@@ -243,6 +243,151 @@ def get_year_trend(user_id, year):
     return {"labels": labels, "income": income, "expense": expense, "net": net}
 
 
+# ── P2 Insights ───────────────────────────────────────────────────────────────
+
+def get_savings_rate(total_income, total_expense):
+    """
+    (income - expense) / income * 100. Returns None (not 0) when there
+    is no income yet this month — a savings rate is meaningless without
+    a denominator, and showing 0% would misleadingly read as "saved
+    nothing" rather than "no income recorded".
+    """
+    if not total_income:
+        return None
+    return (total_income - total_expense) / total_income * 100
+
+
+def get_budget_totals(user_id, year, month):
+    """Total budgeted and total spent-against-budget, across every category with a budget set this month."""
+    rows = get_budgets_with_progress(user_id, year, month)
+    total_budgeted = sum(r["monthly_limit"] for r in rows)
+    total_spent = sum(r["spent"] for r in rows)
+    return total_budgeted, total_spent
+
+
+def get_safe_to_spend(user_id, year, month):
+    """
+    Budget remaining in ₹ and a safe-to-spend-per-day figure for the
+    rest of the month, based on total budgeted vs total spent across
+    every budgeted category. Returns None when no budgets are set at
+    all this month — there is nothing to be "safe" against yet.
+    """
+    from wealth.timezone_utils import today_ist
+
+    total_budgeted, total_spent = get_budget_totals(user_id, year, month)
+    if total_budgeted == 0:
+        return None
+
+    remaining = total_budgeted - total_spent
+    today = today_ist()
+    _, last_day = month_bounds(year, month)
+    if today.year == year and today.month == month:
+        days_left = max((last_day - today).days + 1, 1)
+    else:
+        # A past or future month has no "days left" concept — only the
+        # current month gets a per-day figure (guarded in the template).
+        days_left = None
+
+    return {
+        "total_budgeted": total_budgeted,
+        "total_spent": total_spent,
+        "remaining": remaining,
+        "days_left": days_left,
+        "per_day": (remaining / days_left) if (days_left and remaining > 0) else 0,
+    }
+
+
+def get_prev_month_comparison(user_id, year, month, total_income, total_expense):
+    """
+    This month's income/expense vs the previous month, with % change.
+    pct_change is None when the previous month had zero in that
+    category — a percentage off a zero base is undefined, not 0%.
+    """
+    prev_year, prev_month = parse_month_key(adjacent_month_key(year, month, -1))
+    prev_summary = get_month_summary(user_id, prev_year, prev_month)
+
+    def pct_change(curr, prev):
+        if not prev:
+            return None
+        return (curr - prev) / prev * 100
+
+    return {
+        "prev_month_label": month_label(prev_year, prev_month),
+        "prev_income":  prev_summary["total_income"],
+        "prev_expense": prev_summary["total_expense"],
+        "prev_net":     prev_summary["net"],
+        "income_pct_change":  pct_change(total_income, prev_summary["total_income"]),
+        "expense_pct_change": pct_change(total_expense, prev_summary["total_expense"]),
+    }
+
+
+def get_top_expenses(user_id, year, month, limit=5):
+    """The `limit` largest individual expense transactions this month, largest first."""
+    txns = get_transactions(user_id, year=year, month=month, txn_type=TransactionType.EXPENSE)
+    return sorted(txns, key=lambda t: t.amount, reverse=True)[:limit]
+
+
+def get_unbudgeted_categories(user_id, year, month):
+    """
+    Expense categories with spend this month but no budget set —
+    [(category, amount), ...], largest spend first — so the user
+    notices where money went with nothing tracking it.
+    """
+    summary = get_month_summary(user_id, year, month)
+    budgeted = budgeted_categories(user_id, year, month)
+    return [(cat, amt) for cat, amt in summary["by_category"].items() if cat not in budgeted]
+
+
+def get_average_monthly_expense(user_id, anchor_date, n=6):
+    """
+    Average total expense per month over the `n` months up to and
+    including anchor_date's month, counting only months that actually
+    have any transactions — so a new account with 1 month of data
+    isn't dragged toward zero by empty history it hasn't lived through
+    yet.
+    """
+    totals = []
+    year, month = anchor_date.year, anchor_date.month
+    for i in range(n):
+        y, m = parse_month_key(adjacent_month_key(year, month, -i))
+        s = get_month_summary(user_id, y, m)
+        if s["total_income"] or s["total_expense"]:
+            totals.append(s["total_expense"])
+    if not totals:
+        return None
+    return sum(totals) / len(totals)
+
+
+def get_month_forecast(user_id, year, month, total_income, total_expense):
+    """
+    Straight-line projection of this month's expense/net to month-end,
+    based on the daily average spend so far. Only meaningful for the
+    CURRENT month — a past month is already final and a future month
+    has no data yet — so this returns None for any other month; callers
+    should only render the forecast card when is_current_month is true.
+    """
+    from wealth.timezone_utils import today_ist
+
+    today = today_ist()
+    if today.year != year or today.month != month:
+        return None
+
+    _, last_day = month_bounds(year, month)
+    days_elapsed = today.day
+    days_in_month = last_day.day
+    if days_elapsed == 0:
+        return None
+
+    daily_rate = total_expense / days_elapsed
+    projected_expense = daily_rate * days_in_month
+    return {
+        "days_elapsed": days_elapsed,
+        "days_in_month": days_in_month,
+        "projected_expense": projected_expense,
+        "projected_net": total_income - projected_expense,
+    }
+
+
 # ── Budgets ───────────────────────────────────────────────────────────────────
 
 def upsert_budget(db, user_id, year, month, data):
@@ -375,3 +520,117 @@ def apply_budget_to_future_months(db, budget, user_id, num_months=12):
     if error:
         return 0, error
     return applied, None
+
+
+# ── Recurring payments (SIP/EMI/subscriptions) ─────────────────────────────────
+
+def create_recurring(db, user_id, data):
+    """Returns (recurring_payment, error). On error, nothing is written."""
+    errors = validate_recurring(data)
+    if errors:
+        return None, errors[0]
+
+    rp = RecurringPayment(
+        user_id      = user_id,
+        name         = data["name"].strip(),
+        type         = (data.get("type") or TransactionType.EXPENSE).strip(),
+        category     = data["category"].strip(),
+        amount       = float(data["amount"]),
+        day_of_month = int(data["day_of_month"]),
+    )
+    db.session.add(rp)
+    error = _commit(db)
+    if error:
+        return None, error
+    return rp, None
+
+
+def update_recurring(db, rp, user_id, data):
+    if rp.user_id != user_id:
+        return None, "You do not have permission to edit this recurring payment."
+
+    errors = validate_recurring(data)
+    if errors:
+        return None, errors[0]
+
+    rp.name         = data["name"].strip()
+    rp.type         = (data.get("type") or TransactionType.EXPENSE).strip()
+    rp.category     = data["category"].strip()
+    rp.amount       = float(data["amount"])
+    rp.day_of_month = int(data["day_of_month"])
+    error = _commit(db)
+    if error:
+        return None, error
+    return rp, None
+
+
+def toggle_recurring_active(db, rp, user_id):
+    if rp.user_id != user_id:
+        return False, "You do not have permission to modify this recurring payment."
+    rp.active = not rp.active
+    error = _commit(db)
+    if error:
+        return False, error
+    return True, None
+
+
+def delete_recurring(db, rp, user_id):
+    if rp.user_id != user_id:
+        return False, "You do not have permission to delete this recurring payment."
+    db.session.delete(rp)
+    error = _commit(db)
+    if error:
+        return False, error
+    return True, None
+
+
+def get_recurring_payments(user_id):
+    """All recurring payments for a user, active first, then by day of month."""
+    return RecurringPayment.query.filter_by(user_id=user_id) \
+        .order_by(RecurringPayment.active.desc(), RecurringPayment.day_of_month).all()
+
+
+def _next_occurrence(rp, from_date):
+    """
+    The next date on/after `from_date` that `rp` falls due, clamping
+    day_of_month to the last day of a shorter month (e.g. day 31 lands
+    on 30 April in a 30-day month, not an invalid date).
+    """
+    import calendar
+    from datetime import date
+
+    def clamped_date(year, month, day):
+        last_day = calendar.monthrange(year, month)[1]
+        return date(year, month, min(day, last_day))
+
+    candidate = clamped_date(from_date.year, from_date.month, rp.day_of_month)
+    if candidate < from_date:
+        y, m = parse_month_key(adjacent_month_key(from_date.year, from_date.month, 1))
+        candidate = clamped_date(y, m, rp.day_of_month)
+    return candidate
+
+
+def get_upcoming_recurring(user_id, days=30):
+    """
+    Active recurring payments due in the next `days` days (inclusive of
+    today), soonest first — the "next 30 days" calendar view on the
+    dashboard.
+    Returns [{id, name, type, category, amount, due_date, days_away}, ...]
+    """
+    from wealth.timezone_utils import today_ist
+    from datetime import timedelta
+
+    today = today_ist()
+    window_end = today + timedelta(days=days)
+
+    upcoming = []
+    for rp in RecurringPayment.query.filter_by(user_id=user_id, active=True).all():
+        due_date = _next_occurrence(rp, today)
+        if due_date <= window_end:
+            upcoming.append({
+                "id": rp.id, "name": rp.name, "type": rp.type, "category": rp.category,
+                "amount": rp.amount, "due_date": due_date,
+                "days_away": (due_date - today).days,
+            })
+    upcoming.sort(key=lambda r: r["due_date"])
+    return upcoming

@@ -193,16 +193,128 @@ def _test_year_trend(app, client):
     check("dashboard renders the trend card heading", "Trend — Income vs Expenses" in html)
 
 
+def _test_p2_insights(app, client):
+    """
+    P2 Insights, stages 1-5: savings rate, safe-to-spend, previous-month
+    comparison, top-5 expenses, unbudgeted categories, average monthly
+    spending, and the month-end forecast. Runs after
+    _test_transactions_and_dates (₹55,000 Salary + ₹1,250 Food & Dining
+    on 2026-09) and _test_month_bound_budgets (a ₹1,500 Transport budget,
+    0 spent against it) have already set up September's data.
+    """
+    from cashflow_centre import services
+
+    with client.session_transaction() as sess:
+        user_id = sess.get("_user_id")
+    uid = int(user_id)
+
+    with app.app_context():
+        savings_rate = services.get_savings_rate(55000, 1250)
+        check("savings rate is (income-expense)/income", round(savings_rate, 1) == round((55000 - 1250) / 55000 * 100, 1))
+        check("savings rate is None with zero income", services.get_savings_rate(0, 500) is None)
+
+        safe_to_spend = services.get_safe_to_spend(uid, 2026, 9)
+        check("safe-to-spend reflects the ₹1,500 Transport budget with 0 spent",
+              safe_to_spend is not None and safe_to_spend["total_budgeted"] == 1500 and safe_to_spend["remaining"] == 1500)
+
+        cmp = services.get_prev_month_comparison(uid, 2026, 9, 55000, 1250)
+        check("previous month (August) had no data, so pct_change is None", cmp["income_pct_change"] is None)
+        check("previous month comparison carries August's label", "August" in cmp["prev_month_label"])
+
+        top = services.get_top_expenses(uid, 2026, 9)
+        check("top expenses includes the ₹1,250 Food & Dining transaction",
+              len(top) == 1 and top[0].amount == 1250 and top[0].category == "Food & Dining")
+
+        unbudgeted = services.get_unbudgeted_categories(uid, 2026, 9)
+        check("Food & Dining is unbudgeted (only Transport has a budget, and it has no spend)",
+              unbudgeted == [("Food & Dining", 1250)])
+
+        avg = services.get_average_monthly_expense(uid, __import__("datetime").date(2026, 9, 23))
+        check("average monthly expense over 1 month of history is that month's expense", avg == 1250)
+
+        forecast = services.get_month_forecast(uid, 2026, 9, 55000, 1250)
+        check("forecast is only produced for the current month", forecast is not None)
+        if forecast:
+            check("forecast projects a full month from the daily rate so far",
+                  forecast["projected_expense"] >= 1250 and forecast["days_in_month"] == 30)
+        check("forecast is None for a month that isn't the current one",
+              services.get_month_forecast(uid, 2026, 1, 1000, 500) is None)
+
+    r = client.get("/cashflow/?month=2026-09")
+    html = r.get_data(as_text=True)
+    check("dashboard shows the Savings Rate card", "Savings Rate" in html)
+    check("dashboard shows the Safe to Spend card", "Safe to Spend" in html)
+    check("dashboard shows the Forecast to Month-End card", "Forecast to Month-End" in html)
+    check("dashboard renders the category doughnut chart canvas", 'id="cfCategoryChart"' in html)
+    check("dashboard shows Top 5 Expenses", "Top 5 Expenses" in html)
+    check("dashboard flags an unbudgeted category with spend", "no budget set" in html)
+    check("dashboard shows average monthly spending", "Average monthly spending" in html)
+
+
+def _test_recurring_payments(client):
+    """P2 Insights, stage 6: recurring payments and the 30-day upcoming widget."""
+    r = client.get("/cashflow/recurring")
+    check("recurring payments page loads", r.status_code == 200)
+    html = r.get_data(as_text=True)
+    csrf = get_csrf(html)
+
+    from wealth.timezone_utils import today_ist
+    due_day = today_ist().day
+
+    r = client.post("/cashflow/recurring/add", data={
+        "csrf_token": csrf, "name": "Netflix", "type": "expense",
+        "category": "Entertainment", "amount": "649", "day_of_month": str(due_day),
+    }, follow_redirects=True)
+    check("recurring payment created", "Added Netflix." in r.get_data(as_text=True))
+
+    r = client.post("/cashflow/recurring/add", data={
+        "csrf_token": csrf, "name": "", "type": "expense",
+        "category": "Entertainment", "amount": "649", "day_of_month": "5",
+    }, follow_redirects=True)
+    check("recurring payment without a name is rejected", "Please enter a name" in r.get_data(as_text=True))
+
+    r = client.get("/cashflow/recurring")
+    html = r.get_data(as_text=True)
+    check("Netflix appears in the recurring payments list", "Netflix" in html and "Entertainment" in html)
+    m = re.search(r'/cashflow/recurring/(\d+)/toggle', html)
+    check("found a recurring payment id to toggle", bool(m))
+    rp_id = m.group(1) if m else None
+
+    r = client.get("/cashflow/")
+    html = r.get_data(as_text=True)
+    check("Netflix (due today, within 30 days) shows in the dashboard's upcoming widget", "Netflix" in html)
+
+    if rp_id:
+        r = client.post(f"/cashflow/recurring/{rp_id}/toggle", data={"csrf_token": csrf}, follow_redirects=True)
+        check("pausing succeeds", "Paused Netflix." in r.get_data(as_text=True))
+
+        r = client.get("/cashflow/")
+        html = r.get_data(as_text=True)
+        check("a paused recurring payment no longer shows in the upcoming widget",
+              "Netflix" not in html or "No recurring payments due" in html)
+
+        r = client.post(f"/cashflow/recurring/{rp_id}/toggle", data={"csrf_token": csrf}, follow_redirects=True)
+        check("resuming succeeds", "Resumed Netflix." in r.get_data(as_text=True))
+
+        r = client.post(f"/cashflow/recurring/{rp_id}/delete", data={"csrf_token": csrf}, follow_redirects=True)
+        check("deleting succeeds", "Recurring payment removed." in r.get_data(as_text=True))
+
+        r = client.get("/cashflow/recurring")
+        check("deleted recurring payment no longer listed", "Netflix" not in r.get_data(as_text=True))
+
+
 def _test_delete_and_inventory_scripts():
     with open(os.path.join(REPO_ROOT, "delete_user.py")) as f:
         content = f.read()
     check("delete_user.py direct_tables includes cashflow_transaction", "cashflow_transaction" in content)
     check("delete_user.py direct_tables includes cashflow_budget", "cashflow_budget" in content)
+    check("delete_user.py direct_tables includes cashflow_recurring_payment", "cashflow_recurring_payment" in content)
 
     with open(os.path.join(REPO_ROOT, "inventory_user.py")) as f:
         content = f.read()
     check("inventory_user.py direct_tables includes cashflow_transaction", "cashflow_transaction" in content)
     check("inventory_user.py direct_tables includes cashflow_budget", "cashflow_budget" in content)
+    check("inventory_user.py direct_tables includes cashflow_recurring_payment", "cashflow_recurring_payment" in content)
 
 
 def _test_user_isolation(app, client_a, client_b, csrf_a):
@@ -218,6 +330,22 @@ def _test_user_isolation(app, client_a, client_b, csrf_a):
     r = client_b.get("/cashflow/?month=2026-10")
     check("second user's October dashboard does NOT show first user's ₹1,000 limit",
           "1,000" not in r.get_data(as_text=True) and "₹1,000" not in r.get_data(as_text=True))
+
+    # Recurring payments IDOR check
+    r = client_a.post("/cashflow/recurring/add", data={
+        "csrf_token": csrf_a, "name": "IsolationTest EMI", "type": "expense",
+        "category": "Rent / EMI", "amount": "5000", "day_of_month": "1",
+    }, follow_redirects=True)
+    m = re.search(r'/cashflow/recurring/(\d+)/toggle', client_a.get("/cashflow/recurring").get_data(as_text=True))
+    check("first user's recurring payment was created", bool(m))
+    if m:
+        rp_id = m.group(1)
+        r = client_b.post(f"/cashflow/recurring/{rp_id}/delete", data={"csrf_token": csrf_b}, follow_redirects=True)
+        check("second user cannot delete first user's recurring payment (IDOR blocked)", r.status_code == 404)
+        r = client_a.get("/cashflow/recurring")
+        check("first user's recurring payment still exists after the blocked attempt",
+              "IsolationTest EMI" in r.get_data(as_text=True))
+
     return csrf_b
 
 
@@ -314,6 +442,12 @@ def _run_suite():
 
     print("\n-- Year trend (P2 Insights) --")
     _test_year_trend(app, client_a)
+
+    print("\n-- Savings rate, safe-to-spend, forecast (P2 Insights) --")
+    _test_p2_insights(app, client_a)
+
+    print("\n-- Recurring payments (P2 Insights) --")
+    _test_recurring_payments(client_a)
 
     print("\n-- Delete/inventory script coverage --")
     _test_delete_and_inventory_scripts()

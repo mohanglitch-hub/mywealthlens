@@ -13,6 +13,30 @@ from datetime import date, datetime as _dt
 from wealth.timezone_utils import today_ist
 
 
+# ── Category colors ──────────────────────────────────────────────────────────
+# Fixed hue per category, assigned once and never cycled or re-ordered, so a
+# category's color stays stable across months regardless of which categories
+# happen to appear (per the app's charting convention: identity, not rank).
+CATEGORY_COLORS = {
+    "Food & Dining":      "#F59E0B",
+    "Transport":          "#3B82F6",
+    "Bills & Utilities":  "#8B5CF6",
+    "Shopping":           "#EC4899",
+    "Entertainment":      "#14B8A6",
+    "Healthcare":         "#EF4444",
+    "Rent / EMI":         "#6366F1",
+    "Education":          "#22C55E",
+    "Travel":             "#F97316",
+    "Investments":        "#06B6D4",
+    "Other":              "#94A3B8",
+}
+
+
+def category_color(category):
+    """The fixed hue for an expense category, falling back to the 'Other' gray for anything unmapped."""
+    return CATEGORY_COLORS.get(category, CATEGORY_COLORS["Other"])
+
+
 # ── Display Helpers ───────────────────────────────────────────────────────────
 
 def format_inr(value):
