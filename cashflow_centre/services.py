@@ -212,6 +212,37 @@ def get_month_summary(user_id, year, month):
     }
 
 
+def get_year_trend(user_id, year):
+    """
+    Monthly income/expense/net totals for every month of `year`, for a
+    12-point trend chart. Always returns all 12 months (Jan..Dec) even
+    when a month has no transactions, so the chart has a full x-axis.
+    """
+    import calendar
+    from datetime import date
+
+    first_day = date(year, 1, 1)
+    last_day = date(year, 12, calendar.monthrange(year, 12)[1])
+    txns = get_transactions(user_id, from_date=first_day, to_date=last_day)
+
+    monthly = {m: {"income": 0, "expense": 0} for m in range(1, 13)}
+    for t in txns:
+        bucket = monthly[t.date.month]
+        if t.type == TransactionType.INCOME:
+            bucket["income"] += t.amount
+        elif t.type == TransactionType.EXPENSE:
+            bucket["expense"] += t.amount
+
+    labels, income, expense, net = [], [], [], []
+    for m in range(1, 13):
+        labels.append(calendar.month_abbr[m])
+        income.append(monthly[m]["income"])
+        expense.append(monthly[m]["expense"])
+        net.append(monthly[m]["income"] - monthly[m]["expense"])
+
+    return {"labels": labels, "income": income, "expense": expense, "net": net}
+
+
 # ── Budgets ───────────────────────────────────────────────────────────────────
 
 def upsert_budget(db, user_id, year, month, data):
