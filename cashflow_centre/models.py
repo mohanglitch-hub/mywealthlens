@@ -128,3 +128,35 @@ class Budget(db.Model):
     def month_key(self):
         """'YYYY-MM' for this budget's month."""
         return f"{self.year:04d}-{self.month:02d}"
+
+
+class RecurringPayment(db.Model):
+    """
+    A recurring payment/SIP/EMI the user expects on roughly the same
+    day every month (rent, a loan EMI, a SIP, a subscription). This is
+    a reminder schedule only — it never creates transactions on its
+    own; logging the actual payment when it happens is still a manual
+    transaction entry, matching the "manual entry only" scoping
+    decision for this module.
+    """
+    __tablename__ = "cashflow_recurring_payment"
+    __table_args__ = (
+        db.Index("ix_cf_recurring_user_active", "user_id", "active"),
+    )
+
+    id      = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    name     = db.Column(db.String(100), nullable=False)  # e.g. "Home Loan EMI", "Netflix"
+    type     = db.Column(db.String(10), nullable=False, default=TransactionType.EXPENSE)
+    category = db.Column(db.String(50), nullable=False)   # from ExpenseCategory.ALL or IncomeCategory.ALL
+    amount   = db.Column(db.Float, nullable=False)
+    day_of_month = db.Column(db.Integer, nullable=False)  # 1-31; clamped to the last day in shorter months
+    active   = db.Column(db.Boolean, nullable=False, default=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<RecurringPayment {self.name} day={self.day_of_month} {self.amount}>"

@@ -10,6 +10,7 @@
   </div>
   <div style="display:flex; gap:10px;">
     <button type="button" class="cf-btn-primary" onclick="cfOpenQuickAdd()">+ Add Entry</button>
+    <a href="{{ url_for('cashflow_centre.recurring') }}" class="cf-btn-secondary">Recurring Payments</a>
     <a href="{{ url_for('cashflow_centre.import_transactions') }}" class="cf-btn-secondary">Import CSV</a>
   </div>
 </div>
@@ -30,16 +31,64 @@
   <div class="cf-summary-card">
     <div class="cf-summary-label">Income</div>
     <div class="cf-summary-value cf-up">{{ format_inr(summary.total_income) }}</div>
+    {% if prev_month_cmp.income_pct_change is not none %}
+    <div class="cf-delta {{ 'cf-up' if prev_month_cmp.income_pct_change >= 0 else 'cf-down' }}">
+      {{ '▲' if prev_month_cmp.income_pct_change >= 0 else '▼' }} {{ '%.0f'|format(prev_month_cmp.income_pct_change|abs) }}% vs {{ prev_month_cmp.prev_month_label.split(' ')[0][:3] }}
+    </div>
+    {% endif %}
   </div>
   <div class="cf-summary-card">
     <div class="cf-summary-label">Expenses</div>
     <div class="cf-summary-value cf-down">{{ format_inr(summary.total_expense) }}</div>
+    {% if prev_month_cmp.expense_pct_change is not none %}
+    <div class="cf-delta {{ 'cf-down' if prev_month_cmp.expense_pct_change >= 0 else 'cf-up' }}">
+      {{ '▲' if prev_month_cmp.expense_pct_change >= 0 else '▼' }} {{ '%.0f'|format(prev_month_cmp.expense_pct_change|abs) }}% vs {{ prev_month_cmp.prev_month_label.split(' ')[0][:3] }}
+    </div>
+    {% endif %}
   </div>
   <div class="cf-summary-card">
     <div class="cf-summary-label">Net</div>
     <div class="cf-summary-value {{ 'cf-up' if summary.net >= 0 else 'cf-down' }}">{{ format_inr(summary.net) }}</div>
   </div>
+  <div class="cf-summary-card">
+    <div class="cf-summary-label">Savings Rate</div>
+    {% if savings_rate is not none %}
+      <div class="cf-summary-value {{ 'cf-up' if savings_rate >= 0 else 'cf-down' }}">{{ '%.0f'|format(savings_rate) }}%</div>
+    {% else %}
+      <div class="cf-summary-value cf-muted-value">—</div>
+    {% endif %}
+  </div>
 </div>
+
+{% if is_current_month and (safe_to_spend or forecast) %}
+<div class="cf-two-col">
+  {% if safe_to_spend %}
+  <div class="cf-card cf-insight-card">
+    <div class="cf-card-heading">Safe to Spend</div>
+    <div class="cf-insight-figure {{ 'cf-down' if safe_to_spend.remaining < 0 else 'cf-up' }}">
+      {{ format_inr(safe_to_spend.remaining) }} <span class="cf-insight-sub">left across your budgets</span>
+    </div>
+    {% if safe_to_spend.days_left %}
+    <div class="cf-insight-detail">
+      {{ format_inr(safe_to_spend.per_day) }}/day for the {{ safe_to_spend.days_left }} day{{ 's' if safe_to_spend.days_left != 1 else '' }} left in {{ month_display }}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if forecast %}
+  <div class="cf-card cf-insight-card">
+    <div class="cf-card-heading">Forecast to Month-End</div>
+    <div class="cf-insight-figure">
+      {{ format_inr(forecast.projected_expense) }} <span class="cf-insight-sub">projected expenses</span>
+    </div>
+    <div class="cf-insight-detail">
+      Based on day {{ forecast.days_elapsed }} of {{ forecast.days_in_month }} · projected net
+      <span class="{{ 'cf-up' if forecast.projected_net >= 0 else 'cf-down' }}">{{ format_inr(forecast.projected_net) }}</span>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 <!-- ── Year trend ── -->
 <div class="cf-card">
@@ -58,15 +107,18 @@
   <div class="cf-card">
     <div class="cf-card-heading">Spend by Category</div>
     {% if summary.by_category %}
+      <div class="cf-chart-wrap cf-pie-wrap">
+        <canvas id="cfCategoryChart" height="200"></canvas>
+      </div>
       <div class="cf-cat-list">
         {% for cat, amount in summary.by_category.items() %}
         <div class="cf-cat-row">
           <div class="cf-cat-row-top">
-            <span class="cf-cat-name">{{ cat }}</span>
+            <span class="cf-cat-name"><span class="cf-cat-dot" style="background:{{ category_color(cat) }};"></span>{{ cat }}</span>
             <span class="cf-cat-amount">{{ format_inr(amount) }}</span>
           </div>
           <div class="cf-bar-track">
-            <div class="cf-bar-fill" style="width: {{ (amount / summary.total_expense * 100) if summary.total_expense else 0 }}%;"></div>
+            <div class="cf-bar-fill" style="width: {{ (amount / summary.total_expense * 100) if summary.total_expense else 0 }}%; background:{{ category_color(cat) }};"></div>
           </div>
         </div>
         {% endfor %}
@@ -102,6 +154,88 @@
       <div class="cf-empty">No budgets set for {{ month_display }}. <a href="{{ url_for('cashflow_centre.budgets', month=month_key) }}" class="cf-link">Set one up</a> to track spend against a monthly limit.</div>
     {% endif %}
   </div>
+</div>
+
+<div class="cf-two-col">
+  <!-- ── Top 5 expenses ── -->
+  <div class="cf-card">
+    <div class="cf-card-heading">Top 5 Expenses — {{ month_display }}</div>
+    {% if top_expenses %}
+      <div class="cf-txn-list">
+        {% for t in top_expenses %}
+        <div class="cf-txn-row">
+          <div class="cf-txn-left">
+            <span class="cf-txn-cat"><span class="cf-rank-badge">{{ loop.index }}</span>{{ t.category }}</span>
+            {% if t.description %}<span class="cf-txn-desc">{{ t.description }}</span>{% endif %}
+          </div>
+          <div class="cf-txn-right">
+            <span class="cf-txn-date">{{ format_date(t.date) }}</span>
+            <span class="cf-txn-amount cf-down">-{{ format_inr(t.amount) }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="cf-empty">No expenses recorded for {{ month_display }} yet.</div>
+    {% endif %}
+  </div>
+
+  <!-- ── Spending insights ── -->
+  <div class="cf-card">
+    <div class="cf-card-heading">Spending Insights</div>
+    {% if avg_monthly_expense is not none %}
+    <div class="cf-insight-row">
+      <span class="cf-cat-name">Average monthly spending</span>
+      <span class="cf-cat-amount">{{ format_inr(avg_monthly_expense) }}</span>
+    </div>
+    {% endif %}
+    {% if unbudgeted %}
+      <div class="cf-cat-name" style="margin:14px 0 8px;">Spent with no budget set</div>
+      <div class="cf-cat-list">
+        {% for cat, amount in unbudgeted %}
+        <div class="cf-insight-row">
+          <span class="cf-cat-name"><span class="cf-cat-dot" style="background:{{ category_color(cat) }};"></span>{{ cat }}</span>
+          <span class="cf-cat-amount">{{ format_inr(amount) }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <a href="{{ url_for('cashflow_centre.budgets', month=month_key) }}" class="cf-link" style="display:inline-block; margin-top:10px;">Set budgets for these</a>
+    {% elif avg_monthly_expense is none %}
+      <div class="cf-empty">Add a few months of transactions to see spending insights here.</div>
+    {% else %}
+      <div class="cf-empty">Every category you've spent in this month has a budget set. Nice.</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ── Upcoming recurring payments ── -->
+<div class="cf-card">
+  <div class="cf-card-heading" style="display:flex; justify-content:space-between; align-items:center;">
+    <span>Upcoming in the Next 30 Days</span>
+    <a href="{{ url_for('cashflow_centre.recurring') }}" class="cf-link">Manage recurring payments</a>
+  </div>
+  {% if upcoming %}
+    <div class="cf-txn-list">
+      {% for u in upcoming %}
+      <div class="cf-txn-row">
+        <div class="cf-txn-left">
+          <span class="cf-txn-cat">{{ u.name }}</span>
+          <span class="cf-txn-desc">{{ u.category }}</span>
+        </div>
+        <div class="cf-txn-right">
+          <span class="cf-due-badge {{ 'cf-due-soon' if u.days_away <= 3 else '' }}">
+            {{ 'Today' if u.days_away == 0 else ('Tomorrow' if u.days_away == 1 else 'in ' + u.days_away|string + ' days') }}
+          </span>
+          <span class="cf-txn-amount {{ 'cf-up' if u.type == 'income' else 'cf-down' }}">
+            {{ '+' if u.type == 'income' else '-' }}{{ format_inr(u.amount) }}
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="cf-empty">No recurring payments due in the next 30 days. <a href="{{ url_for('cashflow_centre.recurring') }}" class="cf-link">Add your EMIs, SIPs or subscriptions</a> to see them here.</div>
+  {% endif %}
 </div>
 
 <!-- ── Recent transactions ── -->
@@ -180,6 +314,29 @@
 
   .cf-two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
   .cf-chart-wrap { position:relative; height:260px; }
+  .cf-pie-wrap { height:200px; margin-bottom:16px; }
+
+  .cf-muted-value { color:var(--muted); }
+  .cf-delta { font-size:0.75rem; font-weight:600; margin-top:4px; }
+
+  .cf-insight-card { display:flex; flex-direction:column; }
+  .cf-insight-figure { font-size:1.3rem; font-weight:700; color:var(--text); }
+  .cf-insight-sub { font-size:0.75rem; font-weight:500; color:var(--muted); margin-left:4px; }
+  .cf-insight-detail { font-size:0.8rem; color:var(--muted); margin-top:8px; }
+  .cf-insight-row { display:flex; justify-content:space-between; align-items:center; padding:6px 0; font-size:0.85rem; }
+
+  .cf-cat-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:8px; vertical-align:middle; }
+  .cf-rank-badge {
+    display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px;
+    border-radius:50%; background:var(--surface2); color:var(--muted); font-size:0.7rem; font-weight:700;
+    margin-right:8px; flex-shrink:0;
+  }
+
+  .cf-due-badge {
+    font-size:0.72rem; font-weight:600; color:var(--muted); background:var(--surface2);
+    border-radius:6px; padding:3px 8px;
+  }
+  .cf-due-soon { color:var(--warning); background:var(--warning-bg, var(--surface2)); }
 
   .cf-card {
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
@@ -272,6 +429,34 @@
         scales: {
           x: { grid: { color: gridColor }, ticks: { color: labelColor, font: { size: 9 } } },
           y: { grid: { color: gridColor }, ticks: { color: labelColor, callback: inrTick } }
+        }
+      }
+    });
+  }
+
+  const cfCategoryCanvas = document.getElementById('cfCategoryChart');
+  if (cfCategoryCanvas) {
+    const catLabels = {{ summary.by_category.keys() | list | tojson }};
+    const catValues = {{ summary.by_category.values() | list | tojson }};
+    const catColorMap = {{ category_colors | tojson }};
+    const cfCategoryColor = name => catColorMap[name] || catColorMap['Other'];
+    new Chart(cfCategoryCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: catLabels,
+        datasets: [{
+          data: catValues,
+          backgroundColor: catLabels.map(cfCategoryColor),
+          borderColor: (document.documentElement.getAttribute('data-theme') === 'dark') ? '#12141f' : '#ffffff',
+          borderWidth: 2,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        cutout: '62%',
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ₹' + ctx.parsed.toLocaleString('en-IN') } }
         }
       }
     });

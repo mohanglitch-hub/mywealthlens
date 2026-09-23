@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Recurring Payments — Cashflow — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "cashflow_centre/_confirm_modal.html" %}
+
+<div class="cf-page-wrap">
+<div class="cf-breadcrumb">
+  <a href="{{ url_for('cashflow_centre.dashboard') }}">Cashflow</a>
+  <span class="cf-breadcrumb-sep">›</span>
+  <span class="cf-breadcrumb-current">Recurring Payments</span>
+</div>
+
+<h1 class="cf-title" style="margin-bottom:6px;">Recurring Payments</h1>
+<p class="cf-subtitle" style="margin-bottom:16px;">
+  EMIs, SIPs and subscriptions you expect on roughly the same day every month.
+  This is a reminder list only — it shows up on your dashboard's "Upcoming in the
+  Next 30 Days" widget, but it never logs a transaction for you automatically.
+</p>
+
+<div class="cf-card" style="margin-bottom:16px;">
+  <div class="cf-card-heading">Add a Recurring Payment</div>
+  <form method="POST" action="{{ url_for('cashflow_centre.add_recurring') }}" id="recurringAddForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="cf-form-grid-3">
+      <div class="cf-field">
+        <label class="cf-label">Name <span class="cf-required">*</span></label>
+        <input type="text" name="name" class="cf-input" placeholder="e.g. Home Loan EMI" required maxlength="100" />
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Type <span class="cf-required">*</span></label>
+        <select name="type" id="rp_type" class="cf-select-full" required onchange="rpPopulateCategories('rp_type', 'rp_category')">
+          <option value="expense">Expense</option>
+          <option value="income">Income</option>
+        </select>
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Category <span class="cf-required">*</span></label>
+        <select name="category" id="rp_category" class="cf-select-full" required></select>
+      </div>
+    </div>
+    <div class="cf-form-grid-3">
+      <div class="cf-field">
+        <label class="cf-label">Amount (₹) <span class="cf-required">*</span></label>
+        <input type="number" name="amount" class="cf-input" required min="0.01" step="0.01" />
+      </div>
+      <div class="cf-field">
+        <label class="cf-label">Day of Month <span class="cf-required">*</span></label>
+        <input type="number" name="day_of_month" class="cf-input" required min="1" max="31" placeholder="e.g. 5" />
+        <span class="cf-hint">Clamped to the last day in shorter months.</span>
+      </div>
+      <div class="cf-field" style="display:flex; align-items:flex-end;">
+        <button type="submit" class="cf-btn-primary" style="width:100%;">Add</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="cf-card">
+  <div class="cf-card-heading">Your Recurring Payments</div>
+  {% if items %}
+    <div class="cf-cat-list">
+      {% for rp in items %}
+      <div class="cf-budget-row" style="{{ 'opacity:0.55;' if not rp.active }}">
+        <div style="flex:1;">
+          <div class="cf-cat-row-top">
+            <span class="cf-cat-name">
+              {{ rp.name }}
+              <span class="cf-due-badge" style="margin-left:6px;">{{ rp.category }}</span>
+              {% if not rp.active %}<span class="cf-due-badge" style="margin-left:6px;">Paused</span>{% endif %}
+            </span>
+            <span class="cf-cat-amount {{ 'cf-up' if rp.type == 'income' else '' }}">
+              {{ '+' if rp.type == 'income' else '' }}{{ format_inr(rp.amount) }} on day {{ rp.day_of_month }}
+            </span>
+          </div>
+        </div>
+        <div class="cf-budget-actions">
+          <form method="POST" action="{{ url_for('cashflow_centre.toggle_recurring', rp_id=rp.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="submit" class="cf-btn-neutral-outline">{{ 'Resume' if not rp.active else 'Pause' }}</button>
+          </form>
+          <form method="POST" action="{{ url_for('cashflow_centre.delete_recurring', rp_id=rp.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="button" class="cf-btn-neutral-outline cf-btn-outline-danger"
+                    onclick="confirmAction(this.form, 'Remove Recurring Payment?', 'This removes ' + {{ rp.name | tojson }} + ' from your reminders. It does not affect any transactions you have already logged.', 'Remove')">
+              Remove
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="cf-empty">No recurring payments yet. Add your EMIs, SIPs or subscriptions above to see them on your dashboard's 30-day calendar.</div>
+  {% endif %}
+</div>
+</div>
+
+<style>
+  .cf-page-wrap { max-width:1100px; margin:0 auto; }
+  .cf-breadcrumb { font-size:0.95rem; margin-bottom:14px; }
+  .cf-breadcrumb a { color:var(--accent2); text-decoration:none; font-weight:600; }
+  .cf-breadcrumb a:hover { color:var(--accent); }
+  .cf-breadcrumb-sep { color:var(--muted2); margin:0 6px; }
+  .cf-breadcrumb-current { color:var(--text); font-weight:700; }
+  .cf-title { font-size:1.4rem; font-weight:700; color:var(--text); }
+  .cf-subtitle { font-size:0.85rem; color:var(--muted); line-height:1.5; }
+
+  .cf-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:22px; box-shadow:var(--shadow-sm);
+  }
+  .cf-card-heading { font-size:0.95rem; font-weight:700; color:var(--text); margin-bottom:16px; }
+
+  .cf-form-grid-3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
+  .cf-field { margin-bottom:14px; }
+  .cf-label { display:block; font-size:0.82rem; font-weight:600; color:var(--text2); margin-bottom:6px; }
+  .cf-hint { display:block; font-size:0.75rem; color:var(--muted2); margin-top:4px; }
+  .cf-required { color:var(--down); }
+  .cf-input, .cf-select-full {
+    width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:10px 12px; color:var(--text); font-family:var(--font-ui); font-size:0.9rem; outline:none;
+  }
+  .cf-input:focus, .cf-select-full:focus { border-color:var(--accent); }
+
+  .cf-btn-primary {
+    background:var(--accent); border:1px solid var(--accent); border-radius:8px;
+    padding:10px 20px; font-size:0.85rem; font-weight:700; color:#fff;
+    font-family:var(--font-ui); cursor:pointer; white-space:nowrap;
+  }
+  .cf-btn-primary:hover { opacity:0.88; }
+  .cf-btn-neutral-outline {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:8px 14px; font-size:0.8rem; font-weight:600; color:var(--text2);
+    font-family:var(--font-ui); cursor:pointer;
+  }
+  .cf-btn-neutral-outline:hover { border-color:var(--accent); color:var(--accent); }
+  .cf-btn-outline-danger:hover { border-color:var(--down); color:var(--down); }
+
+  .cf-cat-list { display:flex; flex-direction:column; gap:16px; }
+  .cf-budget-row { display:flex; align-items:center; gap:16px; }
+  .cf-budget-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .cf-cat-row-top { display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; flex-wrap:wrap; gap:8px; }
+  .cf-cat-name { color:var(--text2); font-weight:600; }
+  .cf-cat-amount { color:var(--text); font-weight:600; font-family:var(--font-data); white-space:nowrap; }
+  .cf-up { color:var(--up); }
+
+  .cf-due-badge {
+    font-size:0.72rem; font-weight:600; color:var(--muted); background:var(--surface2);
+    border-radius:6px; padding:3px 8px;
+  }
+
+  .cf-empty { font-size:0.85rem; color:var(--muted); line-height:1.6; padding:8px 0; }
+
+  @media (max-width:768px) {
+    .cf-form-grid-3 { grid-template-columns:1fr; }
+    .cf-budget-row { flex-direction:column; align-items:stretch; }
+  }
+</style>
+
+<script>
+  const RP_EXPENSE_CATEGORIES = {{ expense_categories | tojson }};
+  const RP_INCOME_CATEGORIES  = {{ income_categories | tojson }};
+
+  function rpPopulateCategories(typeId, catId) {
+    const typeSelect = document.getElementById(typeId);
+    const catSelect = document.getElementById(catId);
+    const categories = typeSelect.value === 'income' ? RP_INCOME_CATEGORIES : RP_EXPENSE_CATEGORIES;
+    catSelect.innerHTML = '';
+    categories.forEach(function (c) {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      catSelect.appendChild(opt);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    rpPopulateCategories('rp_type', 'rp_category');
+  });
+</script>
+{% endblock %}
