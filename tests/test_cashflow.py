@@ -171,6 +171,28 @@ def _test_month_bound_budgets(client, csrf):
           "1,000" in html or "₹1,000" in html)
 
 
+def _test_year_trend(app, client):
+    """P2 Insights: the dashboard's year income/expense/net trend chart."""
+    from cashflow_centre import services
+
+    with client.session_transaction() as sess:
+        user_id = sess.get("_user_id")
+    with app.app_context():
+        trend = services.get_year_trend(int(user_id), 2026)
+
+    check("year trend has all 12 months", len(trend["labels"]) == 12)
+    check("year trend labels start Jan and end Dec", trend["labels"][0] == "Jan" and trend["labels"][-1] == "Dec")
+    check("September income reflects the ₹55,000 salary added earlier", trend["income"][8] == 55000)
+    check("September expense reflects the ₹1,250 dining txn added earlier", trend["expense"][8] == 1250)
+    check("September net is income minus expense", trend["net"][8] == 55000 - 1250)
+    check("months with no transactions are zero, not missing", trend["income"][0] == 0 and trend["expense"][0] == 0)
+
+    r = client.get("/cashflow/?month=2026-09")
+    html = r.get_data(as_text=True)
+    check("dashboard renders the trend chart canvas", 'id="cfTrendChart"' in html)
+    check("dashboard renders the trend card heading", "Trend — Income vs Expenses" in html)
+
+
 def _test_delete_and_inventory_scripts():
     with open(os.path.join(REPO_ROOT, "delete_user.py")) as f:
         content = f.read()
@@ -289,6 +311,9 @@ def _run_suite():
 
     print("\n-- Month-bound budgets --")
     _test_month_bound_budgets(client_a, csrf_a)
+
+    print("\n-- Year trend (P2 Insights) --")
+    _test_year_trend(app, client_a)
 
     print("\n-- Delete/inventory script coverage --")
     _test_delete_and_inventory_scripts()

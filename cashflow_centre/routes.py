@@ -84,6 +84,8 @@ def dashboard():
 
     self_url = url_for("cashflow_centre.dashboard", month=month_key)
 
+    year_trend = services.get_year_trend(current_user.id, year)
+
     return render_template(
         "cashflow_centre/dashboard.html",
         summary=summary, budgets=budgets, recent=recent,
@@ -91,7 +93,7 @@ def dashboard():
         prev_month=adjacent_month_key(year, month, -1),
         next_month=adjacent_month_key(year, month, 1),
         is_current_month=is_current_month, self_url=self_url,
-        quick_add=quick_add,
+        quick_add=quick_add, year_trend=year_trend, trend_year=year,
         expense_categories=ExpenseCategory.ALL, income_categories=IncomeCategory.ALL,
         payment_methods=PaymentMethod.ALL,
         today_ist=today_ist().strftime("%Y-%m-%d"),

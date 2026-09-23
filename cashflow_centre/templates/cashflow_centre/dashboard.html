@@ -41,6 +41,18 @@
   </div>
 </div>
 
+<!-- ── Year trend ── -->
+<div class="cf-card">
+  <div class="cf-card-heading">{{ trend_year }} Trend — Income vs Expenses</div>
+  {% if year_trend.income | sum or year_trend.expense | sum %}
+    <div class="cf-chart-wrap">
+      <canvas id="cfTrendChart" height="260"></canvas>
+    </div>
+  {% else %}
+    <div class="cf-empty">No transactions recorded for {{ trend_year }} yet — the trend will fill in as you add entries through the year.</div>
+  {% endif %}
+</div>
+
 <div class="cf-two-col">
   <!-- ── Spend by category ── -->
   <div class="cf-card">
@@ -167,6 +179,7 @@
   .cf-down { color:var(--down); }
 
   .cf-two-col { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  .cf-chart-wrap { position:relative; height:260px; }
 
   .cf-card {
     background:var(--surface); border:1px solid var(--border); border-radius:12px;
@@ -206,4 +219,62 @@
     .cf-two-col { grid-template-columns:1fr; }
   }
 </style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+  const cfTrendCanvas = document.getElementById('cfTrendChart');
+  if (cfTrendCanvas) {
+    const isDark   = document.documentElement.getAttribute('data-theme') === 'dark';
+    const gridColor  = isDark ? '#1e2130' : '#E2E8F0';
+    const labelColor = isDark ? '#64748b' : '#64748B';
+    const trendLabels  = {{ year_trend.labels | tojson }};
+    const trendIncome  = {{ year_trend.income | tojson }};
+    const trendExpense = {{ year_trend.expense | tojson }};
+    const trendNet     = {{ year_trend.net | tojson }};
+
+    Chart.defaults.color = labelColor;
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 11;
+    const inrTick = v => v >= 10000000 ? '₹' + (v/10000000).toFixed(1) + 'Cr'
+                      : v >= 100000    ? '₹' + (v/100000).toFixed(1) + 'L'
+                      : v <= -10000000 ? '-₹' + (Math.abs(v)/10000000).toFixed(1) + 'Cr'
+                      : v <= -100000   ? '-₹' + (Math.abs(v)/100000).toFixed(1) + 'L'
+                      : '₹' + (v/1000).toFixed(0) + 'K';
+
+    new Chart(cfTrendCanvas, {
+      type: 'line',
+      data: {
+        labels: trendLabels,
+        datasets: [
+          {
+            label: 'Income', data: trendIncome,
+            borderColor: '#16A34A', backgroundColor: 'rgba(22,163,74,0.1)',
+            fill: false, tension: 0.3, pointRadius: 3,
+          },
+          {
+            label: 'Expenses', data: trendExpense,
+            borderColor: '#DC2626', backgroundColor: 'rgba(220,38,38,0.1)',
+            fill: false, tension: 0.3, pointRadius: 3,
+          },
+          {
+            label: 'Net', data: trendNet,
+            borderColor: '#6366f1', backgroundColor: 'rgba(99,102,241,0.15)',
+            fill: true, tension: 0.3, pointRadius: 3,
+          },
+        ]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { usePointStyle: true, font: { size: 10 } } },
+          tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ₹' + ctx.parsed.y.toLocaleString('en-IN') } }
+        },
+        scales: {
+          x: { grid: { color: gridColor }, ticks: { color: labelColor, font: { size: 9 } } },
+          y: { grid: { color: gridColor }, ticks: { color: labelColor, callback: inrTick } }
+        }
+      }
+    });
+  }
+</script>
 {% endblock %}
