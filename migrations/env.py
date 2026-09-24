@@ -65,7 +65,14 @@ def run_migrations_offline():
     """
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url, target_metadata=get_metadata(), literal_binds=True
+        url=url, target_metadata=get_metadata(), literal_binds=True,
+        # SQLite can't ALTER most things directly (add/drop column,
+        # change type, etc.) — batch mode has Alembic recreate the
+        # table under the hood instead, which is the only way SQLite
+        # migrations work at all. Harmless on Postgres (it just uses
+        # normal ALTER there), so this is on unconditionally rather
+        # than branching on dialect.
+        render_as_batch=True,
     )
 
     with context.begin_transaction():
@@ -97,6 +104,10 @@ def run_migrations_online():
     connectable = get_engine()
 
     with connectable.connect() as connection:
+        # Flask-Migrate's own configure_args already includes
+        # render_as_batch (True on SQLite) unless conf_args overrides
+        # it — see run_migrations_offline() for why batch mode matters.
+        conf_args.setdefault("render_as_batch", True)
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),

@@ -164,15 +164,44 @@ def refresh_session():
     app.permanent_session_lifetime = timedelta(minutes=30)
 
 
+def _bootstrap_schema():
+    """
+    Production-readiness audit (Sep 2026): schema is now managed
+    entirely through Alembic (`flask db upgrade`), on SQLite as well
+    as Postgres — replacing db.create_all() and the old per-module
+    hand-written "migrate_xxx.py" script pattern for good. Every
+    future schema change (new table, new column, anything) should now
+    be captured with `flask db migrate` and applied with
+    `flask db upgrade`, on any database.
+
+    This still runs automatically at every startup, exactly like
+    create_all() always did — nothing changes about the "pull, restart,
+    it's up to date" workflow. It's just Alembic doing the work now,
+    so every change is properly version-tracked instead of inferred
+    fresh at each restart.
+
+    One-time transition handling: a database that already has tables
+    from create_all()'s years of running, but no alembic_version table
+    (since create_all() never tracked versions), gets STAMPED at the
+    current baseline rather than having Alembic try to CREATE TABLE
+    on tables that already exist, which would fail outright. A
+    genuinely fresh, empty database just gets the full migration
+    history applied normally.
+    """
+    from sqlalchemy import inspect
+    from flask_migrate import upgrade as _alembic_upgrade, stamp as _alembic_stamp
+
+    existing_tables = set(inspect(db.engine).get_table_names())
+    if "alembic_version" not in existing_tables and "user" in existing_tables:
+        print("Existing pre-Alembic database found — stamping at the current "
+              "schema version (no tables touched, no data changed)...")
+        _alembic_stamp()
+
+    _alembic_upgrade()
+
+
 with app.app_context():
-    # SQLite (the default, unset-DATABASE_URL path): unchanged behavior —
-    # db.create_all() only fills in tables that don't exist yet, matching
-    # every module's own "new table needs no migration, just a restart"
-    # convention. On Postgres, schema is managed entirely through Alembic
-    # (`flask db upgrade`) from here on — create_all() is skipped there so
-    # it can never race ahead of or diverge from the migration history.
-    if app.config["SQLALCHEMY_DATABASE_URI"].startswith("sqlite"):
-        db.create_all()
+    _bootstrap_schema()
 
 def safe_float(val, default=0.0):
     try:
@@ -2359,6 +2388,23 @@ register_backup_cli(app)
 
 if __name__ == '__main__':
     import os
-    # Render requires 0.0.0.0. Local development still works fine with this.
+    # Production-readiness audit (Sep 2026): Flask's own app.run() is
+    # Werkzeug's development server — single-threaded by default, not
+    # hardened against slow/malicious clients, and explicitly documented
+    # by Flask itself as unfit for anything but local development, even
+    # with debug=False. Waitress is a real, battle-tested production WSGI
+    # server with no C extensions to compile, which matters here since it
+    # needs to "just work" from `py app.py` on Windows the same way the
+    # dev server always did — no separate process manager, no reverse
+    # proxy required to be safe to leave running.
+    #
+    # HTTPS is deliberately NOT handled here — deferred until a hosting
+    # platform is chosen, since Render/Railway/etc. all terminate TLS
+    # automatically at their edge the moment this is deployed there, and
+    # building local HTTPS now would just be thrown away. MWL_HTTPS stays
+    # the single flag to flip (see SESSION_COOKIE_SECURE above) once real
+    # HTTPS is in front of this, whatever form that takes.
+    from waitress import serve
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    print(f"Serving on http://127.0.0.1:{port} (Waitress — Ctrl+C to stop)")
+    serve(app, host='0.0.0.0', port=port)

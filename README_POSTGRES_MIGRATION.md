@@ -1,11 +1,20 @@
 # Moving to Postgres — one-time setup
 
-This is optional and **nothing breaks if you skip it** — with no `DATABASE_URL`
-set, the app keeps using your existing `instance/mywealthlens.db` exactly as
-before. This is step 1 of the production-readiness plan we agreed on
-(Postgres + Alembic → encryption design → multi-tenant → responsive UI →
-desktop), done now so future schema changes (especially the encryption work)
-go through real migrations instead of plain scripts.
+Moving to Postgres itself is optional and **nothing breaks if you skip it** —
+with no `DATABASE_URL` set, the app keeps using your existing
+`instance/mywealthlens.db` exactly as before. This is step 1 of the
+production-readiness plan we agreed on (Postgres + Alembic → encryption
+design → multi-tenant → responsive UI → desktop).
+
+One thing is **not** optional and needs no action from you: schema
+management itself now goes through Alembic on SQLite too, not just Postgres.
+The first time you start the app after pulling this change, it will detect
+your existing database, print a line saying it's stamping it at the current
+schema version, and continue exactly as before — no tables touched, no data
+changed, nothing for you to do. Every restart after that is a non-event,
+same as it always was with `db.create_all()`. This just means future schema
+changes (especially the encryption work) now go through real, version-
+tracked migrations instead of plain scripts.
 
 ## 1. Install Postgres on Windows
 
@@ -79,10 +88,10 @@ session this was built, so this should be a non-event.
 
 ## Going forward: schema changes now go through Alembic
 
-Once you're on Postgres, any future change to a model (a new column, a new
-table) should be captured as a migration instead of relying on
-`db.create_all()` (which is now skipped entirely on Postgres — see the
-comment in `app.py`):
+Schema management now goes through Alembic on **every** database, not just
+Postgres — `db.create_all()` and the old hand-written `migrate_xxx.py`
+scripts are fully retired. Any future change to a model (a new column, a new
+table) should be captured as a migration:
 
 ```powershell
 flask db migrate -m "describe the change"
