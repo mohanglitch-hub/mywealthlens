@@ -248,6 +248,20 @@ def safe_float(val, default=0.0):
         return float(str(val).strip())
     except (TypeError, ValueError):
         return default
+
+def safe_int(val, default=0):
+    """Same purpose as safe_float() above, for form fields parsed with
+    int(). Goals-module audit (Sep 2026, Batch 6): add_goal()/edit_goal()
+    used a bare int(request.form.get('target_year', 2030)) -- fine for
+    the normal <select>, which can only submit a real year, but a
+    hostile or scripted POST with a non-numeric value (curl, devtools,
+    a buggy client) raised an uncaught ValueError -> unhandled 500,
+    instead of the friendly "Target year must be..." flash the rest of
+    that validation logic clearly intends."""
+    try:
+        return int(str(val).strip())
+    except (TypeError, ValueError):
+        return default
 @app.route('/')
 def index():
     if current_user.is_authenticated:
@@ -1707,12 +1721,15 @@ def add_goal():
     name        = request.form.get('name', '').strip()
     emoji       = request.form.get('emoji', '').strip()
     target_amt  = safe_float(request.form.get('target_amt'))
-    target_year = int(request.form.get('target_year', 2030))
+    target_year = safe_int(request.form.get('target_year'), None)
     current_savings = safe_float(request.form.get('current_savings'))
     monthly_sip     = safe_float(request.form.get('monthly_sip'))
     annual_return   = safe_float(request.form.get('annual_return', '12'))
     if not name or target_amt <= 0:
         flash('Please enter a goal name and target amount.', 'error')
+        return redirect(url_for('goals'))
+    if target_year is None:
+        flash('Please enter a valid target year.', 'error')
         return redirect(url_for('goals'))
     # Goals-module audit (Sep 2026, Batch 6): this used to check against
     # a hardcoded "<= 2024", which only worked by coincidence when 2024
@@ -1772,9 +1789,12 @@ def edit_goal(goal_id):
     name        = request.form.get('name', '').strip()
     emoji       = request.form.get('emoji', '').strip()
     target_amt  = safe_float(request.form.get('target_amt'))
-    target_year = int(request.form.get('target_year', 2030))
+    target_year = safe_int(request.form.get('target_year'), None)
     if not name or target_amt <= 0:
         flash('Please enter a goal name and target amount.', 'error')
+        return redirect(url_for('goals'))
+    if target_year is None:
+        flash('Please enter a valid target year.', 'error')
         return redirect(url_for('goals'))
     if target_year < dt.utcnow().year:
         flash('Target year must be this year or later.', 'error')
