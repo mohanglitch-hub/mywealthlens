@@ -1714,8 +1714,15 @@ def add_goal():
     if not name or target_amt <= 0:
         flash('Please enter a goal name and target amount.', 'error')
         return redirect(url_for('goals'))
-    if target_year <= 2024:
-        flash('Target year must be in the future.', 'error')
+    # Goals-module audit (Sep 2026, Batch 6): this used to check against
+    # a hardcoded "<= 2024", which only worked by coincidence when 2024
+    # was still in the past for everyone using the app -- as the
+    # calendar moves on it would silently accept genuinely past target
+    # years (e.g. "2025" typed in 2027) instead of catching them here.
+    # Checked against the real current year instead; this year itself
+    # is allowed (an "achieve it now" goal is a legitimate, tested shape).
+    if target_year < dt.utcnow().year:
+        flash('Target year must be this year or later.', 'error')
         return redirect(url_for('goals'))
     inflation_rate = safe_float(request.form.get('inflation_rate', '0'))
     step_up_pct    = safe_float(request.form.get('step_up_pct', '0'))
@@ -1769,8 +1776,8 @@ def edit_goal(goal_id):
     if not name or target_amt <= 0:
         flash('Please enter a goal name and target amount.', 'error')
         return redirect(url_for('goals'))
-    if target_year <= 2024:
-        flash('Target year must be in the future.', 'error')
+    if target_year < dt.utcnow().year:
+        flash('Target year must be this year or later.', 'error')
         return redirect(url_for('goals'))
 
     is_retirement_goal = request.form.get('is_retirement_goal') == 'on'
