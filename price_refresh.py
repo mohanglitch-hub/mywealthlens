@@ -52,11 +52,20 @@ def parse_amfi_navall_text(text):
     clean CSV — it's semicolon-delimited data rows interleaved with
     blank lines and section headers (fund-house names, "Open Ended
     Schemes(...)" category labels). A row is treated as real NAV data
-    only when it has exactly 6 semicolon-separated fields AND the
-    first field is a plain integer scheme code — everything else
-    (headers, blanks, the "Scheme Code;ISIN..." header line itself) is
-    silently skipped rather than erroring, since that structure is
-    normal for this file, not a corruption.
+    only when the first field is a plain integer scheme code —
+    everything else (headers, blanks, the "Scheme Code;ISIN..." header
+    line itself) is silently skipped rather than erroring, since that
+    structure is normal for this file, not a corruption.
+
+    AMFI has used two column layouts in the wild (confirmed against a
+    real download, Sep 2026 — the classic 6-field layout with Plan and
+    Option folded into "Scheme Name" isn't what they serve any more):
+      6 fields: Scheme Code;ISIN Payout;ISIN Reinvest;Scheme Name;NAV;Date
+      8 fields: Scheme Code;ISIN Payout;ISIN Reinvest;Scheme Name;Plan;Option;NAV;Date
+    NAV is always the second-to-last field and Scheme Code always the
+    first, in both, so both are supported by field count rather than
+    hardcoding one layout — if AMFI adds yet another column the same
+    way, this keeps working without a code change.
     """
     nav_map = {}
     for line in text.splitlines():
@@ -64,10 +73,10 @@ def parse_amfi_navall_text(text):
         if not line or ";" not in line:
             continue
         fields = line.split(";")
-        if len(fields) != 6:
+        if len(fields) not in (6, 8):
             continue
         scheme_code = fields[0].strip()
-        nav_raw = fields[4].strip()
+        nav_raw = fields[-2].strip()
         if not scheme_code.isdigit():
             continue
         try:
