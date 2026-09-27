@@ -29,7 +29,16 @@ from reportlab.platypus import (
 
 from . import services
 from .models import RetirementScheme, SchemeType
-from .utils import format_inr, format_date
+from .utils import format_date
+# PDF-safe (Sep 2026 audit fix): this export uses ReportLab's base
+# Helvetica font, which can't render the ₹ glyph (not in
+# WinAnsiEncoding) — format_inr() (this module's normal formatter,
+# used in HTML templates where the glyph renders fine) would print a
+# broken/missing character for INR here. Use the PDF-safe formatter
+# directly instead, same convention insurance_centre's PDF export and
+# app.py's /export/pdf already use.
+import currency_display
+format_inr = currency_display.format_money_pdf_safe
 
 # ── Shared colours (matches app.py / insurance_centre's dark theme) ──────────
 _TEAL   = colors.HexColor("#00d4aa")

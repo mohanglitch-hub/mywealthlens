@@ -8,7 +8,7 @@ import bcrypt, pdfplumber, io, re, os, secrets, csv, hashlib, yfinance as yf
 import casparser
 from datetime import datetime as dt, timedelta, date as _date_cls
 from models import (db, User, MutualFund, MutualFundTransaction, Stock, StockTransaction,
-                     Goal, GoalHoldingLink, NetWorthHistory)
+                     Goal, GoalHoldingLink, NetWorthHistory, BackupCode, UserSession)
 from cas_xirr import scheme_xirr as _scheme_xirr, portfolio_xirr as _portfolio_xirr
 from mail import send_password_reset_email
 from stock_xirr import stock_xirr as _stock_xirr, portfolio_stock_xirr as _portfolio_stock_xirr
@@ -22,6 +22,8 @@ from cashflow_centre import cashflow_bp
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory, WealthAsset
 from retirement_centre.models import RetirementScheme
+import session_manager
+import twofa
 
 
 def format_date(d, fmt="%d %b %Y"):
@@ -165,6 +167,24 @@ def refresh_session():
     app.permanent_session_lifetime = timedelta(minutes=30)
 
 
+@app.before_request
+def enforce_session_revocation():
+    """
+    Account security (Sep 2026, Batch 3) — makes "log out other
+    devices" actually work. Flask-Login's own cookie has no server-side
+    revocation of its own, so this confirms the browser's session
+    token still has a live UserSession row (see session_manager.py)
+    before letting an otherwise-authenticated request proceed. If the
+    row is gone — someone revoked it from Preferences > Security, on
+    this device or another — the request is logged out right here,
+    rather than on whatever page it happened to land on next.
+    """
+    if current_user.is_authenticated:
+        if not session_manager.validate_and_touch(current_user.id):
+            logout_user()
+            session.pop('sid', None)
+
+
 # Global display currency (Sep 2026) — registered once here so every
 # template can call format_inr(...)/format_money_precise(...)/
 # display_symbol()/display_currency_code() without each route having
@@ -261,6 +281,7 @@ def signup():
         db.session.add(user)
         db.session.commit()
         login_user(user)
+        session_manager.create_session(user)
         flash(f'Welcome to MyWealthLens, {name}!', 'success')
         return redirect(url_for('dashboard'))
     return render_template('signup.html')
@@ -275,16 +296,74 @@ def login():
         password = request.form.get('password', '')
         user = User.query.filter_by(email=email).first()
         if user and bcrypt.checkpw(password.encode('utf-8'), user.password.encode('utf-8')):
+            if user.totp_enabled:
+                # Two-factor account (Sep 2026, Batch 3): password alone
+                # isn't enough to log in — stash the user id as a
+                # PENDING second factor rather than calling login_user()
+                # yet, and send them to the code-entry step. Nothing
+                # about this user is treated as authenticated until
+                # /login/2fa verifies the code.
+                session['pending_2fa_user_id'] = user.id
+                return redirect(url_for('login_2fa'))
             login_user(user)
+            session_manager.create_session(user)
             flash(f'Welcome back, {user.name}!', 'success')
             return redirect(url_for('dashboard'))
         else:
             flash('Invalid email or password.', 'error')
     return render_template('login.html')
 
+
+@app.route('/login/2fa', methods=['GET', 'POST'])
+@limiter.limit('5 per 15 minutes', methods=['POST'])
+def login_2fa():
+    """
+    Second step of login for accounts with 2FA enabled — reached only
+    after /login already verified the password and parked the user id
+    in session['pending_2fa_user_id']. Accepts either a 6-digit
+    authenticator code or one of the account's backup codes; either
+    way, THIS is the point login_user()/create_session() actually run.
+    """
+    pending_id = session.get('pending_2fa_user_id')
+    if not pending_id:
+        return redirect(url_for('login'))
+    user = db.session.get(User, pending_id)
+    if not user or not user.totp_enabled:
+        session.pop('pending_2fa_user_id', None)
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip()
+        ok = twofa.verify_totp_code(user.totp_secret, code)
+        used_backup_code = None
+        if not ok:
+            for bc in BackupCode.query.filter_by(user_id=user.id, used=False).all():
+                if twofa.check_backup_code(code, bc.code_hash):
+                    ok = True
+                    used_backup_code = bc
+                    break
+        if ok:
+            if used_backup_code:
+                used_backup_code.used = True
+                db.session.commit()
+            session.pop('pending_2fa_user_id', None)
+            login_user(user)
+            session_manager.create_session(user)
+            if used_backup_code:
+                remaining = BackupCode.query.filter_by(user_id=user.id, used=False).count()
+                flash(f'Welcome back, {user.name}! You used a backup code — '
+                      f'{remaining} unused backup code(s) remain.', 'success')
+            else:
+                flash(f'Welcome back, {user.name}!', 'success')
+            return redirect(url_for('dashboard'))
+        flash('Invalid authentication code.', 'error')
+    return render_template('login_2fa.html')
+
+
 @app.route('/logout')
 @login_required
 def logout():
+    session_manager.end_current_session(current_user.id)
     logout_user()
     flash('You have been logged out.', 'success')
     return redirect(url_for('login'))
@@ -631,16 +710,39 @@ def preferences():
         backup_last_display = parsed_dt.strftime('%d %b %Y, %I:%M %p') + f' UTC ({size_mb:.1f} MB)'
 
     import fx_rates
+
+    # Security (Sep 2026, Batch 3) — active sessions list, with each
+    # row's device label pre-computed here since Jinja can't call
+    # session_manager's regex helper directly.
+    current_token = session_manager.current_session_token()
+    active_sessions = []
+    for s in session_manager.list_sessions(current_user.id):
+        active_sessions.append({
+            'id': s.id,
+            'device': session_manager.describe_device(s.user_agent),
+            'ip_address': s.ip_address or 'Unknown',
+            'last_seen_at': s.last_seen_at,
+            'created_at': s.created_at,
+            'is_current': (s.session_token == current_token),
+        })
+    backup_codes_remaining = None
+    if current_user.totp_enabled:
+        backup_codes_remaining = BackupCode.query.filter_by(
+            user_id=current_user.id, used=False).count()
+
     return render_template(
         'preferences.html', user=current_user, system_health=system_health,
         backup_settings=backup_settings, backup_has_passphrase=backup_services.has_passphrase(),
         backup_last_display=backup_last_display,
         supported_currencies=fx_rates.SUPPORTED_CURRENCIES,
+        active_sessions=active_sessions,
+        backup_codes_remaining=backup_codes_remaining,
     )
 
 
 @app.route('/account/currency', methods=['POST'])
 @login_required
+@limiter.limit('20 per hour')
 def update_display_currency():
     """
     Saves the user's chosen global display currency (Sep 2026 — see
@@ -680,6 +782,7 @@ def update_display_currency():
 
 @app.route('/account/notifications', methods=['POST'])
 @login_required
+@limiter.limit('20 per hour')
 def update_notification_preferences():
     """
     Saves the two Notifications toggles (My Account > Notifications).
@@ -1599,6 +1702,7 @@ def goals():
 
 @app.route('/goals/add', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def add_goal():
     name        = request.form.get('name', '').strip()
     emoji       = request.form.get('emoji', '').strip()
@@ -1646,6 +1750,7 @@ def add_goal():
 
 @app.route('/goals/edit/<int:goal_id>', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def edit_goal(goal_id):
     """Same fields/validation as add_goal(), but updates an existing
     goal in place — needed because glide-path and retirement-drawdown
@@ -1700,6 +1805,7 @@ def edit_goal(goal_id):
 
 @app.route('/goals/delete/<int:goal_id>', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def delete_goal(goal_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -1728,6 +1834,7 @@ _DEFAULT_ASSET_CLASS = {
 
 @app.route('/goals/<int:goal_id>/link', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def link_goal_holding(goal_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -1794,6 +1901,7 @@ def link_goal_holding(goal_id):
 
 @app.route('/goals/<int:goal_id>/unlink/<int:link_id>', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def unlink_goal_holding(goal_id, link_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -1811,6 +1919,7 @@ def unlink_goal_holding(goal_id, link_id):
 
 @app.route('/goals/<int:goal_id>/review', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def review_goal(goal_id):
     """Goal review nudge (see GOAL_REVIEW_PERIOD_DAYS in goals()) —
     just stamps last_reviewed_at. Deliberately doesn't change any
@@ -1829,6 +1938,7 @@ def review_goal(goal_id):
 
 @app.route('/goals/<int:goal_id>/archive', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def archive_goal(goal_id):
     """Archive a goal as either 'achieved' or 'dropped' — same
     Archive -> Restore lifecycle used across Insurance/Retirement
@@ -1860,6 +1970,7 @@ def archive_goal(goal_id):
 
 @app.route('/goals/<int:goal_id>/restore', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def restore_goal(goal_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -1922,8 +2033,14 @@ def _fmt(n):
     # and formats it in the user's chosen display currency — see
     # currency_display.py. Every _fmt() call site in this PDF export
     # gets currency-awareness for free via this one function.
+    # PDF-safe (Sep 2026 audit fix): this export uses ReportLab's base
+    # Helvetica font, which can't render the ₹ glyph (not in
+    # WinAnsiEncoding) — format_money_pdf_safe() spells INR as "Rs."
+    # instead, same convention insurance_centre's PDF export already
+    # used this for; format_money() (the ₹-glyph version) is correct
+    # for HTML templates, just not for this ReportLab document.
     import currency_display
-    return currency_display.format_money(n)
+    return currency_display.format_money_pdf_safe(n)
 
 def _pct(n):
     return f"{n:.1f}%"
@@ -2547,6 +2664,7 @@ def rate_limit_exceeded(e):
 
 @app.route('/account/change-password', methods=['POST'])
 @login_required
+@limiter.limit('10 per hour')
 def change_password():
     current_pw = request.form.get('current_password', '')
     new_pw     = request.form.get('new_password', '')
@@ -2565,6 +2683,212 @@ def change_password():
     db.session.commit()
     flash('Password changed successfully!', 'success')
     return redirect(url_for('preferences'))
+
+
+@app.route('/account/delete', methods=['POST'])
+@login_required
+@limiter.limit('5 per hour')
+def delete_account():
+    """
+    Self-service "Delete my account" (Batch 3, Sep 2026). Permanently
+    deletes the signed-in user's account and everything tied to it,
+    across every module — the same cascade-delete logic the admin CLI
+    tool (delete_user.py) uses, both sourced from account_deletion.py
+    so the two can never drift the way this project's table lists once
+    did (see that module's docstring).
+
+    Two-factor confirmation, since this is irreversible from the UI:
+      1. Current password (bcrypt-verified, same pattern as
+         change_password() above).
+      2. Typing the literal word DELETE into a confirmation field —
+         stronger than the backup-restore box's checkbox, because a
+         restore can be undone and this cannot.
+
+    A full DB backup is still taken first (account_deletion.backup_db)
+    as a last-resort safety net for Mohan himself, even though the
+    user-facing flow treats this as final.
+    """
+    current_pw = request.form.get('current_password', '')
+    typed_confirm = (request.form.get('confirm_delete', '') or '').strip()
+
+    if not bcrypt.checkpw(current_pw.encode('utf-8'), current_user.password.encode('utf-8')):
+        flash('Current password is incorrect. Account was not deleted.', 'error')
+        return redirect(url_for('preferences') + '#danger-zone')
+
+    if typed_confirm != 'DELETE':
+        flash('You must type DELETE exactly to confirm. Account was not deleted.', 'error')
+        return redirect(url_for('preferences') + '#danger-zone')
+
+    import account_deletion
+    user_id = current_user.id
+    user_name = current_user.name
+
+    # Backup first — best-effort; deletion still proceeds even if this
+    # fails, since the user explicitly asked for their data gone.
+    account_deletion.backup_db(app)
+
+    account_deletion.wipe_document_files(app, db, user_id)
+    account_deletion.cascade_delete_user(app, db, user_id)
+
+    logout_user()
+    session.pop('sid', None)
+    flash(f"Your MyWealthLens account and all associated data have been "
+          f"permanently deleted. Goodbye, {user_name}.", 'success')
+    return redirect(url_for('login'))
+
+
+# ── Two-Factor Authentication (Sep 2026, Batch 3) ──
+
+@app.route('/account/2fa/setup', methods=['GET', 'POST'])
+@login_required
+@limiter.limit('10 per hour')
+def account_2fa_setup():
+    """
+    GET: starts (or resumes) a setup attempt — generates a fresh TOTP
+    secret if one isn't already pending, and shows the QR code to
+    scan. Note the secret is written to the DB here, before it's
+    confirmed — see the User.totp_secret docstring in models.py for
+    why that's fine (totp_enabled is what actually turns 2FA on).
+
+    POST: verifies the 6-digit code the user typed back in from their
+    authenticator app. On success, flips totp_enabled on, issues a
+    fresh set of backup codes, and shows them exactly once.
+    """
+    if current_user.totp_enabled:
+        flash('Two-factor authentication is already enabled on your account.', 'error')
+        return redirect(url_for('preferences') + '#security')
+
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip()
+        if not twofa.verify_totp_code(current_user.totp_secret, code):
+            flash('That code didn’t match. Double-check your authenticator app and try again.', 'error')
+            return redirect(url_for('account_2fa_setup'))
+
+        current_user.totp_enabled = True
+        # Clear out any stale unused codes from an earlier abandoned
+        # attempt before issuing a fresh set.
+        BackupCode.query.filter_by(user_id=current_user.id).delete()
+        plain_codes = twofa.generate_backup_codes()
+        for code_str in plain_codes:
+            db.session.add(BackupCode(user_id=current_user.id,
+                                       code_hash=twofa.hash_backup_code(code_str)))
+        db.session.commit()
+        return render_template('2fa_backup_codes.html', codes=plain_codes, regenerated=False)
+
+    if not current_user.totp_secret:
+        current_user.totp_secret = twofa.generate_secret()
+        db.session.commit()
+
+    uri = twofa.provisioning_uri(current_user.totp_secret, current_user.email)
+    qr = twofa.qr_data_uri(uri)
+    return render_template('2fa_setup.html', qr_data_uri=qr, secret=current_user.totp_secret)
+
+
+@app.route('/account/2fa/cancel-setup', methods=['POST'])
+@login_required
+@limiter.limit('10 per hour')
+def account_2fa_cancel_setup():
+    """Abandons an in-progress (not yet confirmed) setup attempt —
+    clears the pending secret so /account/2fa/setup starts clean next
+    time. Refuses to touch an already-ENABLED account; that's what
+    /account/2fa/disable is for, and it requires re-verifying the
+    account first."""
+    if not current_user.totp_enabled:
+        current_user.totp_secret = None
+        db.session.commit()
+    return redirect(url_for('preferences') + '#security')
+
+
+@app.route('/account/2fa/disable', methods=['POST'])
+@login_required
+@limiter.limit('5 per hour')
+def account_2fa_disable():
+    """Turning 2FA OFF requires proving you still control both factors
+    — current password AND a valid code — so a stolen/forgotten
+    session alone can't downgrade an account's security."""
+    current_pw = request.form.get('current_password', '')
+    code = request.form.get('code', '').strip()
+
+    if not bcrypt.checkpw(current_pw.encode('utf-8'), current_user.password.encode('utf-8')):
+        flash('Current password is incorrect. Two-factor authentication was not disabled.', 'error')
+        return redirect(url_for('preferences') + '#security')
+
+    ok = twofa.verify_totp_code(current_user.totp_secret, code)
+    if not ok:
+        for bc in BackupCode.query.filter_by(user_id=current_user.id, used=False).all():
+            if twofa.check_backup_code(code, bc.code_hash):
+                ok = True
+                break
+    if not ok:
+        flash('That code didn’t match. Two-factor authentication was not disabled.', 'error')
+        return redirect(url_for('preferences') + '#security')
+
+    current_user.totp_enabled = False
+    current_user.totp_secret = None
+    BackupCode.query.filter_by(user_id=current_user.id).delete()
+    db.session.commit()
+    flash('Two-factor authentication has been turned off.', 'success')
+    return redirect(url_for('preferences') + '#security')
+
+
+@app.route('/account/2fa/regenerate-backup-codes', methods=['POST'])
+@login_required
+@limiter.limit('5 per hour')
+def account_2fa_regenerate_backup_codes():
+    """Invalidates every existing backup code and issues 10 fresh ones
+    — for when a user has used most of them up, or worries an old set
+    may have leaked. Requires the current password, same bar as
+    disabling 2FA outright, since this is also a meaningful account-
+    recovery capability."""
+    if not current_user.totp_enabled:
+        flash('Two-factor authentication isn’t enabled on your account.', 'error')
+        return redirect(url_for('preferences') + '#security')
+
+    current_pw = request.form.get('current_password', '')
+    if not bcrypt.checkpw(current_pw.encode('utf-8'), current_user.password.encode('utf-8')):
+        flash('Current password is incorrect. Backup codes were not regenerated.', 'error')
+        return redirect(url_for('preferences') + '#security')
+
+    BackupCode.query.filter_by(user_id=current_user.id).delete()
+    plain_codes = twofa.generate_backup_codes()
+    for code_str in plain_codes:
+        db.session.add(BackupCode(user_id=current_user.id,
+                                   code_hash=twofa.hash_backup_code(code_str)))
+    db.session.commit()
+    return render_template('2fa_backup_codes.html', codes=plain_codes, regenerated=True)
+
+
+# ── Session Management ("log out other devices", Sep 2026, Batch 3) ──
+
+@app.route('/account/sessions/<int:session_id>/revoke', methods=['POST'])
+@login_required
+@limiter.limit('20 per hour')
+def account_revoke_session(session_id):
+    deleted, was_current = session_manager.revoke_session(current_user.id, session_id)
+    if not deleted:
+        flash('That session was already gone.', 'error')
+        return redirect(url_for('preferences') + '#security')
+
+    if was_current:
+        logout_user()
+        session.pop('sid', None)
+        flash('You have been logged out of this device.', 'success')
+        return redirect(url_for('login'))
+
+    flash('That device has been logged out.', 'success')
+    return redirect(url_for('preferences') + '#security')
+
+
+@app.route('/account/sessions/revoke-others', methods=['POST'])
+@login_required
+@limiter.limit('10 per hour')
+def account_revoke_other_sessions():
+    count = session_manager.revoke_other_sessions(current_user.id)
+    if count:
+        flash(f'Logged out {count} other device(s). This device stays signed in.', 'success')
+    else:
+        flash('No other active sessions found.', 'success')
+    return redirect(url_for('preferences') + '#security')
 
 
 @app.route('/account/encryption/setup', methods=['POST'])
