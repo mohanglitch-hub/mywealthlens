@@ -20,34 +20,22 @@ Safety measures:
   - Prints a final inventory-style verification that every count for
     this user_id is now zero, and that OTHER users' data is untouched.
 
+The actual table list/deletion order lives in account_deletion.py —
+shared with the self-service "Delete my account" web route (Batch 3,
+Sep 2026) so the two never drift apart the way this script and
+inventory_user.py's OWN separate copies of the table list once did
+(an audit found both still referenced `family`/`family_member`/
+`family_invite`, tables that no longer exist).
+
 Usage: py delete_user.py <user_id>
 Example: py delete_user.py 1
 """
 
-import sys, os, shutil
-from datetime import datetime
-
+import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app import app, db
-
-
-def backup_db():
-    db_uri = app.config.get("SQLALCHEMY_DATABASE_URI", "")
-    if not db_uri.startswith("sqlite:///"):
-        print("Non-SQLite database — back up manually before proceeding.")
-        return None
-    db_path = db_uri.replace("sqlite:///", "", 1)
-    if not os.path.isabs(db_path):
-        db_path = os.path.join(app.instance_path, db_path)
-    if not os.path.exists(db_path):
-        print("WARNING: could not locate the .db file to back up.")
-        return None
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(
-        os.path.dirname(db_path), f"mywealthlens_pre_user_delete_backup_{ts}.db")
-    shutil.copy2(db_path, backup_path)
-    return backup_path
+import account_deletion
 
 
 def delete_user(user_id):
@@ -70,15 +58,15 @@ def delete_user(user_id):
         # ── Confirmation: must type the exact email address ──
         print("\nThis will permanently delete this account and ALL data")
         print("tied to it, across every module (Wealth, Insurance,")
-        print("Retirement, Documents). This cannot be undone except by")
-        print("restoring the backup this script creates.")
+        print("Retirement, Family, Cashflow, Documents). This cannot be")
+        print("undone except by restoring the backup this script creates.")
         typed = input(f"\nType the account's email exactly to confirm ({email}): ").strip()
         if typed != email:
             print("\nEmail did not match. Aborting — nothing was changed.")
             return False
 
         # ── Step 1: backup ──
-        backup_path = backup_db()
+        backup_path = account_deletion.backup_db(app)
         if backup_path:
             print(f"\nStep 1: Backup written to:\n  {backup_path}")
         else:
@@ -90,81 +78,19 @@ def delete_user(user_id):
 
         # ── Step 2: document files on disk ──
         print("\nStep 2: Removing document files on disk...")
-        policy_ids = [r[0] for r in db.session.execute(
-            text("SELECT id FROM insurance_policy WHERE user_id = :uid"),
-            {"uid": uid}).fetchall()]
-        scheme_ids = [r[0] for r in db.session.execute(
-            text("SELECT id FROM retirement_scheme WHERE user_id = :uid"),
-            {"uid": uid}).fetchall()]
-
-        wealth_dir = os.path.join(app.instance_path, "documents", "wealth", str(uid))
-        if os.path.isdir(wealth_dir):
-            shutil.rmtree(wealth_dir)
-            print(f"  removed {wealth_dir}")
-
-        for pid in policy_ids:
-            d = os.path.join(app.instance_path, "documents", "insurance", str(pid))
-            if os.path.isdir(d):
-                shutil.rmtree(d)
-                print(f"  removed {d}")
-
-        for sid in scheme_ids:
-            d = os.path.join(app.instance_path, "documents", "retirement", str(sid))
-            if os.path.isdir(d):
-                shutil.rmtree(d)
-                print(f"  removed {d}")
+        removed_dirs = account_deletion.wipe_document_files(app, db, uid)
+        for d in removed_dirs:
+            print(f"  removed {d}")
+        if not removed_dirs:
+            print("  (none)")
 
         # ── Step 3: delete rows, children first ──
         print("\nStep 3: Deleting database rows (children before parents)...")
-
-        # Indirect (via policy_id / scheme_id)
-        if policy_ids:
-            ph = ",".join(str(i) for i in policy_ids)
-            for t, col in [("insurance_nominee", "policy_id"),
-                          ("insurance_member", "policy_id"),
-                          ("insurance_addon", "policy_id"),
-                          ("insurance_document", "policy_id"),
-                          ("insurance_timeline", "policy_id")]:
-                n = db.session.execute(text(f"DELETE FROM {t} WHERE {col} IN ({ph})")).rowcount
-                if n: print(f"  {t}: {n} row(s) deleted")
-
-        if scheme_ids:
-            sh = ",".join(str(i) for i in scheme_ids)
-            for t, col in [("retirement_contribution", "scheme_id"),
-                          ("retirement_balance_snapshot", "scheme_id"),
-                          ("retirement_timeline", "scheme_id"),
-                          ("retirement_scheme_nominee", "scheme_id"),
-                          ("retirement_document", "scheme_id")]:
-                n = db.session.execute(text(f"DELETE FROM {t} WHERE {col} IN ({sh})")).rowcount
-                if n: print(f"  {t}: {n} row(s) deleted")
-
-        # Direct user_id-owned tables
-        direct_tables = [
-            "mutual_fund", "stock", "goal", "user_profile", "loan",
-            "net_worth_history", "family_member",
-            "wealth_asset", "wealth_liability", "wealth_value_snapshot",
-            "wealth_snapshot", "wealth_snapshot_log", "wealth_document",
-            "insurance_policy", "retirement_scheme",
-            "cashflow_transaction", "cashflow_budget", "cashflow_recurring_payment",
-        ]
-        for t in direct_tables:
-            n = db.session.execute(
-                text(f"DELETE FROM {t} WHERE user_id = :uid"), {"uid": uid}).rowcount
-            if n: print(f"  {t}: {n} row(s) deleted")
-
-        # family created_by this user
-        n = db.session.execute(
-            text("DELETE FROM family WHERE created_by = :uid"), {"uid": uid}).rowcount
-        if n: print(f"  family: {n} row(s) deleted")
-
-        # family_invite keyed by email
-        n = db.session.execute(
-            text("DELETE FROM family_invite WHERE email = :email"), {"email": email}).rowcount
-        if n: print(f"  family_invite: {n} row(s) deleted")
-
-        # Finally, the user row itself
-        db.session.execute(text("DELETE FROM user WHERE id = :uid"), {"uid": uid})
-        db.session.commit()
+        summary = account_deletion.cascade_delete_user(app, db, uid)
+        for table, count in summary.items():
+            if table == "user":
+                continue
+            print(f"  {table}: {count} row(s) deleted")
         print(f"\n  user: 1 row deleted (id={uid})")
 
         # ── Step 4: verify ──

@@ -304,17 +304,28 @@ def _test_recurring_payments(client):
 
 
 def _test_delete_and_inventory_scripts():
+    # account_deletion.py (Sep 2026, Batch 3) is now the single source of
+    # truth for "every table tied to a user_id" -- delete_user.py and
+    # inventory_user.py both import DIRECT_TABLES/GOAL_ID_TABLES from it
+    # rather than keeping their own copies (that drift is exactly what
+    # caused the old `family`/`family_member`/`family_invite` bug this
+    # suite originally caught). So the real invariant to check is: (a)
+    # account_deletion.py's own list still covers the cashflow tables,
+    # and (b) both scripts still delegate to it instead of re-inlining
+    # their own list.
+    with open(os.path.join(REPO_ROOT, "account_deletion.py")) as f:
+        content = f.read()
+    check("account_deletion.py direct_tables includes cashflow_transaction", "cashflow_transaction" in content)
+    check("account_deletion.py direct_tables includes cashflow_budget", "cashflow_budget" in content)
+    check("account_deletion.py direct_tables includes cashflow_recurring_payment", "cashflow_recurring_payment" in content)
+
     with open(os.path.join(REPO_ROOT, "delete_user.py")) as f:
         content = f.read()
-    check("delete_user.py direct_tables includes cashflow_transaction", "cashflow_transaction" in content)
-    check("delete_user.py direct_tables includes cashflow_budget", "cashflow_budget" in content)
-    check("delete_user.py direct_tables includes cashflow_recurring_payment", "cashflow_recurring_payment" in content)
+    check("delete_user.py imports the shared account_deletion module", "import account_deletion" in content)
 
     with open(os.path.join(REPO_ROOT, "inventory_user.py")) as f:
         content = f.read()
-    check("inventory_user.py direct_tables includes cashflow_transaction", "cashflow_transaction" in content)
-    check("inventory_user.py direct_tables includes cashflow_budget", "cashflow_budget" in content)
-    check("inventory_user.py direct_tables includes cashflow_recurring_payment", "cashflow_recurring_payment" in content)
+    check("inventory_user.py imports the shared account_deletion module", "import account_deletion" in content)
 
 
 def _test_user_isolation(app, client_a, client_b, csrf_a):
