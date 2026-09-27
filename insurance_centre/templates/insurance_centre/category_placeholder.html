@@ -1,8 +1,0 @@
-{% extends "base.html" %}
-{% block title %}{{ category }} — Insurance Centre{% endblock %}
-{% block content %}
-<script>window.location = '/insurance-centre/policies?category={{ category | urlencode }}';</script>
-<div style="text-align:center; padding:60px; color:var(--muted);">
-  Redirecting to {{ category }} policies...
-</div>
-{% endblock %}
