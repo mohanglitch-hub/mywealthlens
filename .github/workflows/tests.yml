@@ -1,0 +1,44 @@
+name: Tests
+
+# Batch 7 (Sep 2026): runs the full test suite on every push and pull
+# request against master, so a change that breaks something is caught
+# before it reaches production. Each script in tests/ builds its own
+# throwaway SQLite database from scratch via the app's own Alembic
+# migrations (see tests/_scratch_env.py and test_cashflow.py's own
+# docstring) -- nothing here touches real data, and there's nothing
+# to configure or provision for this to work.
+#
+# Results show up on the "Actions" tab of the repo on GitHub, and as
+# a green check / red X next to each push and pull request.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch: {}  # lets you also trigger a run manually from the Actions tab
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+
+      - name: Run test suite
+        run: |
+          set -e
+          for f in tests/test_*.py; do
+            echo "::group::$f"
+            python "$f"
+            echo "::endgroup::"
+          done
