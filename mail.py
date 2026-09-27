@@ -106,3 +106,157 @@ def send_password_reset_email(instance_path, to_email, reset_url, ttl_minutes):
         return True, None
     except Exception as e:
         return False, str(e)
+
+
+def _send(instance_path, to_email, subject, text_body, html_body):
+    """
+    Shared send path for the notification emails below — same
+    config-loading and SMTP mechanics as send_password_reset_email()
+    above, just parameterized on subject/body instead of hardcoding
+    the reset-password content. Never raises; returns (ok, error).
+    """
+    config = _load_smtp_config(instance_path)
+    if config is None:
+        return False, "Email isn't configured yet (no MWL_SMTP_USER/MWL_SMTP_APP_PASSWORD env vars or instance/email_config.json)."
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = f'{config["from_name"]} <{config["user"]}>'
+    msg["To"] = to_email
+    msg.set_content(text_body)
+    msg.add_alternative(html_body, subtype="html")
+
+    try:
+        context = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+            server.starttls(context=context)
+            server.login(config["user"], config["app_password"])
+            server.send_message(msg)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def send_monthly_summary_email(instance_path, to_email, ctx):
+    """
+    Notifications (Sep 2026) — the opt-in monthly wealth summary email
+    (My Account > Notifications). `ctx` is a plain dict built by
+    notifications_service.py: {
+        month_label, net_worth, net_worth_change_display, total_income,
+        total_expense, net_cashflow, savings_rate, top_category,
+        top_category_amount,
+    } — all money figures pre-formatted strings (already converted to
+    the user's own display currency), so this function only lays them
+    out, never does currency math itself.
+    """
+    subject = f"Your MyWealthLens summary — {ctx['month_label']}"
+    text_body = (
+        f"Your MyWealthLens summary for {ctx['month_label']}\n\n"
+        f"Net worth: {ctx['net_worth']} ({ctx['net_worth_change_display']} since last month)\n\n"
+        f"Cashflow for {ctx['month_label']}:\n"
+        f"  Income:  {ctx['total_income']}\n"
+        f"  Expense: {ctx['total_expense']}\n"
+        f"  Net:     {ctx['net_cashflow']} ({ctx['savings_rate']}% savings rate)\n"
+    )
+    if ctx.get("top_category"):
+        text_body += f"  Biggest expense category: {ctx['top_category']} ({ctx['top_category_amount']})\n"
+    text_body += (
+        "\nOpen MyWealthLens to see the full picture.\n\n"
+        "You're getting this because you turned on the monthly summary "
+        "email under My Account > Notifications — turn it off there any time."
+    )
+
+    top_row = ""
+    if ctx.get("top_category"):
+        top_row = (
+            f'<tr><td style="padding:6px 0; color:#666;">Biggest expense category</td>'
+            f'<td style="padding:6px 0; text-align:right;">{ctx["top_category"]} '
+            f'({ctx["top_category_amount"]})</td></tr>'
+        )
+    html_body = f"""\
+<html><body style="font-family:sans-serif; color:#1a1a2e;">
+  <h2 style="margin-bottom:4px;">Your MyWealthLens summary</h2>
+  <p style="color:#666; margin-top:0;">{ctx['month_label']}</p>
+
+  <table style="width:100%; max-width:420px; border-collapse:collapse; margin:16px 0;">
+    <tr><td style="padding:6px 0; color:#666;">Net worth</td>
+        <td style="padding:6px 0; text-align:right; font-weight:600;">{ctx['net_worth']}</td></tr>
+    <tr><td style="padding:6px 0; color:#666;">Change since last month</td>
+        <td style="padding:6px 0; text-align:right;">{ctx['net_worth_change_display']}</td></tr>
+  </table>
+
+  <h3 style="margin-bottom:4px;">Cashflow</h3>
+  <table style="width:100%; max-width:420px; border-collapse:collapse; margin:8px 0 16px;">
+    <tr><td style="padding:6px 0; color:#666;">Income</td>
+        <td style="padding:6px 0; text-align:right;">{ctx['total_income']}</td></tr>
+    <tr><td style="padding:6px 0; color:#666;">Expense</td>
+        <td style="padding:6px 0; text-align:right;">{ctx['total_expense']}</td></tr>
+    <tr><td style="padding:6px 0; color:#666;">Net ({ctx['savings_rate']}% savings rate)</td>
+        <td style="padding:6px 0; text-align:right; font-weight:600;">{ctx['net_cashflow']}</td></tr>
+    {top_row}
+  </table>
+
+  <p style="font-size:0.85rem; color:#666;">
+    You're getting this because you turned on the monthly summary email
+    under My Account &gt; Notifications — turn it off there any time.
+  </p>
+</body></html>"""
+
+    return _send(instance_path, to_email, subject, text_body, html_body)
+
+
+def send_renewal_sip_reminder_email(instance_path, to_email, items):
+    """
+    Notifications (Sep 2026) — the opt-in renewal/SIP due-date reminder
+    email. `items` is a list of dicts (built by notifications_service.py),
+    each already formatted for display: {
+        label, detail, due_date_display, days_away,
+    } — e.g. {"label": "HDFC Life Term Plan renewal",
+              "detail": "Insurance", "due_date_display": "3 Oct 2026",
+              "days_away": 6}
+    One digest email per run per user, not one email per item.
+    """
+    count = len(items)
+    subject = (
+        f"1 item due soon — MyWealthLens" if count == 1
+        else f"{count} items due soon — MyWealthLens"
+    )
+
+    lines = []
+    for it in items:
+        when = "today" if it["days_away"] == 0 else (
+            "tomorrow" if it["days_away"] == 1 else f"in {it['days_away']} days"
+        )
+        lines.append(f"  - {it['label']} ({it['detail']}) — due {it['due_date_display']}, {when}")
+    text_body = (
+        "The following are coming due soon:\n\n" + "\n".join(lines) +
+        "\n\nOpen MyWealthLens for details.\n\n"
+        "You're getting this because you turned on renewal/SIP reminders "
+        "under My Account > Notifications — turn it off there any time."
+    )
+
+    rows = ""
+    for it in items:
+        when = "today" if it["days_away"] == 0 else (
+            "tomorrow" if it["days_away"] == 1 else f"in {it['days_away']} days"
+        )
+        rows += (
+            f'<tr><td style="padding:8px 0; border-bottom:1px solid #eee;">'
+            f'<div style="font-weight:600;">{it["label"]}</div>'
+            f'<div style="font-size:0.82rem; color:#666;">{it["detail"]}</div></td>'
+            f'<td style="padding:8px 0; border-bottom:1px solid #eee; text-align:right; white-space:nowrap;">'
+            f'{it["due_date_display"]}<br><span style="font-size:0.82rem; color:#666;">{when}</span></td></tr>'
+        )
+    html_body = f"""\
+<html><body style="font-family:sans-serif; color:#1a1a2e;">
+  <h2 style="margin-bottom:4px;">Coming due soon</h2>
+  <table style="width:100%; max-width:480px; border-collapse:collapse; margin:16px 0;">
+    {rows}
+  </table>
+  <p style="font-size:0.85rem; color:#666;">
+    You're getting this because you turned on renewal/SIP reminders under
+    My Account &gt; Notifications — turn it off there any time.
+  </p>
+</body></html>"""
+
+    return _send(instance_path, to_email, subject, text_body, html_body)

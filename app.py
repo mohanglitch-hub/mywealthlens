@@ -678,6 +678,25 @@ def update_display_currency():
     return redirect(url_for('preferences') + '#appearance')
 
 
+@app.route('/account/notifications', methods=['POST'])
+@login_required
+def update_notification_preferences():
+    """
+    Saves the two Notifications toggles (My Account > Notifications).
+    Both are plain checkboxes on one form, submitted together — an
+    unchecked checkbox simply isn't present in request.form, so
+    absence means False, matching a normal HTML form's behavior.
+    Actual sending happens later, via the `flask notifications ...`
+    CLI jobs (notifications_cli.py) run on a schedule — this route
+    only flips the opt-in flags.
+    """
+    current_user.notify_monthly_summary = 'notify_monthly_summary' in request.form
+    current_user.notify_renewal_sip_reminders = 'notify_renewal_sip_reminders' in request.form
+    db.session.commit()
+    flash("Notification preferences saved.", "success")
+    return redirect(url_for('preferences') + '#notifications')
+
+
 @app.route('/account')
 @login_required
 def account():
@@ -2635,6 +2654,12 @@ register_backup_cli(app)
 # Same Task Scheduler pattern as Wealth's snapshot CLI above.
 from price_refresh_cli import register_price_refresh_cli
 register_price_refresh_cli(app)
+
+# Notifications — `flask notifications monthly-summary` / `flask
+# notifications reminders` (Sep 2026). Same Task Scheduler pattern as
+# the CLI commands above; see notifications_cli.py / notifications_service.py.
+from notifications_cli import register_notifications_cli
+register_notifications_cli(app)
 
 if __name__ == '__main__':
     import os

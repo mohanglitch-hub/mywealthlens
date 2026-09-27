@@ -89,6 +89,16 @@ class User(UserMixin, db.Model):
     # rewrites a single stored value.
     display_currency = db.Column(db.String(3), nullable=False, default="INR")
 
+    # Notifications (Sep 2026) — both start OFF; the user opts in under
+    # My Account > Notifications. Matches the reset-password email's
+    # existing pattern of only ever sending mail the user asked for.
+    # Actual sending is driven by the `flask notifications ...` CLI
+    # commands (notifications_cli.py), invoked on a schedule via Windows
+    # Task Scheduler — same pattern as `flask wealth snapshot` / `flask
+    # backup run` / `flask prices refresh`. See notifications_service.py.
+    notify_monthly_summary       = db.Column(db.Boolean, nullable=False, default=False)
+    notify_renewal_sip_reminders = db.Column(db.Boolean, nullable=False, default=False)
+
     mutual_funds = db.relationship("MutualFund", backref="owner", lazy=True, cascade="all, delete-orphan")
     mf_transactions = db.relationship("MutualFundTransaction", backref="owner", lazy=True, cascade="all, delete-orphan")
     stocks       = db.relationship("Stock",      backref="owner", lazy=True, cascade="all, delete-orphan")
@@ -439,3 +449,35 @@ class FxRateCache(db.Model):
 
     def __repr__(self):
         return f"<FxRateCache {self.currency}={self.rate} fetched={self.fetched_at}>"
+
+
+class NotificationLog(db.Model):
+    """
+    Notifications (Sep 2026) — records one row per notification email
+    actually sent, so the daily `flask notifications ...` CLI runs (see
+    notifications_cli.py / notifications_service.py) never send the same
+    reminder or summary twice. Each row's (user_id, notif_type, ref_key)
+    is unique:
+      - monthly summary:  notif_type="monthly_summary",
+                           ref_key="YYYY-MM" (the month being summarized)
+      - renewal/SIP due:  notif_type="renewal_sip_reminder",
+                           ref_key="insurance:<policy_id>:<renewal_date>"
+                           or "recurring:<recurring_payment_id>:<due_date>"
+    A CLI run checks for an existing row before sending, so re-running
+    the same day (or after a missed day) never re-sends a reminder for
+    the same underlying due date — matching the idempotent-CLI pattern
+    already used by the Wealth snapshot / backup / price-refresh jobs.
+    """
+    __tablename__ = "notification_log"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "notif_type", "ref_key",
+                             name="uq_notification_log_user_type_ref"),
+    )
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    notif_type = db.Column(db.String(30), nullable=False)
+    ref_key    = db.Column(db.String(120), nullable=False)
+    sent_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<NotificationLog user={self.user_id} {self.notif_type} {self.ref_key}>"
