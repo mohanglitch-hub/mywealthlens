@@ -260,7 +260,7 @@
 
       <!-- ═══ Data & Privacy ═══ -->
       <section class="pref-section" id="sec-privacy" style="display:none;">
-        <div class="settings-card">
+        <div class="settings-card" id="danger-zone">
           <div class="card-title">Data &amp; Privacy</div>
           <div class="card-sub" style="margin-bottom:16px;">
             Your data is stored locally on this server only. Never shared or sold.
@@ -270,10 +270,38 @@
             <a href="/export/pdf" class="btn-setting">📄 Export my data (PDF)</a>
           </div>
           <div style="margin-top:12px;">
-            <button class="btn-danger"
-              onclick="if(confirm('Are you sure? This will permanently delete your account and all data.')) window.location='/account/delete'">
+            <button type="button" class="btn-danger" id="delete-account-toggle"
+              onclick="document.getElementById('delete-account-box').style.display='block'; this.style.display='none';">
               Delete my account
             </button>
+          </div>
+
+          <div id="delete-account-box" style="display:none; margin-top:20px; padding-top:20px; border-top:1px solid var(--border);">
+            <div style="font-weight:600; color:var(--down); margin-bottom:4px;">⚠️ Delete My Account</div>
+            <div style="color:var(--muted); font-size:0.82rem; margin-bottom:16px;">
+              This permanently deletes your account and everything tied to it — every asset, policy,
+              scheme, goal, transaction, and uploaded document, across every module. There is no undo
+              from here (only Mohan, working directly on the server, could restore from a backup file).
+            </div>
+            <form method="POST" action="{{ url_for('delete_account') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label for="delete_current_password">Current password</label>
+                <div class="input-wrapper">
+                  <input type="password" id="delete_current_password" name="current_password" required />
+                  <button type="button" class="toggle-pw" onclick="togglePw('delete_current_password',this)">Show</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="confirm_delete">Type <strong>DELETE</strong> to confirm</label>
+                <div class="input-wrapper">
+                  <input type="text" id="confirm_delete" name="confirm_delete" autocomplete="off" required />
+                </div>
+              </div>
+              <button type="submit" class="btn-setting" style="background:var(--down-bg); color:var(--down); border-color:var(--down);">
+                Permanently Delete My Account
+              </button>
+            </form>
           </div>
         </div>
       </section>
