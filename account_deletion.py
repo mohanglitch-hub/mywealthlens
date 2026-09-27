@@ -52,6 +52,7 @@ DIRECT_TABLES = [
     "retirement_scheme_nominee", "retirement_document", "retirement_timeline",
     "cashflow_transaction", "cashflow_budget", "cashflow_recurring_payment",
     "notification_log",
+    "user_session", "backup_code",
 ]
 
 # goal_holding_link has no user_id column of its own (it links a Goal

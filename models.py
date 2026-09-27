@@ -99,6 +99,15 @@ class User(UserMixin, db.Model):
     notify_monthly_summary       = db.Column(db.Boolean, nullable=False, default=False)
     notify_renewal_sip_reminders = db.Column(db.Boolean, nullable=False, default=False)
 
+    # Two-factor authentication (Sep 2026, Batch 3). totp_secret is the
+    # base32 TOTP seed (pyotp) -- set as soon as setup starts, but
+    # totp_enabled only flips to True once the user proves they can
+    # generate a valid code from it (see app.py's /account/2fa/setup).
+    # A secret sitting here with totp_enabled=False is just an
+    # in-progress/abandoned setup attempt, not a live second factor.
+    totp_secret  = db.Column(db.String(64), nullable=True)
+    totp_enabled = db.Column(db.Boolean, nullable=False, default=False)
+
     mutual_funds = db.relationship("MutualFund", backref="owner", lazy=True, cascade="all, delete-orphan")
     mf_transactions = db.relationship("MutualFundTransaction", backref="owner", lazy=True, cascade="all, delete-orphan")
     stocks       = db.relationship("Stock",      backref="owner", lazy=True, cascade="all, delete-orphan")
@@ -481,3 +490,57 @@ class NotificationLog(db.Model):
 
     def __repr__(self):
         return f"<NotificationLog user={self.user_id} {self.notif_type} {self.ref_key}>"
+
+
+class UserSession(db.Model):
+    """
+    Account security (Sep 2026, Batch 3) — server-side record of one
+    active login, so "log out other devices" is actually possible.
+
+    Flask's session cookie is signed but client-side by default: the
+    cookie alone can't be revoked from the server once issued. So each
+    successful login (see app.py's session_manager.create_session())
+    also writes one row here and puts its random `session_token` in
+    the browser's session cookie. A before_request check then confirms
+    that token still has a row before treating the request as
+    authenticated -- deleting the row (revoking) is what actually logs
+    that device out, on its very next request.
+
+    user_agent/ip_address are stored only to show a human a recognizable
+    "Chrome on Windows, last seen 2 hours ago" line in Preferences >
+    Security -- never used for anything else, and deleted the moment
+    the session itself is revoked or expires.
+    """
+    __tablename__ = "user_session"
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    session_token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    user_agent    = db.Column(db.String(255), nullable=True)
+    ip_address    = db.Column(db.String(64), nullable=True)
+    created_at    = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_seen_at  = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<UserSession user={self.user_id} token={self.session_token[:8]}…>"
+
+
+class BackupCode(db.Model):
+    """
+    One single-use 2FA recovery code (Sep 2026, Batch 3) -- issued 10
+    at a time whenever 2FA is enabled or backup codes are regenerated
+    (see app.py's /account/2fa/setup and /account/2fa/regenerate-backup-
+    codes). Stored bcrypt-hashed, exactly like the account password
+    (code_hash), never in plaintext -- the plain codes are shown to the
+    user exactly once, right after generation, and cannot be retrieved
+    again afterward. `used` flips to True the moment a code is
+    consumed at login, so each code works exactly once.
+    """
+    __tablename__ = "backup_code"
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    code_hash  = db.Column(db.String(256), nullable=False)
+    used       = db.Column(db.Boolean, nullable=False, default=False)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<BackupCode user={self.user_id} used={self.used}>"

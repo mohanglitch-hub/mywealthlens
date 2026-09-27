@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Two-Factor Authentication — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="auth-card">
+
+  <!-- Branding -->
+  <div style="text-align:center; margin-bottom:32px;">
+    <div style="font-family:'Roboto Mono',monospace; font-size:1.15rem; font-weight:700; letter-spacing:0.04em;">
+      <span style="color:var(--accent);">MyWealth</span><span style="color:var(--muted2);">Lens</span>
+    </div>
+    <div style="color:var(--muted2); font-size:0.72rem; margin-top:6px; letter-spacing:0.1em; text-transform:uppercase;">
+      Your complete financial picture
+    </div>
+  </div>
+
+  <div class="auth-title">Enter your authentication code</div>
+  <div class="auth-subtitle">Open your authenticator app and enter the 6-digit code, or use a backup code.</div>
+
+  <form method="POST" action="{{ url_for('login_2fa') }}" id="twofaForm" novalidate>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <div class="form-group">
+      <label for="code">Authentication code</label>
+      <input type="text" id="code" name="code"
+             placeholder="123456 or A1B2-C3D4-E5F6-G7H8"
+             required autocomplete="one-time-code" inputmode="text"
+             autofocus />
+      <div class="field-error" id="err-code"></div>
+    </div>
+
+    <button type="submit" class="btn-primary" id="twofaBtn" style="margin-top:8px;">
+      Verify
+    </button>
+  </form>
+
+  <div class="auth-footer" style="margin-top:24px;">
+    <a href="{{ url_for('login') }}">Cancel and go back to login</a>
+  </div>
+
+</div>
+
+<style>
+  .field-error { font-size:0.78rem; color:var(--down); margin-top:5px; min-height:16px; }
+  #twofaBtn:disabled { opacity:0.6; cursor:not-allowed; }
+</style>
+
+<script>
+  document.getElementById('twofaForm').addEventListener('submit', function(e) {
+    const code = document.getElementById('code').value.trim();
+    if (!code) {
+      document.getElementById('err-code').textContent = 'Please enter your code.';
+      e.preventDefault();
+      return;
+    }
+    const btn = document.getElementById('twofaBtn');
+    btn.textContent = 'Verifying…';
+    btn.disabled = true;
+  });
+</script>
+{% endblock %}

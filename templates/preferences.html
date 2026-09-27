@@ -215,6 +215,107 @@
             </div>
           </div>
         </div>
+
+        <!-- ═══ Two-Factor Authentication ═══ -->
+        <div class="settings-card" style="margin-top:16px;">
+          <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Two-Factor Authentication</div>
+          <div style="color:var(--muted); font-size:0.875rem; margin-bottom:16px;">
+            Require a code from an authenticator app, in addition to your password, when logging in.
+          </div>
+
+          {% if user.totp_enabled %}
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
+            <span style="color:var(--up); font-weight:600; font-size:0.85rem;">✓ Enabled</span>
+            <span style="color:var(--muted); font-size:0.8rem;">— {{ backup_codes_remaining }} unused backup code(s) remaining</span>
+          </div>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="btn-setting" onclick="document.getElementById('regen-codes-box').style.display='block'; this.style.display='none';">Regenerate Backup Codes</button>
+            <button type="button" class="btn-danger" onclick="document.getElementById('disable-2fa-box').style.display='block'; this.style.display='none';">Disable 2FA</button>
+          </div>
+
+          <div id="regen-codes-box" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+            <div style="color:var(--muted); font-size:0.82rem; margin-bottom:12px;">
+              This invalidates your current backup codes and issues 10 new ones. Requires your password.
+            </div>
+            <form method="POST" action="{{ url_for('account_2fa_regenerate_backup_codes') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label for="regen_password">Current password</label>
+                <div class="input-wrapper">
+                  <input type="password" id="regen_password" name="current_password" required />
+                  <button type="button" class="toggle-pw" onclick="togglePw('regen_password',this)">Show</button>
+                </div>
+              </div>
+              <button type="submit" class="btn-setting">Regenerate</button>
+            </form>
+          </div>
+
+          <div id="disable-2fa-box" style="display:none; margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+            <div style="color:var(--down); font-size:0.82rem; margin-bottom:12px;">
+              Turning this off means logging in will only require your password. Requires your password and a current code.
+            </div>
+            <form method="POST" action="{{ url_for('account_2fa_disable') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label for="disable_password">Current password</label>
+                <div class="input-wrapper">
+                  <input type="password" id="disable_password" name="current_password" required />
+                  <button type="button" class="toggle-pw" onclick="togglePw('disable_password',this)">Show</button>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="disable_code">Authentication code or backup code</label>
+                <input type="text" id="disable_code" name="code" required />
+              </div>
+              <button type="submit" class="btn-setting" style="background:var(--down-bg); color:var(--down); border-color:var(--down);">Disable Two-Factor Authentication</button>
+            </form>
+          </div>
+          {% else %}
+          <div style="color:var(--muted); font-size:0.85rem; margin-bottom:16px;">Not enabled.</div>
+          <a href="{{ url_for('account_2fa_setup') }}" class="btn-primary" style="width:auto; padding:10px 24px; text-decoration:none; display:inline-flex; align-items:center;">
+            Set Up Two-Factor Authentication
+          </a>
+          {% endif %}
+        </div>
+
+        <!-- ═══ Active Sessions ═══ -->
+        <div class="settings-card" style="margin-top:16px;">
+          <div style="font-weight:600; color:var(--text); margin-bottom:4px;">Active Sessions</div>
+          <div style="color:var(--muted); font-size:0.875rem; margin-bottom:16px;">
+            Devices currently logged into your account. If you don't recognize one, log it out.
+          </div>
+
+          {% for s in active_sessions %}
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
+            <div>
+              <div style="font-size:0.88rem; color:var(--text); font-weight:600;">
+                {{ s.device }}
+                {% if s.is_current %}<span style="color:var(--up); font-size:0.72rem; font-weight:700; margin-left:6px;">THIS DEVICE</span>{% endif %}
+              </div>
+              <div style="font-size:0.76rem; color:var(--muted); margin-top:2px;">
+                {{ s.ip_address }} · last active {{ s.last_seen_at.strftime('%d %b %Y, %I:%M %p') }}
+              </div>
+            </div>
+            <form method="POST" action="{{ url_for('account_revoke_session', session_id=s.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="btn-setting" style="padding:6px 14px; font-size:0.78rem;">
+                {{ 'Log out this device' if s.is_current else 'Log out' }}
+              </button>
+            </form>
+          </div>
+          {% else %}
+          <div style="color:var(--muted); font-size:0.85rem;">No active sessions found.</div>
+          {% endfor %}
+
+          {% if active_sessions|length > 1 %}
+          <form method="POST" action="{{ url_for('account_revoke_other_sessions') }}" style="margin-top:16px;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <button type="submit" class="btn-setting" style="background:var(--down-bg); color:var(--down); border-color:var(--down);">
+              Log Out All Other Devices
+            </button>
+          </form>
+          {% endif %}
+        </div>
       </section>
 
       <!-- ═══ Appearance ═══ -->

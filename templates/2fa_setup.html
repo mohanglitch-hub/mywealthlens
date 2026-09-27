@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Set Up Two-Factor Authentication — MyWealthLens{% endblock %}
+
+{% block content %}
+<div style="max-width:480px; margin:32px auto;">
+  <div class="settings-card">
+    <div style="font-weight:700; font-size:1.1rem; color:var(--text); margin-bottom:4px;">Set Up Two-Factor Authentication</div>
+    <div style="color:var(--muted); font-size:0.875rem; margin-bottom:20px;">
+      Scan this QR code with an authenticator app (Google Authenticator, Authy, 1Password, etc.), then enter the 6-digit code it shows you.
+    </div>
+
+    <div style="text-align:center; background:var(--surface2); border-radius:10px; padding:20px; margin-bottom:16px;">
+      <img src="{{ qr_data_uri }}" alt="2FA QR code" style="width:200px; height:200px; border-radius:6px;" />
+    </div>
+
+    <details style="margin-bottom:20px;">
+      <summary style="cursor:pointer; color:var(--accent); font-size:0.82rem; font-weight:600;">Can't scan it? Enter this code manually</summary>
+      <div style="margin-top:10px; font-family:var(--font-data); font-size:0.9rem; background:var(--surface2); padding:10px 12px; border-radius:6px; word-break:break-all; color:var(--text);">
+        {{ secret }}
+      </div>
+    </details>
+
+    <form method="POST" action="{{ url_for('account_2fa_setup') }}" id="setupForm" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="form-group">
+        <label for="code">6-digit code from your app</label>
+        <input type="text" id="code" name="code" placeholder="123456"
+               inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required autofocus />
+        <div class="field-error" id="err-code"></div>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:4px;">
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">Confirm and Enable</button>
+        <form method="POST" action="{{ url_for('account_2fa_cancel_setup') }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <button type="submit" class="btn-setting">Cancel</button>
+        </form>
+      </div>
+    </form>
+  </div>
+</div>
+
+<style>
+  .settings-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+  }
+  .field-error { font-size:0.78rem; color:var(--down); margin-top:5px; min-height:16px; }
+  .btn-setting {
+    background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 20px; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  }
+</style>
+{% endblock %}
