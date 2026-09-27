@@ -70,6 +70,15 @@ class User(UserMixin, db.Model):
     encryption_verifier_iv    = db.Column(db.String(64),  nullable=True)
     encryption_enabled_at     = db.Column(db.DateTime,    nullable=True)
 
+    # Forgot Password (Sep 2026): only the SHA-256 hash of the reset
+    # token is ever stored — the raw token exists only in the emailed
+    # link and briefly in memory while handling that request, never
+    # written to the database. A DB leak alone can't be used to reset
+    # anyone's password. Single-use (cleared on successful reset) and
+    # time-limited (see PASSWORD_RESET_TOKEN_TTL_MINUTES in app.py).
+    reset_token_hash    = db.Column(db.String(64), nullable=True)
+    reset_token_expires = db.Column(db.DateTime,   nullable=True)
+
     mutual_funds = db.relationship("MutualFund", backref="owner", lazy=True, cascade="all, delete-orphan")
     mf_transactions = db.relationship("MutualFundTransaction", backref="owner", lazy=True, cascade="all, delete-orphan")
     stocks       = db.relationship("Stock",      backref="owner", lazy=True, cascade="all, delete-orphan")
@@ -95,6 +104,12 @@ class MutualFund(db.Model):
     xirr        = db.Column(db.Float, nullable=True)   # cached per-scheme XIRR, refreshed on each CAS import
     source      = db.Column(db.String(20), default="cams")
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Production-readiness (Sep 2026): set whenever `nav` is refreshed via
+    # the manual "Refresh Prices" button or the scheduled `flask prices
+    # refresh` CLI command (see price_refresh.py) — same purpose as
+    # Stock.price_updated_at below, added now for parity since MFs didn't
+    # have any way to refresh nav after import until this.
+    nav_updated_at = db.Column(db.DateTime, nullable=True)
     transactions = db.relationship(
         "MutualFundTransaction", backref="holding", lazy=True,
         cascade="all, delete-orphan",
