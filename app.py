@@ -1922,8 +1922,14 @@ def _fmt(n):
     # and formats it in the user's chosen display currency — see
     # currency_display.py. Every _fmt() call site in this PDF export
     # gets currency-awareness for free via this one function.
+    # PDF-safe (Sep 2026 audit fix): this export uses ReportLab's base
+    # Helvetica font, which can't render the ₹ glyph (not in
+    # WinAnsiEncoding) — format_money_pdf_safe() spells INR as "Rs."
+    # instead, same convention insurance_centre's PDF export already
+    # used this for; format_money() (the ₹-glyph version) is correct
+    # for HTML templates, just not for this ReportLab document.
     import currency_display
-    return currency_display.format_money(n)
+    return currency_display.format_money_pdf_safe(n)
 
 def _pct(n):
     return f"{n:.1f}%"
