@@ -58,6 +58,16 @@ def _asset_fields_from_form(form):
         "current_value": _parse_float(form.get("current_value")) or 0,
         "value_as_of":   _parse_date(form.get("value_as_of")),
 
+        # Multi-currency (Sep 2026) — current_value above has already
+        # been converted to INR by the route (see routes.py's
+        # _apply_asset_currency_conversion) before this function ever
+        # sees the form; these fields are just the transparency record
+        # of what was actually entered and what rate was used.
+        "currency":      (form.get("currency") or "INR").strip().upper() or "INR",
+        "foreign_value": _parse_float(form.get("foreign_value")),
+        "fx_rate":       _parse_float(form.get("fx_rate")),
+        "fx_rate_date":  _parse_date(form.get("fx_rate_date")),
+
         "ownership_type":       form.get("ownership_type") or "Sole",
         "ownership_percentage": _parse_float(form.get("ownership_percentage")),
 
@@ -733,6 +743,14 @@ def _liability_fields_from_form(form):
         # ^ Phase L — the WealthLiability equivalent of WealthAsset's
         #   value_as_of, added new in this phase (Section 34/81:
         #   liabilities need the same backdating support assets do).
+
+        # Multi-currency (Sep 2026) — mirrors _asset_fields_from_form's
+        # currency block; outstanding_amount above has already been
+        # converted to INR by the route before this function sees it.
+        "currency":                   (form.get("currency") or "INR").strip().upper() or "INR",
+        "foreign_outstanding_amount": _parse_float(form.get("foreign_outstanding_amount")),
+        "fx_rate":                    _parse_float(form.get("fx_rate")),
+        "fx_rate_date":               _parse_date(form.get("fx_rate_date")),
 
         "ownership_type":       form.get("ownership_type") or "Sole",
         "ownership_percentage": _parse_float(form.get("ownership_percentage")),

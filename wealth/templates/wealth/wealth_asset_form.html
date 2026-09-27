@@ -101,14 +101,33 @@
       <div class="wealth-card-heading"><span class="wealth-card-num">4</span><span class="wealth-card-title" id="valueCardTitle">Current Value</span></div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
         <div class="form-group">
-          <label for="current_value" id="currentValueLabel">Current Value (₹) <span class="wealth-required-mark">*</span></label>
-          <input type="number" name="current_value" id="current_value" step="0.01" min="0"
-                 value="{{ values.current_value }}" required />
+          <label for="currency">Currency</label>
+          <select name="currency" id="currency">
+            {% for code, label in supported_currencies.items() %}
+            <option value="{{ code }}" {% if (values.currency or 'INR') == code %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
         </div>
         <div class="form-group">
           <label for="value_as_of">Valuation Date</label>
           <input type="date" name="value_as_of" id="value_as_of" value="{{ values.value_as_of }}"
                  max="{{ today_ist }}" />
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px;">
+        <div class="form-group" id="currentValueGroup">
+          <label for="current_value" id="currentValueLabel">Current Value (₹) <span class="wealth-required-mark">*</span></label>
+          <input type="number" name="current_value" id="current_value" step="0.01" min="0"
+                 value="{{ values.current_value }}" required />
+        </div>
+        <div class="form-group" id="foreignValueGroup" style="display:none;">
+          <label for="foreign_value" id="foreignValueLabel">Amount</label>
+          <input type="number" name="foreign_value" id="foreign_value" step="0.01" min="0"
+                 value="{{ values.foreign_value }}" />
+          <div style="font-size:0.72rem; color:var(--muted); margin-top:4px;">
+            Converted to INR automatically using the latest exchange rate when you save.
+            {% if values.fx_rate %}Last converted at 1 {{ values.currency }} = ₹{{ values.fx_rate }} (as of {{ values.fx_rate_date }}).{% endif %}
+          </div>
         </div>
       </div>
       {% if is_edit %}
@@ -117,6 +136,28 @@
       </div>
       {% endif %}
     </div>
+
+    <script>
+      (function() {
+        var currencySelect = document.getElementById('currency');
+        var currentValueGroup = document.getElementById('currentValueGroup');
+        var foreignValueGroup = document.getElementById('foreignValueGroup');
+        var currentValueInput = document.getElementById('current_value');
+        var foreignLabel = document.getElementById('foreignValueLabel');
+
+        function syncCurrencyUI() {
+          var isForeign = currencySelect.value !== 'INR';
+          foreignValueGroup.style.display = isForeign ? '' : 'none';
+          currentValueGroup.style.display = isForeign ? 'none' : '';
+          currentValueInput.required = !isForeign;
+          if (isForeign) {
+            foreignLabel.textContent = 'Amount (' + currencySelect.value + ')';
+          }
+        }
+        currencySelect.addEventListener('change', syncCurrencyUI);
+        syncCurrencyUI();
+      })();
+    </script>
 
     <script>
       (function() {

@@ -34,6 +34,7 @@ def register_price_refresh_cli(app):
         """
         from models import db
         from price_refresh import refresh_all_prices
+        import fx_rates
 
         click.echo("Starting price/NAV refresh for all users...")
         summary = refresh_all_prices(db, user_id=None)
@@ -46,5 +47,14 @@ def register_price_refresh_cli(app):
         click.echo(f"MFs not in AMFI file:    {summary['mfs_failed']}")
         if summary["amfi_error"]:
             click.echo(f"AMFI file error:         {summary['amfi_error']}")
+
+        click.echo("")
+        click.echo("Refreshing foreign-currency Wealth Centre holdings...")
+        fx_summary = fx_rates.refresh_fx_for_wealth_rows(db, user_id=None)
+        click.echo(f"Foreign-currency assets re-converted:      {fx_summary['assets_updated']}")
+        click.echo(f"Foreign-currency liabilities re-converted: {fx_summary['liabilities_updated']}")
+        for failure in fx_summary["currencies_failed"]:
+            click.echo(f"Couldn't fetch rate for {failure['currency']}: {failure['error']}")
+
         click.echo("")
         click.echo("Run completed.")

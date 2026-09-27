@@ -63,6 +63,11 @@
       <div class="wealth-field"><span class="wealth-field-label">Start Date</span><span class="wealth-field-value">{{ format_date(liability.start_date) }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Maturity / End Date</span><span class="wealth-field-value">{{ format_date(liability.expected_end_date) }}</span></div>
     </div>
+    {% if liability.currency and liability.currency != 'INR' %}
+    <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
+      Recorded as {{ '%.2f'|format(liability.foreign_outstanding_amount) if liability.foreign_outstanding_amount is not none else '—' }} {{ liability.currency }}, converted at 1 {{ liability.currency }} = ₹{{ liability.fx_rate }}{% if liability.fx_rate_date %} (as of {{ format_date(liability.fx_rate_date) }}){% endif %}.
+    </div>
+    {% endif %}
   </div>
 
   <!-- ── Lender Information ── -->

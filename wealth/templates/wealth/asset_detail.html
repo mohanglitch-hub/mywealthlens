@@ -68,6 +68,11 @@
       <div class="wealth-field"><span class="wealth-field-label">Acquisition Value</span><span class="wealth-field-value">{{ format_inr(asset.acquisition_value) if asset.acquisition_value is not none else '—' }}</span></div>
       <div class="wealth-field"><span class="wealth-field-label">Acquisition Date</span><span class="wealth-field-value">{{ format_date(asset.acquisition_date) }}</span></div>
     </div>
+    {% if asset.currency and asset.currency != 'INR' %}
+    <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
+      Recorded as {{ '%.2f'|format(asset.foreign_value) if asset.foreign_value is not none else '—' }} {{ asset.currency }}, converted at 1 {{ asset.currency }} = ₹{{ asset.fx_rate }}{% if asset.fx_rate_date %} (as of {{ format_date(asset.fx_rate_date) }}){% endif %}.
+    </div>
+    {% endif %}
   </div>
 
   <!-- ── Ownership ── -->
