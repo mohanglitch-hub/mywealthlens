@@ -282,22 +282,38 @@
       <section class="pref-section" id="sec-notifications" style="display:none;">
         <div class="settings-card">
           <div class="card-title">Notifications</div>
-          <div class="card-sub">Email reminders and alerts</div>
-          <div class="coming-soon-row">
-            <span>📧</span>
-            <div>
-              <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Monthly wealth summary email</div>
-              <div style="font-size:0.78rem; color:var(--muted);">Coming in a future phase</div>
+          <div class="card-sub">Email reminders and alerts — both start off; turn on whichever you want.</div>
+          <form method="POST" action="{{ url_for('update_notification_preferences') }}" id="notificationsForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <div class="coming-soon-row">
+              <span>📧</span>
+              <div>
+                <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Monthly wealth summary email</div>
+                <div style="font-size:0.78rem; color:var(--muted);">Net worth and last month's cashflow, sent once a month.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" name="notify_monthly_summary"
+                       {% if user.notify_monthly_summary %}checked{% endif %}
+                       onchange="document.getElementById('notificationsForm').submit();" />
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-            <span class="badge-soon">Soon</span>
-          </div>
-          <div class="coming-soon-row" style="border-bottom:none;">
-            <span>⏰</span>
-            <div>
-              <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Renewal / SIP due date reminders</div>
-              <div style="font-size:0.78rem; color:var(--muted);">Coming in a future phase</div>
+            <div class="coming-soon-row" style="border-bottom:none;">
+              <span>⏰</span>
+              <div>
+                <div style="font-size:0.85rem; font-weight:500; color:var(--text2);">Renewal / SIP due date reminders</div>
+                <div style="font-size:0.78rem; color:var(--muted);">Insurance renewals and recurring SIP/EMI payments due within 7 days.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" name="notify_renewal_sip_reminders"
+                       {% if user.notify_renewal_sip_reminders %}checked{% endif %}
+                       onchange="document.getElementById('notificationsForm').submit();" />
+                <span class="toggle-slider"></span>
+              </label>
             </div>
-            <span class="badge-soon">Soon</span>
+          </form>
+          <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
+            Sent from whatever email address MyWealthLens is configured to send from on this machine — if these emails aren't arriving, ask about setting up outbound email.
           </div>
         </div>
       </section>
@@ -590,6 +606,27 @@
     margin-left:auto; background:var(--warning-bg); color:var(--warning);
     border:1px solid var(--warning); border-radius:12px;
     font-size:0.7rem; padding:2px 8px; font-weight:600; white-space:nowrap;
+  }
+  .toggle-switch {
+    margin-left:auto; position:relative; display:inline-block;
+    width:40px; height:22px; flex-shrink:0;
+  }
+  .toggle-switch input { opacity:0; width:0; height:0; }
+  .toggle-slider {
+    position:absolute; cursor:pointer; inset:0;
+    background:var(--surface2); border:1px solid var(--border);
+    border-radius:22px; transition:all 0.2s;
+  }
+  .toggle-slider::before {
+    content:""; position:absolute; height:16px; width:16px;
+    left:2px; top:2px; background:var(--muted); border-radius:50%;
+    transition:all 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background:var(--accent); border-color:var(--accent);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform:translateX(18px); background:#fff;
   }
 
   /* About */
