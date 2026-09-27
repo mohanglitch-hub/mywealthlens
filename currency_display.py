@@ -204,6 +204,53 @@ def format_money_pdf_safe(value_inr):
     return f"{sign}{prefix}{v:,.2f}"
 
 
+def get_display_context_for_user(user):
+    """
+    Same as get_display_context(), but for background jobs (the
+    `flask notifications ...` CLI commands — see notifications_service.py)
+    that run outside a request/flask_login.current_user context and
+    iterate over many users' own display_currency in one process. Not
+    memoized in flask.g (there is no request to memoize against); each
+    call does at most one FxRateCache lookup/refresh, same as the
+    request-scoped path.
+    """
+    currency = (getattr(user, "display_currency", None) or "INR").upper().strip() or "INR"
+    if currency == "INR":
+        return ("INR", fx_rates.CURRENCY_SYMBOLS["INR"], 1.0, True)
+    rate = _get_cached_rate(currency)
+    if rate is None:
+        return ("INR", fx_rates.CURRENCY_SYMBOLS["INR"], 1.0, False)
+    symbol = fx_rates.CURRENCY_SYMBOLS.get(currency, currency + " ")
+    return (currency, symbol, rate, True)
+
+
+def format_money_for_user(value_inr, user):
+    """
+    format_money(), for the same background-job case as
+    get_display_context_for_user() above — takes the User object
+    directly instead of reading flask_login.current_user/flask.g.
+    """
+    if value_inr is None:
+        return "—"
+    currency, symbol, rate, _ok = get_display_context_for_user(user)
+    converted = value_inr / rate if rate else value_inr
+    sign = "-" if converted < 0 else ""
+    v = abs(converted)
+
+    if currency == "INR":
+        if v >= 10_000_000:
+            return f"{sign}{symbol}{v/10_000_000:.2f} Cr"
+        if v >= 100_000:
+            return f"{sign}{symbol}{v/100_000:.2f} L"
+        return f"{sign}{symbol}{v:,.0f}"
+
+    if v >= 1_000_000_000:
+        return f"{sign}{symbol}{v/1_000_000_000:.2f}B"
+    if v >= 1_000_000:
+        return f"{sign}{symbol}{v/1_000_000:.2f}M"
+    return f"{sign}{symbol}{v:,.2f}"
+
+
 def display_symbol():
     """Just the current display currency's symbol — for templates
     and JS chart configs that need to build their own label."""
