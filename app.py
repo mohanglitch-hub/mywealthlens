@@ -2713,11 +2713,11 @@ def delete_account():
 
     if not bcrypt.checkpw(current_pw.encode('utf-8'), current_user.password.encode('utf-8')):
         flash('Current password is incorrect. Account was not deleted.', 'error')
-        return redirect(url_for('preferences') + '#danger-zone')
+        return redirect(url_for('preferences') + '#privacy')
 
     if typed_confirm != 'DELETE':
         flash('You must type DELETE exactly to confirm. Account was not deleted.', 'error')
-        return redirect(url_for('preferences') + '#danger-zone')
+        return redirect(url_for('preferences') + '#privacy')
 
     import account_deletion
     user_id = current_user.id
