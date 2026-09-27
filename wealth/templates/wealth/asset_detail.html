@@ -263,11 +263,19 @@
     // same-effective-date correction must plot as ONE point (the
     // latest-recorded value for that date), never two contradictory
     // points at the same x-position (Section 45).
-    const points = {{ analytics.chart_points|map(attribute='value')|list|tojson }};
+    {% set converted_points = [] %}
+    {% for p in analytics.chart_points %}{% set _ = converted_points.append(to_display(p.value)) %}{% endfor %}
+    const points = {{ converted_points|tojson }};
     const labels = {{ analytics.chart_points|map(attribute='date')|list|tojson }};
-    const inrTick = v => v >= 10000000 ? '₹' + (v/10000000).toFixed(1) + 'Cr'
-                      : v >= 100000    ? '₹' + (v/100000).toFixed(1) + 'L'
-                      : '₹' + (v/1000).toFixed(0) + 'K';
+    const DISPLAY_SYMBOL = {{ display_symbol()|tojson }};
+    const DISPLAY_IS_INR = {{ (display_currency_code() == 'INR')|tojson }};
+    const DISPLAY_LOCALE = DISPLAY_IS_INR ? 'en-IN' : 'en-US';
+    const moneyTick = v => DISPLAY_IS_INR
+      ? (v >= 10000000 ? DISPLAY_SYMBOL + (v/10000000).toFixed(1) + 'Cr'
+        : v >= 100000   ? DISPLAY_SYMBOL + (v/100000).toFixed(1) + 'L'
+        : DISPLAY_SYMBOL + (v/1000).toFixed(0) + 'K')
+      : (v >= 1000000 ? DISPLAY_SYMBOL + (v/1000000).toFixed(1) + 'M'
+        : DISPLAY_SYMBOL + (v/1000).toFixed(1) + 'K');
     new Chart(document.getElementById('valueHistoryChart'), {
       type: 'line',
       data: { labels: labels, datasets: [{
@@ -277,10 +285,10 @@
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: ctx => ' ₹' + ctx.parsed.y.toLocaleString('en-IN') } } },
+          tooltip: { callbacks: { label: ctx => ' ' + DISPLAY_SYMBOL + ctx.parsed.y.toLocaleString(DISPLAY_LOCALE) } } },
         scales: {
           x: { ticks: { font: { size: 9 } } },
-          y: { ticks: { callback: inrTick } }
+          y: { ticks: { callback: moneyTick } }
         }
       }
     });

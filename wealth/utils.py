@@ -13,20 +13,17 @@ from datetime import date, datetime as _dt
 
 def format_inr(value):
     """
-    Format a number as Indian Rupees (Cr/L notation). Handles
-    negative values properly (Section 27/19 of Phase D spec — Net
-    Worth can legitimately be negative, and the sign must never be
-    hidden or dropped). e.g. -1000000 -> '-₹10.00 L', not '₹-1,000,000'.
+    Format a stored INR value for display. Despite the name (kept for
+    backward compatibility — every template in this module calls
+    format_inr(...)), this now converts to the user's chosen global
+    display currency (Sep 2026 — My Account > Appearance > Currency)
+    before formatting; INR-Cr/L notation is exactly the old behavior
+    when the display currency is left as INR. See currency_display.py
+    for the actual conversion/formatting logic and why this is a pure
+    display-layer change — stored values are never touched.
     """
-    if value is None:
-        return "—"
-    sign = "-" if value < 0 else ""
-    value = abs(value)
-    if value >= 10_000_000:
-        return f"{sign}₹{value/10_000_000:.2f} Cr"
-    if value >= 100_000:
-        return f"{sign}₹{value/100_000:.2f} L"
-    return f"{sign}₹{value:,.0f}"
+    from currency_display import format_money
+    return format_money(value)
 
 
 def format_date(d, fmt="%d %b %Y"):

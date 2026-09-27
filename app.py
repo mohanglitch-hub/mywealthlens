@@ -165,6 +165,25 @@ def refresh_session():
     app.permanent_session_lifetime = timedelta(minutes=30)
 
 
+# Global display currency (Sep 2026) — registered once here so every
+# template can call format_inr(...)/format_money_precise(...)/
+# display_symbol()/display_currency_code() without each route having
+# to pass them in explicitly. Routes/modules that already pass their
+# own format_inr into render_template() still take precedence for
+# that call (an explicit kwarg always overrides a Jinja global of the
+# same name) — those module-level format_inr functions were rewired
+# to delegate to currency_display.format_money() too, so both paths
+# end up currency-aware; this registration is the safety net for
+# templates/routes that never passed one explicitly.
+import currency_display
+app.jinja_env.globals["format_inr"] = currency_display.format_money
+app.jinja_env.globals["format_money"] = currency_display.format_money
+app.jinja_env.globals["format_money_precise"] = currency_display.format_money_precise
+app.jinja_env.globals["display_symbol"] = currency_display.display_symbol
+app.jinja_env.globals["display_currency_code"] = currency_display.display_currency_code
+app.jinja_env.globals["to_display"] = currency_display.to_display
+
+
 def _bootstrap_schema():
     """
     Production-readiness audit (Sep 2026): schema is now managed
@@ -453,18 +472,24 @@ def dashboard():
     ]
     upcoming_renewals.sort(key=lambda p: p.renewal_date)
 
-    # History for stacked area chart
+    # History for stacked area chart. Values are converted to the
+    # user's global display currency (Sep 2026) here, in Python,
+    # before being serialized to the template's `| tojson` — the
+    # chart's JS then just displays whatever numbers it's given,
+    # already in the right currency, and only needs to know which
+    # symbol/notation to label them with (see dashboard.html).
+    import currency_display
     history = NetWorthHistory.query.filter_by(user_id=current_user.id)\
         .order_by(NetWorthHistory.snapshot_date).limit(365).all()
     history_data = [{
         'date':        h.snapshot_date.strftime('%d %b %Y'),
-        'total':       h.total,
-        'equity':      h.equity,
-        'debt':        h.debt,
-        'gold':        h.gold,
-        'realestate':  h.realestate,
-        'cash':        h.cash,
-        'other':       h.other,
+        'total':       currency_display.to_display(h.total),
+        'equity':      currency_display.to_display(h.equity),
+        'debt':        currency_display.to_display(h.debt),
+        'gold':        currency_display.to_display(h.gold),
+        'realestate':  currency_display.to_display(h.realestate),
+        'cash':        currency_display.to_display(h.cash),
+        'other':       currency_display.to_display(h.other),
     } for h in history]
 
     # ── Unified cross-module Recent Activity (Wealth, Insurance,
@@ -605,11 +630,53 @@ def preferences():
         size_mb = (backup_settings.get('last_backup_size') or 0) / 1024 / 1024
         backup_last_display = parsed_dt.strftime('%d %b %Y, %I:%M %p') + f' UTC ({size_mb:.1f} MB)'
 
+    import fx_rates
     return render_template(
         'preferences.html', user=current_user, system_health=system_health,
         backup_settings=backup_settings, backup_has_passphrase=backup_services.has_passphrase(),
         backup_last_display=backup_last_display,
+        supported_currencies=fx_rates.SUPPORTED_CURRENCIES,
     )
+
+
+@app.route('/account/currency', methods=['POST'])
+@login_required
+def update_display_currency():
+    """
+    Saves the user's chosen global display currency (Sep 2026 — see
+    currency_display.py). Pure display-layer setting: nothing in the
+    database is converted or rewritten by this route, only the one
+    column that says which currency to convert TO at render time.
+    """
+    import fx_rates
+    currency = (request.form.get('currency') or 'INR').strip().upper()
+    if currency not in fx_rates.SUPPORTED_CURRENCIES:
+        flash(f"'{currency}' isn't a supported currency.", "error")
+        return redirect(url_for('preferences') + '#appearance')
+
+    current_user.display_currency = currency
+    db.session.commit()
+
+    if currency == 'INR':
+        flash("Display currency set to Indian Rupee (₹).", "success")
+    else:
+        # Warm the rate cache right away rather than waiting for the
+        # next page render to discover a fetch problem — the user
+        # should find out now, not see silently-wrong-looking numbers
+        # later. get_display_context() is memoized per-request (flask.g),
+        # so this doesn't cost anything extra on the redirect that follows.
+        import currency_display
+        _, _, _, ok = currency_display.get_display_context()
+        if ok:
+            flash(f"Display currency set to {fx_rates.SUPPORTED_CURRENCIES[currency]}. "
+                  f"Every value across the app is now shown converted to {currency} — "
+                  f"nothing in your data was changed.", "success")
+        else:
+            flash(f"Display currency set to {currency}, but today's exchange rate couldn't "
+                  f"be fetched — values will show in INR until a rate becomes available "
+                  f"(this refreshes automatically).", "warning")
+    return redirect(url_for('preferences') + '#appearance')
+
 
 @app.route('/account')
 @login_required
@@ -1412,6 +1479,19 @@ def goals():
 
         glide_curve = goal_glide.glide_path_curve(g, linked_value=linked_value)
         rebalance = goal_glide.rebalance_suggestion(g, linked_rows)
+        if rebalance:
+            # goal_glide.py is a pure function with no Flask/request context
+            # (see its module docstring), so it always messages in INR —
+            # re-render the amount here in the user's display currency
+            # (Sep 2026 global display currency feature) without touching
+            # its own INR-only "amount" field.
+            import currency_display
+            direction_word = "debt → equity" if rebalance["direction"] == "debt_to_equity" else "equity → debt"
+            target_pct = glide_curve[0]["equity_pct"] if glide_curve else 100.0
+            rebalance["message"] = (
+                f"Move {currency_display.format_money(rebalance['amount'])} {direction_word} "
+                f"to reach the {target_pct:.0f}% equity target for this year."
+            )
         drawdown = goal_glide.drawdown_curve(g, glide_curve[-1]['projected_corpus'] if glide_curve else 0)
         needs_review = (g.last_reviewed_at is None) or (g.last_reviewed_at < review_cutoff)
 
@@ -1680,7 +1760,8 @@ def link_goal_holding(goal_id):
         if remaining_pct <= 0:
             flash(f'{name} is already fully allocated to other goals — nothing left to link here.', 'error')
         else:
-            flash(f'Only {remaining_pct:g}% of {name} (₹{remaining_value:,.0f}) is still '
+            import currency_display
+            flash(f'Only {remaining_pct:g}% of {name} ({currency_display.format_money(remaining_value)}) is still '
                   f'unallocated — the rest is already linked to other goals.', 'error')
         return redirect(url_for('goals'))
 
@@ -1818,7 +1899,12 @@ _AMBER  = colors.HexColor('#f59e0b')
 
 # ── PDF helpers ───────────────────────────────────────────────────────────────
 def _fmt(n):
-    return f"₹{n:,.0f}"
+    # Global display currency (Sep 2026): converts the stored INR value
+    # and formats it in the user's chosen display currency — see
+    # currency_display.py. Every _fmt() call site in this PDF export
+    # gets currency-awareness for free via this one function.
+    import currency_display
+    return currency_display.format_money(n)
 
 def _pct(n):
     return f"{n:.1f}%"
@@ -1998,8 +2084,10 @@ def export_pdf():
 
     def pct(v): return round(v/total*100, 1) if total else 0
 
+    import currency_display
+    _sym = currency_display.display_symbol()
     summary_data = [
-        ['Asset Class', 'Value (₹)', 'Allocation %'],
+        ['Asset Class', f'Value ({_sym})', 'Allocation %'],
         ['📊 Equity (MF + Stocks)', _fmt(equity_val), _pct(pct(equity_val))],
         ['🏛️ Debt (PPF/VPF/SSY/FD)', _fmt(debt_val),  _pct(pct(debt_val))],
         ['🥇 Gold / Silver',          _fmt(gold_val),  _pct(pct(gold_val))],
@@ -2023,13 +2111,14 @@ def export_pdf():
     # Mutual Funds
     if mfs:
         story.append(Paragraph("Mutual Funds", S['h3']))
-        mf_data = [['Scheme Name', 'Folio', 'Units', 'NAV (₹)', 'Value (₹)']]
+        mf_data = [['Scheme Name', 'Folio', 'Units', f'NAV ({_sym})', f'Value ({_sym})']]
         for m in mfs:
+            nav_disp = currency_display.to_display(getattr(m, 'nav', 0) or 0)
             mf_data.append([
                 m.scheme or '—',
                 getattr(m, 'folio', '—') or '—',
                 f"{getattr(m, 'units', 0) or 0:,.3f}",
-                f"{getattr(m, 'nav', 0) or 0:,.2f}",
+                f"{nav_disp:,.2f}",
                 _fmt(m.value),
             ])
         mt = Table(mf_data, colWidths=[W*0.42, W*0.16, W*0.12, W*0.14, W*0.16])
@@ -2039,12 +2128,13 @@ def export_pdf():
     # Stocks
     if stocks:
         story.append(Paragraph("Stocks / Demat Holdings", S['h3']))
-        sk_data = [['Company / ISIN', 'Quantity', 'Price (₹)', 'Value (₹)']]
+        sk_data = [['Company / ISIN', 'Quantity', f'Price ({_sym})', f'Value ({_sym})']]
         for s in stocks:
+            price_disp = currency_display.to_display(s.live_price or s.buy_price or 0)
             sk_data.append([
                 s.name or getattr(s, 'isin', '—') or '—',
                 f"{getattr(s, 'quantity', 0) or 0:,.0f}",
-                f"{(s.live_price or s.buy_price or 0):,.2f}",
+                f"{price_disp:,.2f}",
                 _fmt(s.value),
             ])
         skt = Table(sk_data, colWidths=[W*0.46, W*0.16, W*0.18, W*0.20])
@@ -2067,7 +2157,7 @@ def export_pdf():
         if not items:
             continue
         story.append(Paragraph(f"{cat_icons.get(cat, '📦')} {cat}", S['h3']))
-        ph_data = [['Name', 'Value (₹)']]
+        ph_data = [['Name', f'Value ({_sym})']]
         for a in items:
             ph_data.append([a.name or cat, _fmt(a.current_value)])
         ph_data.append(['Subtotal', _fmt(sum(a.current_value for a in items))])
@@ -2103,7 +2193,7 @@ def export_pdf():
                  'Projected Corpus', _fmt(calc['projected'])],
                 ['Years Left', str(calc['years_left']),
                  'Status',
-                 'On Track ✓' if calc['on_track'] else f"Shortfall ₹{calc.get('shortfall',0):,.0f}"],
+                 'On Track ✓' if calc['on_track'] else f"Shortfall {_fmt(calc.get('shortfall',0))}"],
             ]
             if linked_value > 0 or calc.get('inflation_applied'):
                 extra_row = [
@@ -2136,15 +2226,17 @@ def export_pdf():
                                    g.monthly_sip, g.annual_return, getattr(g, 'step_up_pct', 0) or 0)
             if proj:
                 story.append(Paragraph("SIP Growth Projection", S['h3']))
-                sip_hdr = [['Period', 'Projected Balance (₹)', 'vs Target (₹)', 'Progress %']]
+                sip_hdr = [['Period', f'Projected Balance ({_sym})', f'vs Target ({_sym})', 'Progress %']]
                 sip_rows = []
                 for (label, bal, kind) in proj:
                     delta = bal - compare_target
                     progress = min(round(bal / compare_target * 100, 1), 100) if compare_target else 0
+                    bal_disp = currency_display.to_display(bal)
+                    delta_disp = currency_display.to_display(delta)
                     sip_rows.append([
                         label,
-                        f"{bal:,.0f}",
-                        f"{'+' if delta >= 0 else ''}{delta:,.0f}",
+                        f"{bal_disp:,.0f}",
+                        f"{'+' if delta_disp >= 0 else ''}{delta_disp:,.0f}",
                         f"{progress}%",
                     ])
                 sip_data = sip_hdr + sip_rows
@@ -2199,6 +2291,15 @@ def export_excel():
                        + sum(a.current_value for a in assets_by_cat.get(WealthAssetCategory.OTHER, [])))
     cash_val       = 0
     total          = equity_val + debt_val + gold_val + realestate_val + cash_val + other_val
+
+    # Global display currency (Sep 2026): every stored figure below is
+    # still INR; convert to the user's chosen display currency before
+    # writing it into a cell, and label/format cells with that currency's
+    # symbol instead of a hardcoded ₹. See currency_display.py.
+    import currency_display
+    _sym = currency_display.display_symbol()
+    _cd  = currency_display.to_display
+    _num_fmt = f'"{_sym}"#,##0'
 
     wb = openpyxl.Workbook()
 
@@ -2285,7 +2386,7 @@ def export_excel():
     r += 1
     _title_cell(ws1, r, 1, "NET WORTH SUMMARY", sz=11)
     r += 1
-    _hdr_row(ws1, r, ['Asset Class', 'Value (₹)', 'Allocation %'])
+    _hdr_row(ws1, r, ['Asset Class', f'Value ({_sym})', 'Allocation %'])
     r += 1
     summary_rows = [
         ('Equity (MF + Stocks)', equity_val),
@@ -2295,13 +2396,15 @@ def export_excel():
         ('Cash & Others', cash_val + other_val),
     ]
     for i, (lbl, val) in enumerate(summary_rows):
+        # Percentage stays a ratio of the raw INR totals (unaffected by
+        # currency conversion); only the displayed value itself converts.
         pct_val = round(val/total*100, 1) if total else 0
-        _data_row(ws1, r, [lbl, val, f"{pct_val}%"], alt=i%2==1)
-        ws1.cell(row=r, column=2).number_format = '₹#,##0'
+        _data_row(ws1, r, [lbl, _cd(val), f"{pct_val}%"], alt=i%2==1)
+        ws1.cell(row=r, column=2).number_format = _num_fmt
         r += 1
     # Total row
-    _hdr_row(ws1, r, ['TOTAL', total, '100%'])
-    ws1.cell(row=r, column=2).number_format = '₹#,##0'
+    _hdr_row(ws1, r, ['TOTAL', _cd(total), '100%'])
+    ws1.cell(row=r, column=2).number_format = _num_fmt
 
     _set_col_widths(ws1, [28, 20, 15])
     _freeze(ws1, 'A5')
@@ -2318,23 +2421,26 @@ def export_excel():
 
     _title_cell(ws2, 1, 1, "All Assets", sz=14)
     r2 = 3
-    _hdr_row(ws2, r2, ['Category', 'Name / Scheme', 'Sub-type', 'Units / Qty', 'Price / NAV (₹)', 'Value (₹)'])
+    _hdr_row(ws2, r2, ['Category', 'Name / Scheme', 'Sub-type', 'Units / Qty', f'Price / NAV ({_sym})', f'Value ({_sym})'])
     r2 += 1
 
     all_rows = []
     for m in mfs:
+        nav = getattr(m, 'nav', '') or ''
         all_rows.append(['Mutual Fund', m.scheme or '—',
                          getattr(m, 'amc', '') or '',
-                         getattr(m, 'units', '') or '', getattr(m, 'nav', '') or '', m.value])
+                         getattr(m, 'units', '') or '', _cd(nav) if nav != '' else '', _cd(m.value)])
     for s in stocks:
+        price = s.live_price or s.buy_price or ''
         all_rows.append(['Stock', s.name or '—', getattr(s, 'isin', '') or '',
-                         getattr(s, 'quantity', '') or '', (s.live_price or s.buy_price or ''), s.value])
+                         getattr(s, 'quantity', '') or '', _cd(price) if price != '' else '', _cd(s.value)])
     for a in all_assets_flat:
-        all_rows.append([a.category, a.name or '—', a.asset_type or '', '', '', a.current_value])
+        all_rows.append([a.category, a.name or '—', a.asset_type or '', '', '', _cd(a.current_value)])
 
     for i, row_data in enumerate(all_rows):
         _data_row(ws2, r2, row_data, alt=i%2==1)
-        ws2.cell(row=r2, column=6).number_format = '₹#,##0'
+        ws2.cell(row=r2, column=5).number_format = _num_fmt
+        ws2.cell(row=r2, column=6).number_format = _num_fmt
         r2 += 1
 
     _set_col_widths(ws2, [16, 40, 20, 12, 15, 16])
@@ -2363,15 +2469,15 @@ def export_excel():
                                   getattr(g, 'step_up_pct', 0) or 0)
             _title_cell(ws4, r4, 1, f"{g.emoji or '⭐'} {g.name}", sz=12)
             r4 += 1
-            _hdr_row(ws4, r4, ['Target (₹)', 'Target Year', 'Savings (₹)',
-                                'SIP/mo (₹)', 'Return %', 'Projected (₹)', 'Status'])
+            _hdr_row(ws4, r4, [f'Target ({_sym})', 'Target Year', f'Savings ({_sym})',
+                                f'SIP/mo ({_sym})', 'Return %', f'Projected ({_sym})', 'Status'])
             r4 += 1
-            status = 'On Track ✓' if calc['on_track'] else f"Shortfall ₹{calc.get('shortfall',0):,.0f}"
-            _data_row(ws4, r4, [g.target_amt, g.target_year, g.current_savings or 0,
-                                 g.monthly_sip or 0, f"{g.annual_return}%",
-                                 round(calc['projected']), status])
+            status = 'On Track ✓' if calc['on_track'] else f"Shortfall {currency_display.format_money(calc.get('shortfall',0))}"
+            _data_row(ws4, r4, [_cd(g.target_amt), g.target_year, _cd(g.current_savings or 0),
+                                 _cd(g.monthly_sip or 0), f"{g.annual_return}%",
+                                 round(_cd(calc['projected'])), status])
             for col in [1, 3, 4, 6]:
-                ws4.cell(row=r4, column=col).number_format = '₹#,##0'
+                ws4.cell(row=r4, column=col).number_format = _num_fmt
             ws4.cell(row=r4, column=7).font = \
                 _font(GREEN_HEX if calc['on_track'] else RED_HEX, bold=True, sz=9)
             r4 += 2
@@ -2379,7 +2485,7 @@ def export_excel():
             # SIP projection
             ws4.cell(row=r4, column=1, value="SIP Growth Projection").font = _font(TEAL_HEX, bold=True, sz=10)
             r4 += 1
-            _hdr_row(ws4, r4, ['Period', 'Projected Balance (₹)', 'vs Target (₹)', 'Progress %'])
+            _hdr_row(ws4, r4, ['Period', f'Projected Balance ({_sym})', f'vs Target ({_sym})', 'Progress %'])
             r4 += 1
 
             compare_target = calc['inflation_adjusted_target'] if calc.get('inflation_applied') else g.target_amt
@@ -2388,9 +2494,9 @@ def export_excel():
             for i, (label, bal, _) in enumerate(proj):
                 delta = bal - compare_target
                 progress = min(round(bal / compare_target * 100, 1), 100) if compare_target else 0
-                _data_row(ws4, r4, [label, round(bal), round(delta), f"{progress}%"], alt=i%2==1)
-                ws4.cell(row=r4, column=2).number_format = '₹#,##0'
-                ws4.cell(row=r4, column=3).number_format = '₹#,##0'
+                _data_row(ws4, r4, [label, round(_cd(bal)), round(_cd(delta)), f"{progress}%"], alt=i%2==1)
+                ws4.cell(row=r4, column=2).number_format = _num_fmt
+                ws4.cell(row=r4, column=3).number_format = _num_fmt
                 delta_color = GREEN_HEX if delta >= 0 else RED_HEX
                 ws4.cell(row=r4, column=3).font = _font(delta_color, sz=9)
                 r4 += 1
