@@ -641,6 +641,7 @@ def preferences():
 
 @app.route('/account/currency', methods=['POST'])
 @login_required
+@limiter.limit('20 per hour')
 def update_display_currency():
     """
     Saves the user's chosen global display currency (Sep 2026 — see
@@ -680,6 +681,7 @@ def update_display_currency():
 
 @app.route('/account/notifications', methods=['POST'])
 @login_required
+@limiter.limit('20 per hour')
 def update_notification_preferences():
     """
     Saves the two Notifications toggles (My Account > Notifications).
@@ -1599,6 +1601,7 @@ def goals():
 
 @app.route('/goals/add', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def add_goal():
     name        = request.form.get('name', '').strip()
     emoji       = request.form.get('emoji', '').strip()
@@ -1646,6 +1649,7 @@ def add_goal():
 
 @app.route('/goals/edit/<int:goal_id>', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def edit_goal(goal_id):
     """Same fields/validation as add_goal(), but updates an existing
     goal in place — needed because glide-path and retirement-drawdown
@@ -1700,6 +1704,7 @@ def edit_goal(goal_id):
 
 @app.route('/goals/delete/<int:goal_id>', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def delete_goal(goal_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -1728,6 +1733,7 @@ _DEFAULT_ASSET_CLASS = {
 
 @app.route('/goals/<int:goal_id>/link', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def link_goal_holding(goal_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -1794,6 +1800,7 @@ def link_goal_holding(goal_id):
 
 @app.route('/goals/<int:goal_id>/unlink/<int:link_id>', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def unlink_goal_holding(goal_id, link_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -1811,6 +1818,7 @@ def unlink_goal_holding(goal_id, link_id):
 
 @app.route('/goals/<int:goal_id>/review', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def review_goal(goal_id):
     """Goal review nudge (see GOAL_REVIEW_PERIOD_DAYS in goals()) —
     just stamps last_reviewed_at. Deliberately doesn't change any
@@ -1829,6 +1837,7 @@ def review_goal(goal_id):
 
 @app.route('/goals/<int:goal_id>/archive', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def archive_goal(goal_id):
     """Archive a goal as either 'achieved' or 'dropped' — same
     Archive -> Restore lifecycle used across Insurance/Retirement
@@ -1860,6 +1869,7 @@ def archive_goal(goal_id):
 
 @app.route('/goals/<int:goal_id>/restore', methods=['POST'])
 @login_required
+@limiter.limit('30 per hour')
 def restore_goal(goal_id):
     goal = Goal.query.get_or_404(goal_id)
     if goal.user_id != current_user.id:
@@ -2553,6 +2563,7 @@ def rate_limit_exceeded(e):
 
 @app.route('/account/change-password', methods=['POST'])
 @login_required
+@limiter.limit('10 per hour')
 def change_password():
     current_pw = request.form.get('current_password', '')
     new_pw     = request.form.get('new_password', '')
@@ -2571,6 +2582,57 @@ def change_password():
     db.session.commit()
     flash('Password changed successfully!', 'success')
     return redirect(url_for('preferences'))
+
+
+@app.route('/account/delete', methods=['POST'])
+@login_required
+@limiter.limit('5 per hour')
+def delete_account():
+    """
+    Self-service "Delete my account" (Batch 3, Sep 2026). Permanently
+    deletes the signed-in user's account and everything tied to it,
+    across every module — the same cascade-delete logic the admin CLI
+    tool (delete_user.py) uses, both sourced from account_deletion.py
+    so the two can never drift the way this project's table lists once
+    did (see that module's docstring).
+
+    Two-factor confirmation, since this is irreversible from the UI:
+      1. Current password (bcrypt-verified, same pattern as
+         change_password() above).
+      2. Typing the literal word DELETE into a confirmation field —
+         stronger than the backup-restore box's checkbox, because a
+         restore can be undone and this cannot.
+
+    A full DB backup is still taken first (account_deletion.backup_db)
+    as a last-resort safety net for Mohan himself, even though the
+    user-facing flow treats this as final.
+    """
+    current_pw = request.form.get('current_password', '')
+    typed_confirm = (request.form.get('confirm_delete', '') or '').strip()
+
+    if not bcrypt.checkpw(current_pw.encode('utf-8'), current_user.password.encode('utf-8')):
+        flash('Current password is incorrect. Account was not deleted.', 'error')
+        return redirect(url_for('preferences') + '#danger-zone')
+
+    if typed_confirm != 'DELETE':
+        flash('You must type DELETE exactly to confirm. Account was not deleted.', 'error')
+        return redirect(url_for('preferences') + '#danger-zone')
+
+    import account_deletion
+    user_id = current_user.id
+    user_name = current_user.name
+
+    # Backup first — best-effort; deletion still proceeds even if this
+    # fails, since the user explicitly asked for their data gone.
+    account_deletion.backup_db(app)
+
+    account_deletion.wipe_document_files(app, db, user_id)
+    account_deletion.cascade_delete_user(app, db, user_id)
+
+    logout_user()
+    flash(f"Your MyWealthLens account and all associated data have been "
+          f"permanently deleted. Goodbye, {user_name}.", 'success')
+    return redirect(url_for('login'))
 
 
 @app.route('/account/encryption/setup', methods=['POST'])
