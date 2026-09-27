@@ -235,13 +235,25 @@
         <div class="settings-card">
           <div class="card-title">Currency</div>
           <div class="card-sub" style="margin-bottom:12px;">All values displayed in</div>
-          <div class="currency-box">
-            <span style="font-size:1.1rem;">₹</span>
-            <span>Indian Rupee (INR)</span>
-            <span class="badge-active">Active</span>
-          </div>
+          <form method="POST" action="{{ url_for('update_display_currency') }}" id="currencyForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+              <select name="currency" id="displayCurrencySelect"
+                      style="background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:9px 12px; color:var(--text); font-family:'Inter',sans-serif; font-size:0.88rem;"
+                      onchange="document.getElementById('currencyForm').submit();">
+                {% for code, label in supported_currencies.items() %}
+                <option value="{{ code }}" {% if (user.display_currency or 'INR') == code %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="badge-active">Active</span>
+            </div>
+          </form>
           <div style="font-size:0.78rem; color:var(--muted); margin-top:10px;">
-            Multi-currency support coming in a future phase
+            {% if (user.display_currency or 'INR') == 'INR' %}
+            Every amount in MyWealthLens is stored in INR — this only changes what it's <em>shown as</em>. Pick another currency and everything on screen (and in your exports) converts automatically using the latest exchange rate; nothing in your data is ever rewritten.
+            {% else %}
+            Values are being converted from INR to {{ user.display_currency }} for display using the latest available exchange rate. Your underlying data is still stored in INR — switch back any time with no loss of information.
+            {% endif %}
           </div>
         </div>
       </section>

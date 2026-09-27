@@ -107,14 +107,11 @@ def annual_premium(amount, frequency):
 # ── Display Helpers ───────────────────────────────────────────────────────────
 
 def format_inr(value):
-    """Format a number as Indian Rupees."""
-    if value is None:
-        return "—"
-    if value >= 10_000_000:
-        return f"₹{value/10_000_000:.2f} Cr"
-    if value >= 100_000:
-        return f"₹{value/100_000:.2f} L"
-    return f"₹{value:,.0f}"
+    """Format a stored INR value for display, converted to the user's
+    chosen global display currency (Sep 2026) — see currency_display.py.
+    Name kept for backward compatibility with every template call site."""
+    from currency_display import format_money
+    return format_money(value)
 
 
 def renewal_badge(policy):

@@ -392,11 +392,18 @@
     Chart.defaults.color = labelColor;
     Chart.defaults.font.family = "'Inter', sans-serif";
     Chart.defaults.font.size = 11;
-    const inrTick = v => v >= 10000000 ? '₹' + (v/10000000).toFixed(1) + 'Cr'
-                      : v >= 100000    ? '₹' + (v/100000).toFixed(1) + 'L'
-                      : v <= -10000000 ? '-₹' + (Math.abs(v)/10000000).toFixed(1) + 'Cr'
-                      : v <= -100000   ? '-₹' + (Math.abs(v)/100000).toFixed(1) + 'L'
-                      : '₹' + (v/1000).toFixed(0) + 'K';
+    const DISPLAY_SYMBOL = {{ display_symbol()|tojson }};
+    const DISPLAY_IS_INR = {{ (display_currency_code() == 'INR')|tojson }};
+    const DISPLAY_LOCALE = DISPLAY_IS_INR ? 'en-IN' : 'en-US';
+    const inrTick = v => DISPLAY_IS_INR
+      ? (v >= 10000000 ? DISPLAY_SYMBOL + (v/10000000).toFixed(1) + 'Cr'
+        : v >= 100000   ? DISPLAY_SYMBOL + (v/100000).toFixed(1) + 'L'
+        : v <= -10000000 ? '-' + DISPLAY_SYMBOL + (Math.abs(v)/10000000).toFixed(1) + 'Cr'
+        : v <= -100000   ? '-' + DISPLAY_SYMBOL + (Math.abs(v)/100000).toFixed(1) + 'L'
+        : DISPLAY_SYMBOL + (v/1000).toFixed(0) + 'K')
+      : (v >= 1000000 ? DISPLAY_SYMBOL + (v/1000000).toFixed(1) + 'M'
+        : v <= -1000000 ? '-' + DISPLAY_SYMBOL + (Math.abs(v)/1000000).toFixed(1) + 'M'
+        : DISPLAY_SYMBOL + (v/1000).toFixed(1) + 'K');
 
     new Chart(cfTrendCanvas, {
       type: 'line',
@@ -424,7 +431,7 @@
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom', labels: { usePointStyle: true, font: { size: 10 } } },
-          tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ₹' + ctx.parsed.y.toLocaleString('en-IN') } }
+          tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + DISPLAY_SYMBOL + ctx.parsed.y.toLocaleString(DISPLAY_LOCALE) } }
         },
         scales: {
           x: { grid: { color: gridColor }, ticks: { color: labelColor, font: { size: 9 } } },
@@ -436,8 +443,8 @@
 
   const cfCategoryCanvas = document.getElementById('cfCategoryChart');
   if (cfCategoryCanvas) {
-    const catLabels = {{ summary.by_category.keys() | list | tojson }};
-    const catValues = {{ summary.by_category.values() | list | tojson }};
+    const catLabels = {{ by_category_display.keys() | list | tojson }};
+    const catValues = {{ by_category_display.values() | list | tojson }};
     const catColorMap = {{ category_colors | tojson }};
     const cfCategoryColor = name => catColorMap[name] || catColorMap['Other'];
     new Chart(cfCategoryCanvas, {
@@ -456,7 +463,7 @@
         cutout: '62%',
         plugins: {
           legend: { display: false },
-          tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ₹' + ctx.parsed.toLocaleString('en-IN') } }
+          tooltip: { callbacks: { label: ctx => ' ' + ctx.label + ': ' + DISPLAY_SYMBOL + ctx.parsed.toLocaleString(DISPLAY_LOCALE) } }
         }
       }
     });
