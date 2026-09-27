@@ -31,11 +31,92 @@ from .models import (
 )
 from . import utils
 from .utils import format_inr, format_date
+import fx_rates
 
 
 def _db():
     from models import db
     return db
+
+
+# ── Multi-currency conversion (Sep 2026) ────────────────────────────────────
+#
+# Runs on the submitted form dict BEFORE validators.validate_wealth_asset()/
+# validate_wealth_liability() — those require current_value/outstanding_amount
+# to already be present, and every downstream calculation (net worth,
+# history, exports) reads only that INR figure, never the foreign one. So
+# conversion happens once, right here, by overwriting that one key with the
+# converted INR amount; nothing about the rest of the create/update pipeline
+# needs to know currency exists.
+#
+# A currency of "INR" (or left blank, the default) is a no-op — the form's
+# own current_value/outstanding_amount is used exactly as before, untouched,
+# so nothing changes for the overwhelming majority of holdings that were
+# always INR and always will be.
+
+def _apply_asset_currency_conversion(form):
+    """
+    Mutates `form` in place. Returns an error string, or None on success
+    (including the INR no-op case). On a non-INR currency, converts
+    form['foreign_value'] into form['current_value'] via a live FX rate,
+    and records the rate/date used for transparency (fx_rates.py).
+    """
+    currency = (form.get("currency") or "INR").strip().upper()
+    if not currency or currency == "INR":
+        form["currency"] = "INR"
+        form["foreign_value"] = ""
+        form["fx_rate"] = ""
+        form["fx_rate_date"] = ""
+        return None
+
+    if currency not in fx_rates.SUPPORTED_CURRENCIES:
+        return f"'{currency}' isn't a supported currency."
+
+    foreign_value = services._parse_float(form.get("foreign_value"))
+    if foreign_value is None or foreign_value <= 0:
+        return "Enter the amount in its original currency."
+
+    try:
+        rate, rate_date = fx_rates.fetch_fx_rate(currency, "INR")
+    except fx_rates.FxRateError as e:
+        return f"Couldn't convert {currency} to INR: {e}"
+
+    form["current_value"] = str(round(foreign_value * rate, 2))
+    form["foreign_value"] = str(foreign_value)
+    form["fx_rate"] = str(rate)
+    form["fx_rate_date"] = rate_date.isoformat()
+    return None
+
+
+def _apply_liability_currency_conversion(form):
+    """Mirrors _apply_asset_currency_conversion for liabilities —
+    converts form['foreign_outstanding_amount'] into
+    form['outstanding_amount']."""
+    currency = (form.get("currency") or "INR").strip().upper()
+    if not currency or currency == "INR":
+        form["currency"] = "INR"
+        form["foreign_outstanding_amount"] = ""
+        form["fx_rate"] = ""
+        form["fx_rate_date"] = ""
+        return None
+
+    if currency not in fx_rates.SUPPORTED_CURRENCIES:
+        return f"'{currency}' isn't a supported currency."
+
+    foreign_amount = services._parse_float(form.get("foreign_outstanding_amount"))
+    if foreign_amount is None or foreign_amount <= 0:
+        return "Enter the outstanding amount in its original currency."
+
+    try:
+        rate, rate_date = fx_rates.fetch_fx_rate(currency, "INR")
+    except fx_rates.FxRateError as e:
+        return f"Couldn't convert {currency} to INR: {e}"
+
+    form["outstanding_amount"] = str(round(foreign_amount * rate, 2))
+    form["foreign_outstanding_amount"] = str(foreign_amount)
+    form["fx_rate"] = str(rate)
+    form["fx_rate_date"] = rate_date.isoformat()
+    return None
 
 
 def _get_asset_or_404(asset_id):
@@ -218,6 +299,7 @@ def _asset_form_context(is_edit, asset, values):
         # (Section 28/29: future dates must be rejected client-side
         # too, not just server-side) and the backdating-detection JS.
         existing_heirs=(asset.heirs.all() if is_edit and asset else []),
+        supported_currencies=fx_rates.SUPPORTED_CURRENCIES,
     )
 
 
@@ -257,6 +339,10 @@ def _asset_to_values(asset):
         "interest_rate": asset.interest_rate if asset.interest_rate is not None else "",
         "maturity_date": _d(asset.maturity_date), "investment_type": asset.investment_type or "",
         "status": asset.status or "", "notes": asset.notes or "",
+        "currency": asset.currency or "INR",
+        "foreign_value": asset.foreign_value if asset.foreign_value is not None else "",
+        "fx_rate": asset.fx_rate if asset.fx_rate is not None else "",
+        "fx_rate_date": _d(asset.fx_rate_date),
     }
 
 
@@ -266,6 +352,13 @@ def add_asset():
     """Add a new Wealth asset."""
     if request.method == "POST":
         form = request.form.to_dict()
+        fx_error = _apply_asset_currency_conversion(form)
+        if fx_error:
+            flash(fx_error, "error")
+            return render_template(
+                "wealth/wealth_asset_form.html",
+                **_asset_form_context(False, None, form)
+            )
         errors = validators.validate_wealth_asset(form)
         if errors:
             for e in errors:
@@ -300,6 +393,13 @@ def edit_asset(asset_id):
 
     if request.method == "POST":
         form = request.form.to_dict()
+        fx_error = _apply_asset_currency_conversion(form)
+        if fx_error:
+            flash(fx_error, "error")
+            return render_template(
+                "wealth/wealth_asset_form.html",
+                **_asset_form_context(True, asset, form)
+            )
         errors = validators.validate_wealth_asset(form)
         if errors:
             for e in errors:
@@ -443,6 +543,7 @@ def _liability_form_context(is_edit, liability, values):
         liability_types_by_category=LIABILITY_TYPES_BY_CATEGORY,
         ownership_types=OwnershipType.ALL,
         today_ist=today_ist().isoformat(),
+        supported_currencies=fx_rates.SUPPORTED_CURRENCIES,
     )
 
 
@@ -474,6 +575,11 @@ def _liability_to_values(liability):
         "ownership_percentage": liability.ownership_percentage
                                 if liability.ownership_percentage is not None else "",
         "status": liability.status or "", "notes": liability.notes or "",
+        "currency": liability.currency or "INR",
+        "foreign_outstanding_amount": liability.foreign_outstanding_amount
+                                       if liability.foreign_outstanding_amount is not None else "",
+        "fx_rate": liability.fx_rate if liability.fx_rate is not None else "",
+        "fx_rate_date": _d(liability.fx_rate_date),
     }
 
 
@@ -483,6 +589,13 @@ def add_liability():
     """Add a new Wealth liability."""
     if request.method == "POST":
         form = request.form.to_dict()
+        fx_error = _apply_liability_currency_conversion(form)
+        if fx_error:
+            flash(fx_error, "error")
+            return render_template(
+                "wealth/wealth_liability_form.html",
+                **_liability_form_context(False, None, form)
+            )
         errors = validators.validate_wealth_liability(form)
         if errors:
             for e in errors:
@@ -518,6 +631,13 @@ def edit_liability(liability_id):
 
     if request.method == "POST":
         form = request.form.to_dict()
+        fx_error = _apply_liability_currency_conversion(form)
+        if fx_error:
+            flash(fx_error, "error")
+            return render_template(
+                "wealth/wealth_liability_form.html",
+                **_liability_form_context(True, liability, form)
+            )
         errors = validators.validate_wealth_liability(form)
         if errors:
             for e in errors:

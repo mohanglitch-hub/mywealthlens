@@ -512,10 +512,19 @@ def refresh_prices():
     all-users equivalent, for automatic refresh). Rate-limited since
     each click makes real outbound calls (yfinance per stock, one AMFI
     file download).
+
+    Also re-derives the INR-equivalent of every non-INR Wealth Centre
+    asset/liability from its stored foreign amount, via one Frankfurter
+    lookup per distinct currency in use (fx_rates.refresh_fx_for_wealth_rows)
+    — same button, same click, same "keep everything current" intent,
+    since most holdings won't have any foreign currency at all and this
+    is a no-op for them.
     """
     from price_refresh import refresh_all_prices
+    import fx_rates
 
     summary = refresh_all_prices(db, user_id=current_user.id)
+    fx_summary = fx_rates.refresh_fx_for_wealth_rows(db, user_id=current_user.id)
 
     parts = []
     if summary["stocks_updated"] or summary["stocks_failed"]:
@@ -531,6 +540,13 @@ def refresh_prices():
         if extras:
             mf_bit += " (" + "; ".join(extras) + ")"
         parts.append(mf_bit)
+
+    if fx_summary["assets_updated"] or fx_summary["liabilities_updated"]:
+        parts.append(f"{fx_summary['assets_updated']} foreign-currency asset(s) and "
+                     f"{fx_summary['liabilities_updated']} liability(ies) re-converted to INR")
+    if fx_summary["currencies_failed"]:
+        failed_ccy = ", ".join(f["currency"] for f in fx_summary["currencies_failed"])
+        flash(f"Couldn't refresh exchange rates for: {failed_ccy}. Those holdings' INR values are unchanged.", "warning")
 
     if summary["amfi_error"]:
         flash(f"Stock prices were refreshed, but mutual fund NAVs couldn't be — {summary['amfi_error']}", "error")

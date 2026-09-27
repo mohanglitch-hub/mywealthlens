@@ -243,6 +243,17 @@ class WealthAsset(db.Model):
     current_value = db.Column(db.Float, nullable=False, default=0)
     value_as_of   = db.Column(db.Date, nullable=True)
 
+    # ── Multi-currency (Sep 2026) ─────────────────────────────────
+    # current_value above stays the single authoritative INR figure
+    # every existing calculation reads — nothing downstream changes.
+    # A non-INR asset additionally keeps the amount as entered in its
+    # own currency, plus the rate/date used to derive current_value,
+    # purely for transparency and later re-conversion. See fx_rates.py.
+    currency      = db.Column(db.String(3), nullable=False, default="INR")
+    foreign_value = db.Column(db.Float, nullable=True)
+    fx_rate       = db.Column(db.Float, nullable=True)
+    fx_rate_date  = db.Column(db.Date, nullable=True)
+
     # ── Ownership (Section 8, Phase A / Section 7, Phase B) ──────
     ownership_type       = db.Column(db.String(30), nullable=False,
                                      default=OwnershipType.SOLE)
@@ -398,6 +409,16 @@ class WealthLiability(db.Model):
     outstanding_amount = db.Column(db.Float, nullable=False, default=0)
     interest_rate       = db.Column(db.Float, nullable=True)
     # ^ informational only — never drives any calculation (Section 37)
+
+    # ── Multi-currency (Sep 2026) ─────────────────────────────────
+    # outstanding_amount above stays the single authoritative INR
+    # figure every existing calculation reads. foreign_outstanding_amount
+    # is named to avoid colliding with original_amount (loan principal,
+    # unrelated). See WealthAsset's matching fields and fx_rates.py.
+    currency                     = db.Column(db.String(3), nullable=False, default="INR")
+    foreign_outstanding_amount   = db.Column(db.Float, nullable=True)
+    fx_rate                      = db.Column(db.Float, nullable=True)
+    fx_rate_date                 = db.Column(db.Date, nullable=True)
 
     balance_as_of = db.Column(db.Date, nullable=True)
     # ^ Phase L. WealthAsset already had this exact field (as
