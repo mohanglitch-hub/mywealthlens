@@ -59,7 +59,7 @@
   <div class="top-row">
     <div class="hero-card">
       <div class="hero-label">TOTAL NET WORTH</div>
-      <div class="hero-value">₹{{ "{:,.0f}".format(total) }}</div>
+      <div class="hero-value">{{ format_money(total) }}</div>
       <div class="hero-sub">Across {{ asset_count }} asset{% if asset_count != 1 %}s{% endif %}</div>
     </div>
     <div class="hero-actions">
@@ -85,7 +85,7 @@
       </div>
     </div>
     <div class="chart-card">
-      <div class="card-label">Asset Values (₹)</div>
+      <div class="card-label">Asset Values ({{ display_symbol() }})</div>
       <div class="chart-wrap">
         <canvas id="barChart"></canvas>
       </div>
@@ -120,10 +120,10 @@
     <div class="h-row">
       <div class="h-info">
         <div class="h-name">{{ mf.scheme }}</div>
-        <div class="h-meta">{{ mf.amc }}{% if mf.units %} · {{ mf.units }} units{% endif %}{% if mf.nav %} · NAV ₹{{ "{:,.2f}".format(mf.nav) }}{% endif %}</div>
+        <div class="h-meta">{{ mf.amc }}{% if mf.units %} · {{ mf.units }} units{% endif %}{% if mf.nav %} · NAV {{ format_money_precise(mf.nav) }}{% endif %}</div>
       </div>
       <div style="text-align:right;">
-        <div class="h-value" style="color:#0ea5e9;">₹{{ "{:,.0f}".format(mf.value) }}</div>
+        <div class="h-value" style="color:#0ea5e9;">{{ format_money(mf.value) }}</div>
         {% if mf.xirr is not none %}
         <div style="font-size:0.72rem; color:{{ 'var(--up)' if mf.xirr >= 0 else 'var(--down)' }};">XIRR {{ "{:+.1f}".format(mf.xirr) }}%</div>
         {% endif %}
@@ -148,10 +148,10 @@
     <div class="h-row">
       <div class="h-info">
         <div class="h-name">{{ stock.name }}</div>
-        <div class="h-meta">{{ stock.quantity|int }} shares · ₹{{ "{:,.2f}".format(stock.live_price or stock.buy_price or 0) }}/share</div>
+        <div class="h-meta">{{ stock.quantity|int }} shares · {{ format_money_precise(stock.live_price or stock.buy_price or 0) }}/share</div>
       </div>
       <div style="text-align:right;">
-        <div class="h-value" style="color:#8b5cf6;">₹{{ "{:,.0f}".format(stock.value) }}</div>
+        <div class="h-value" style="color:#8b5cf6;">{{ format_money(stock.value) }}</div>
         {% if stock.xirr is not none %}
         <div style="font-size:0.72rem; color:{{ 'var(--up)' if stock.xirr >= 0 else 'var(--down)' }};">XIRR {{ "{:+.1f}".format(stock.xirr) }}%</div>
         {% endif %}
@@ -168,16 +168,39 @@
     const labelColor = isDark ? '#64748b' : '#64748B';
     const borderCol  = isDark ? '#13161f' : '#FFFFFF';
 
+    // Global display currency (Sep 2026): converted server-side via
+    // to_display() before reaching JS, so these chart values are
+    // already in whatever currency the user picked — the formatter
+    // functions below just need the right symbol/notation.
+    const DISPLAY_SYMBOL = {{ display_symbol()|tojson }};
+    const DISPLAY_IS_INR = {{ (display_currency_code() == 'INR')|tojson }};
+    const DISPLAY_LOCALE = DISPLAY_IS_INR ? 'en-IN' : 'en-US';
+    function formatMoneyTick(v) {
+      if (DISPLAY_IS_INR) {
+        return v>=10000000?DISPLAY_SYMBOL+(v/10000000).toFixed(1)+'Cr'
+             : v>=100000   ?DISPLAY_SYMBOL+(v/100000).toFixed(1)+'L'
+             : v>=1000     ?DISPLAY_SYMBOL+(v/1000).toFixed(0)+'K'
+             : DISPLAY_SYMBOL+v;
+      }
+      return v>=1000000000?DISPLAY_SYMBOL+(v/1000000000).toFixed(1)+'B'
+           : v>=1000000    ?DISPLAY_SYMBOL+(v/1000000).toFixed(1)+'M'
+           : v>=1000       ?DISPLAY_SYMBOL+(v/1000).toFixed(1)+'K'
+           : DISPLAY_SYMBOL+v.toFixed(0);
+    }
+    function formatMoneyTooltip(v) {
+      return ' ' + DISPLAY_SYMBOL + v.toLocaleString(DISPLAY_LOCALE);
+    }
+
     const rawData = [
-      { label:"Mutual Funds",      value:{{ mf          |round(0) }}, color:"#0ea5e9" },
-      { label:"Stocks",            value:{{ stocks      |round(0) }}, color:"#8b5cf6" },
-      { label:"Precious Metals",   value:{{ precious_metals |round(0) }}, color:"#D97706" },
-      { label:"Real Estate",       value:{{ real_estate |round(0) }}, color:"#0F766E" },
-      { label:"Bank & Deposits",   value:{{ bank_deposits |round(0) }}, color:"#16A34A" },
-      { label:"Investments",       value:{{ investments |round(0) }}, color:"#F59E0B" },
-      { label:"Vehicles",          value:{{ vehicles    |round(0) }}, color:"#64748B" },
-      { label:"Business",         value:{{ business    |round(0) }}, color:"#7C3AED" },
-      { label:"Other",             value:{{ other       |round(0) }}, color:"#DC2626" },
+      { label:"Mutual Funds",      value:{{ to_display(mf) |round(0) }}, color:"#0ea5e9" },
+      { label:"Stocks",            value:{{ to_display(stocks) |round(0) }}, color:"#8b5cf6" },
+      { label:"Precious Metals",   value:{{ to_display(precious_metals) |round(0) }}, color:"#D97706" },
+      { label:"Real Estate",       value:{{ to_display(real_estate) |round(0) }}, color:"#0F766E" },
+      { label:"Bank & Deposits",   value:{{ to_display(bank_deposits) |round(0) }}, color:"#16A34A" },
+      { label:"Investments",       value:{{ to_display(investments) |round(0) }}, color:"#F59E0B" },
+      { label:"Vehicles",          value:{{ to_display(vehicles) |round(0) }}, color:"#64748B" },
+      { label:"Business",         value:{{ to_display(business) |round(0) }}, color:"#7C3AED" },
+      { label:"Other",             value:{{ to_display(other) |round(0) }}, color:"#DC2626" },
     ].filter(d => d.value > 0);
 
     const labels = rawData.map(d => d.label);
@@ -197,7 +220,7 @@
           legend:{ position:"bottom", labels:{ padding:12, usePointStyle:true, font:{size:10} } },
           tooltip:{ callbacks:{ label: ctx => {
             const t = ctx.dataset.data.reduce((a,b)=>a+b,0);
-            return " ₹"+ctx.parsed.toLocaleString("en-IN")+" ("+(ctx.parsed/t*100).toFixed(1)+"%)";
+            return formatMoneyTooltip(ctx.parsed)+" ("+(ctx.parsed/t*100).toFixed(1)+"%)";
           }}}
         }
       }
@@ -208,14 +231,14 @@
       data:{ labels, datasets:[{ data:values, backgroundColor:colors.map(c=>c+"cc"), borderColor:colors, borderWidth:1, borderRadius:6 }] },
       options:{
         responsive:true, maintainAspectRatio:false, layout:{padding:0},
-        plugins:{ legend:{display:false}, tooltip:{callbacks:{label:ctx=>" ₹"+ctx.parsed.y.toLocaleString("en-IN")}} },
+        plugins:{ legend:{display:false}, tooltip:{callbacks:{label:ctx=>formatMoneyTooltip(ctx.parsed.y)}} },
         scales:{
           x:{ grid:{color:gridColor}, ticks:{
             color:labelColor, maxRotation:45, minRotation:0,
             font:{size:9}, autoSkip:true, maxTicksLimit:8
           }},
           y:{ grid:{color:gridColor}, ticks:{ color:labelColor,
-            callback: v => v>=10000000?"₹"+(v/10000000).toFixed(1)+"Cr":v>=100000?"₹"+(v/100000).toFixed(1)+"L":v>=1000?"₹"+(v/1000).toFixed(0)+"K":"₹"+v
+            callback: v => formatMoneyTick(v)
           }}
         }
       }
@@ -245,12 +268,12 @@
             interaction:{ mode:'index', intersect:false },
             plugins:{
               legend:{ position:'bottom', labels:{ padding:12, usePointStyle:true, font:{size:10} } },
-              tooltip:{ callbacks:{ label: ctx => ' ₹'+ctx.parsed.y.toLocaleString('en-IN') }}
+              tooltip:{ callbacks:{ label: ctx => formatMoneyTooltip(ctx.parsed.y) }}
             },
             scales:{
               x:{ grid:{color:gridColor}, ticks:{ color:labelColor, maxTicksLimit:8, font:{size:9} } },
               y:{ stacked:true, grid:{color:gridColor}, ticks:{ color:labelColor,
-                callback: v => v>=10000000?'₹'+(v/10000000).toFixed(1)+'Cr':v>=100000?'₹'+(v/100000).toFixed(1)+'L':'₹'+(v/1000).toFixed(0)+'K'
+                callback: v => formatMoneyTick(v)
               }}
             }
           }

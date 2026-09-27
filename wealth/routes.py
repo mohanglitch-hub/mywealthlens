@@ -872,6 +872,17 @@ def wealth_history():
 
     current_position = services.WealthStatisticsService(current_user.id).summary_dict()
 
+    # Global display currency (Sep 2026): convert the chart's raw INR
+    # figures here, once, before they're serialized to the template —
+    # same pattern as app.py's dashboard() route for the net-worth
+    # history chart.
+    import currency_display
+    raw_chart_points = history_service.chart_data(snapshots)
+    for p in raw_chart_points:
+        p["net_worth"] = currency_display.to_display(p["net_worth"])
+        p["total_assets"] = currency_display.to_display(p["total_assets"])
+        p["total_liabilities"] = currency_display.to_display(p["total_liabilities"])
+
     return render_template(
         "wealth/history.html",
         snapshots=snapshots,
@@ -879,7 +890,7 @@ def wealth_history():
         latest=latest,
         latest_change=latest_change,
         current_position=current_position,
-        chart_points=history_service.chart_data(snapshots),
+        chart_points=raw_chart_points,
         range_filter=range_filter,
         today=date.today().isoformat(),
         duplicate_date=request.args.get("duplicate_date", ""),

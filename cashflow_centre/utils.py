@@ -40,20 +40,11 @@ def category_color(category):
 # ── Display Helpers ───────────────────────────────────────────────────────────
 
 def format_inr(value):
-    """
-    Format a number as Indian Rupees (Cr/L notation). Handles negative
-    values properly — net cash flow (income - expense) can legitimately
-    be negative, and the sign must never be hidden or dropped.
-    """
-    if value is None:
-        return "—"
-    sign = "-" if value < 0 else ""
-    value = abs(value)
-    if value >= 10_000_000:
-        return f"{sign}₹{value/10_000_000:.2f} Cr"
-    if value >= 100_000:
-        return f"{sign}₹{value/100_000:.2f} L"
-    return f"{sign}₹{value:,.0f}"
+    """Format a stored INR value for display, converted to the user's
+    chosen global display currency (Sep 2026) — see currency_display.py.
+    Name kept for backward compatibility with every template call site."""
+    from currency_display import format_money
+    return format_money(value)
 
 
 def format_date(d, fmt="%d %b %Y"):

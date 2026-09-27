@@ -51,6 +51,21 @@ SUPPORTED_CURRENCIES = {
     "CAD": "Canadian Dollar (C$)",
 }
 
+# Plain symbol/prefix for each currency, used by currency_display.py to
+# format converted amounts — kept separate from the descriptive labels
+# above (SUPPORTED_CURRENCIES is for the settings dropdown; this is for
+# every other place an amount gets displayed).
+CURRENCY_SYMBOLS = {
+    "INR": "₹",
+    "USD": "$",
+    "EUR": "€",
+    "GBP": "£",
+    "AED": "AED ",
+    "SGD": "S$",
+    "AUD": "A$",
+    "CAD": "C$",
+}
+
 
 class FxRateError(Exception):
     """Raised when a rate genuinely couldn't be fetched (network, bad currency, etc.)."""
