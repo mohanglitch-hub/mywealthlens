@@ -65,6 +65,12 @@
     <div class="hero-actions">
       <a href="/wealth/assets/add" class="btn-accent">+ Add Asset</a>
       <a href="/upload" class="btn-outline">Upload CAS</a>
+      {% if mf_count > 0 or stock_count > 0 %}
+      <form method="POST" action="{{ url_for('refresh_prices') }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="btn-outline">🔄 Refresh Prices</button>
+      </form>
+      {% endif %}
       <a href="/export/pdf" class="btn-outline">📄 PDF</a>
       <a href="/export/excel" class="btn-outline">📊 Excel</a>
     </div>
@@ -102,7 +108,12 @@
   {% if mf_count > 0 %}
   <div class="holdings-card">
     <div class="holdings-header">
-      <div class="card-label" style="margin-bottom:0;">📊 Mutual Funds <span class="count-badge">{{ mf_count }}</span></div>
+      <div>
+        <div class="card-label" style="margin-bottom:0;">📊 Mutual Funds <span class="count-badge">{{ mf_count }}</span></div>
+        {% if mfs_last_refreshed %}
+        <div style="font-size:0.72rem; color:var(--muted2); margin-top:2px;">NAV as of {{ mfs_last_refreshed.strftime('%d %b %Y, %I:%M %p') }}</div>
+        {% endif %}
+      </div>
       <a href="/upload" class="ls-link">Re-upload →</a>
     </div>
     {% for mf in mutual_funds %}
@@ -125,7 +136,12 @@
   {% if stock_count > 0 %}
   <div class="holdings-card">
     <div class="holdings-header">
-      <div class="card-label" style="margin-bottom:0;">📈 Stocks & ETFs <span class="count-badge">{{ stock_count }}</span></div>
+      <div>
+        <div class="card-label" style="margin-bottom:0;">📈 Stocks & ETFs <span class="count-badge">{{ stock_count }}</span></div>
+        {% if stocks_last_refreshed %}
+        <div style="font-size:0.72rem; color:var(--muted2); margin-top:2px;">Prices as of {{ stocks_last_refreshed.strftime('%d %b %Y, %I:%M %p') }}</div>
+        {% endif %}
+      </div>
       <a href="/upload" class="ls-link">Re-upload →</a>
     </div>
     {% for stock in stock_list %}

@@ -4,12 +4,13 @@ from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_migrate import Migrate
-import bcrypt, pdfplumber, io, re, os, secrets, csv, yfinance as yf
+import bcrypt, pdfplumber, io, re, os, secrets, csv, hashlib, yfinance as yf
 import casparser
 from datetime import datetime as dt, timedelta, date as _date_cls
 from models import (db, User, MutualFund, MutualFundTransaction, Stock, StockTransaction,
                      Goal, GoalHoldingLink, NetWorthHistory)
 from cas_xirr import scheme_xirr as _scheme_xirr, portfolio_xirr as _portfolio_xirr
+from mail import send_password_reset_email
 from stock_xirr import stock_xirr as _stock_xirr, portfolio_stock_xirr as _portfolio_stock_xirr
 import goal_glide
 from insurance_centre import insurance_bp
@@ -269,14 +270,85 @@ def logout():
     flash('You have been logged out.', 'success')
     return redirect(url_for('login'))
 
+PASSWORD_RESET_TOKEN_TTL_MINUTES = 60
+
+
 @app.route('/forgot-password', methods=['GET', 'POST'])
+@limiter.limit('5 per 15 minutes', methods=['POST'])
 def forgot_password():
+    """
+    Production-readiness (Sep 2026): this used to look up the user and
+    then do nothing — the generic "if an account exists..." message
+    was correct security practice, but no reset link was ever actually
+    generated or sent. Now it is: a random token is generated, only
+    its SHA-256 hash is stored (see User.reset_token_hash), and the
+    raw token goes out in the emailed link only. The same generic
+    message is shown whether or not the email exists, and whether or
+    not sending actually succeeded — this route must never reveal
+    which accounts exist, or whether SMTP happens to be configured.
+    """
     if request.method == 'POST':
         email = request.form.get('email', '').strip().lower()
         user = User.query.filter_by(email=email).first()
+        if user:
+            raw_token = secrets.token_urlsafe(32)
+            user.reset_token_hash = hashlib.sha256(raw_token.encode('utf-8')).hexdigest()
+            user.reset_token_expires = dt.utcnow() + timedelta(minutes=PASSWORD_RESET_TOKEN_TTL_MINUTES)
+            db.session.commit()
+
+            reset_url = url_for('reset_password', token=raw_token, _external=True)
+            sent, reason = send_password_reset_email(
+                app.instance_path, user.email, reset_url, PASSWORD_RESET_TOKEN_TTL_MINUTES
+            )
+            if not sent:
+                app.logger.warning(f"Password reset email not sent for user {user.id}: {reason}")
+
         flash('If an account exists for that email, a reset link has been sent.', 'success')
         return redirect(url_for('forgot_password'))
     return render_template('forgot_password.html')
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+@limiter.limit('10 per hour', methods=['POST'])
+def reset_password(token):
+    """
+    The link from the reset email lands here. Looks the user up by the
+    SHA-256 hash of the token in the URL (never by the raw token
+    directly — same reasoning as never storing the raw token: a DB
+    leak alone still can't be used to find or forge a valid reset
+    link). Expired or already-used (hash cleared) tokens are rejected
+    with the same "invalid or expired" message either way, so a
+    guesser can't distinguish the two cases.
+    """
+    token_hash = hashlib.sha256(token.encode('utf-8')).hexdigest()
+    user = User.query.filter_by(reset_token_hash=token_hash).first()
+    valid = user is not None and user.reset_token_expires is not None \
+        and user.reset_token_expires > dt.utcnow()
+
+    if not valid:
+        flash('That reset link is invalid or has expired — please request a new one.', 'error')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+        if password != confirm:
+            flash('Passwords do not match.', 'error')
+            return render_template('reset_password.html', token=token)
+        if len(password) < 8:
+            flash('Password must be at least 8 characters.', 'error')
+            return render_template('reset_password.html', token=token)
+
+        user.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        # Single-use: clear the token immediately on success so the same
+        # emailed link can't be replayed to set the password again.
+        user.reset_token_hash = None
+        user.reset_token_expires = None
+        db.session.commit()
+        flash('Your password has been reset — please log in.', 'success')
+        return redirect(url_for('login'))
+
+    return render_template('reset_password.html', token=token)
 
 def _save_snapshot(user_id, cat_totals, mfs, stocks, liabilities_total):
     """
@@ -404,6 +476,14 @@ def dashboard():
     import activity as activity_module
     recent_activity = activity_module.get_unified_activity(current_user.id, days=10)[:5]
 
+    # Freshest refresh timestamp per section, for the "as of" label next
+    # to the Refresh Prices button — None if nothing's ever been
+    # refreshed (import time doesn't set these, only an actual refresh).
+    stock_times = [s.price_updated_at for s in stocks if s.price_updated_at]
+    mf_times = [m.nav_updated_at for m in mfs if m.nav_updated_at]
+    stocks_last_refreshed = max(stock_times) if stock_times else None
+    mfs_last_refreshed = max(mf_times) if mf_times else None
+
     return render_template('dashboard.html',
         user=current_user, total=total_value,
         real_estate=real_estate_value, precious_metals=precious_metals_value,
@@ -415,7 +495,51 @@ def dashboard():
         upcoming_renewals=upcoming_renewals,
         has_any_renewal_dates=has_any_renewal_dates,
         recent_activity=recent_activity,
+        stocks_last_refreshed=stocks_last_refreshed,
+        mfs_last_refreshed=mfs_last_refreshed,
         format_date=format_date)
+
+
+@app.route('/refresh-prices', methods=['POST'])
+@login_required
+@limiter.limit('10 per hour')
+def refresh_prices():
+    """
+    Manual "Refresh Prices" button (production-readiness, Sep 2026) —
+    refreshes every one of the current user's Stock/MutualFund
+    holdings via price_refresh.refresh_all_prices(), scoped to just
+    this user (the scheduled `flask prices refresh` CLI command is the
+    all-users equivalent, for automatic refresh). Rate-limited since
+    each click makes real outbound calls (yfinance per stock, one AMFI
+    file download).
+    """
+    from price_refresh import refresh_all_prices
+
+    summary = refresh_all_prices(db, user_id=current_user.id)
+
+    parts = []
+    if summary["stocks_updated"] or summary["stocks_failed"]:
+        parts.append(f"{summary['stocks_updated']} stock price(s) updated"
+                      + (f", {summary['stocks_failed']} couldn't be fetched" if summary["stocks_failed"] else ""))
+    if summary["mfs_updated"] or summary["mfs_failed"] or summary["mfs_no_code"]:
+        mf_bit = f"{summary['mfs_updated']} mutual fund NAV(s) updated"
+        extras = []
+        if summary["mfs_no_code"]:
+            extras.append(f"{summary['mfs_no_code']} missing an AMFI code (re-upload the CAS to fix)")
+        if summary["mfs_failed"]:
+            extras.append(f"{summary['mfs_failed']} not found in today's AMFI file")
+        if extras:
+            mf_bit += " (" + "; ".join(extras) + ")"
+        parts.append(mf_bit)
+
+    if summary["amfi_error"]:
+        flash(f"Stock prices were refreshed, but mutual fund NAVs couldn't be — {summary['amfi_error']}", "error")
+    elif not parts:
+        flash("No stock or mutual fund holdings to refresh yet — upload a CAS or tradebook first.", "warning")
+    else:
+        flash("Refreshed: " + ". ".join(parts) + ".", "success")
+
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/activity')
@@ -2385,6 +2509,12 @@ register_cli(app)
 # every few minutes. Same pattern as Wealth's CLI registration above.
 from backup.cli import register_cli as register_backup_cli
 register_backup_cli(app)
+
+# Prices — `flask prices refresh`, for scheduled automatic stock
+# price / mutual fund NAV refresh (production-readiness, Sep 2026).
+# Same Task Scheduler pattern as Wealth's snapshot CLI above.
+from price_refresh_cli import register_price_refresh_cli
+register_price_refresh_cli(app)
 
 if __name__ == '__main__':
     import os
