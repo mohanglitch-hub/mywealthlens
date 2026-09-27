@@ -2300,8 +2300,6 @@ def export_excel():
         ws1.cell(row=r, column=2).number_format = '₹#,##0'
         r += 1
     # Total row
-    for col, val in enumerate([('TOTAL', total, '100%')], 1):
-        pass
     _hdr_row(ws1, r, ['TOTAL', total, '100%'])
     ws1.cell(row=r, column=2).number_format = '₹#,##0'
 

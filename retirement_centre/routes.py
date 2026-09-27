@@ -5,8 +5,8 @@ Phase A: dashboard skeleton.
 Phase B: Add / Edit / Detail / Archive / Restore for schemes.
 Phase C: Contribution history, balance snapshots, nominees, and
          maturity/target-retirement calculations.
-
-Documents are not yet implemented — that belongs to a later phase.
+Phase D: Document vault — upload/download/preview/delete per scheme
+         (see the "Documents" section below).
 """
 
 from datetime import date
