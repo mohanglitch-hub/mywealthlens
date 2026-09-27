@@ -38,7 +38,7 @@
       <div class="ga-details">
         <div class="ga-detail-row">
           <span class="ga-detail-label">Target</span>
-          <span class="ga-detail-value ga-target">₹{{ "{:,.0f}".format(g.target_amt) }}</span>
+          <span class="ga-detail-value ga-target">{{ format_money(g.target_amt) }}</span>
         </div>
         <div class="ga-detail-row">
           <span class="ga-detail-label">Target Year</span>
@@ -46,12 +46,12 @@
         </div>
         <div class="ga-detail-row">
           <span class="ga-detail-label">Savings (at archive)</span>
-          <span class="ga-detail-value">₹{{ "{:,.0f}".format(g.current_savings or 0) }}</span>
+          <span class="ga-detail-value">{{ format_money(g.current_savings or 0) }}</span>
         </div>
         {% if g.monthly_sip %}
         <div class="ga-detail-row">
           <span class="ga-detail-label">Monthly SIP</span>
-          <span class="ga-detail-value">₹{{ "{:,.0f}".format(g.monthly_sip) }}</span>
+          <span class="ga-detail-value">{{ format_money(g.monthly_sip) }}</span>
         </div>
         {% endif %}
         {% if g.archived_at %}

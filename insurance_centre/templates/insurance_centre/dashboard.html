@@ -63,7 +63,7 @@
       <div class="ic-stat-icon">🛡️</div>
       <div class="ic-stat-label">Total Coverage</div>
       <div class="ic-stat-value">
-        {% if data.total_coverage > 0 %}{{ format_inr(data.total_coverage) }}{% else %}₹0{% endif %}
+        {{ format_inr(data.total_coverage) if data.total_coverage > 0 else format_inr(0) }}
       </div>
       <div class="ic-stat-hint">Sort by coverage →</div>
     </a>
@@ -73,7 +73,7 @@
       <div class="ic-stat-icon">💳</div>
       <div class="ic-stat-label">Annual Premium</div>
       <div class="ic-stat-value">
-        {% if data.total_premium > 0 %}{{ format_inr(data.total_premium) }}{% else %}₹0{% endif %}
+        {{ format_inr(data.total_premium) if data.total_premium > 0 else format_inr(0) }}
       </div>
       <div class="ic-stat-hint">Sort by premium →</div>
     </a>

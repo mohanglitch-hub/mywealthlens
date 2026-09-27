@@ -162,9 +162,15 @@
             Chart.defaults.font.family = "'Inter', sans-serif";
             Chart.defaults.font.size = 11;
 
-            const inrTick = v => v >= 10000000 ? '₹' + (v/10000000).toFixed(1) + 'Cr'
-                              : v >= 100000    ? '₹' + (v/100000).toFixed(1) + 'L'
-                              : '₹' + (v/1000).toFixed(0) + 'K';
+            const DISPLAY_SYMBOL = {{ display_symbol()|tojson }};
+            const DISPLAY_IS_INR = {{ (display_currency_code() == 'INR')|tojson }};
+            const DISPLAY_LOCALE = DISPLAY_IS_INR ? 'en-IN' : 'en-US';
+            const inrTick = v => DISPLAY_IS_INR
+              ? (v >= 10000000 ? DISPLAY_SYMBOL + (v/10000000).toFixed(1) + 'Cr'
+                : v >= 100000   ? DISPLAY_SYMBOL + (v/100000).toFixed(1) + 'L'
+                : DISPLAY_SYMBOL + (v/1000).toFixed(0) + 'K')
+              : (v >= 1000000 ? DISPLAY_SYMBOL + (v/1000000).toFixed(1) + 'M'
+                : DISPLAY_SYMBOL + (v/1000).toFixed(1) + 'K');
 
             new Chart(document.getElementById('netWorthChart'), {
               type: 'line',
@@ -182,7 +188,7 @@
                 responsive: true, maintainAspectRatio: false,
                 plugins: {
                   legend: { display: false },
-                  tooltip: { callbacks: { label: ctx => ' ₹' + ctx.parsed.y.toLocaleString('en-IN') } }
+                  tooltip: { callbacks: { label: ctx => ' ' + DISPLAY_SYMBOL + ctx.parsed.y.toLocaleString(DISPLAY_LOCALE) } }
                 },
                 scales: {
                   x: { grid: { color: gridColor }, ticks: { color: labelColor, font: { size: 9 } } },
@@ -206,7 +212,7 @@
                   responsive: true, maintainAspectRatio: false,
                   plugins: {
                     legend: { position: 'bottom', labels: { usePointStyle: true, font: { size: 10 } } },
-                    tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ₹' + ctx.parsed.y.toLocaleString('en-IN') } }
+                    tooltip: { callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + DISPLAY_SYMBOL + ctx.parsed.y.toLocaleString(DISPLAY_LOCALE) } }
                   },
                   scales: {
                     x: { grid: { color: gridColor }, ticks: { color: labelColor, font: { size: 9 } } },

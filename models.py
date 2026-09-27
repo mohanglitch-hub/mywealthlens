@@ -79,6 +79,16 @@ class User(UserMixin, db.Model):
     reset_token_hash    = db.Column(db.String(64), nullable=True)
     reset_token_expires = db.Column(db.DateTime,   nullable=True)
 
+    # Global display currency (Sep 2026) — a pure DISPLAY-layer setting.
+    # Every value is still stored in INR everywhere in the database,
+    # exactly as before (CAS holdings are India-only by nature; Wealth
+    # Centre's own per-asset currency support converts foreign holdings
+    # TO INR at save time — see wealth/models.py). This column only
+    # controls what currency amounts are CONVERTED TO and shown as on
+    # screen/in exports, via currency_display.py. Changing it never
+    # rewrites a single stored value.
+    display_currency = db.Column(db.String(3), nullable=False, default="INR")
+
     mutual_funds = db.relationship("MutualFund", backref="owner", lazy=True, cascade="all, delete-orphan")
     mf_transactions = db.relationship("MutualFundTransaction", backref="owner", lazy=True, cascade="all, delete-orphan")
     stocks       = db.relationship("Stock",      backref="owner", lazy=True, cascade="all, delete-orphan")
@@ -399,3 +409,33 @@ class NetWorthHistory(db.Model):
 
     def __repr__(self):
         return f"<NetWorthHistory {self.snapshot_date} total={self.total}>"
+
+
+class FxRateCache(db.Model):
+    """
+    Global display currency (Sep 2026) — a small shared cache of
+    INR-per-unit-foreign-currency rates, refreshed at most once a day
+    per currency, regardless of how many users or page views ask for
+    that currency. Without this, every page load for every user with
+    a non-INR display currency would trigger a live Frankfurter call —
+    slow, wasteful, and unnecessary since exchange rates don't move
+    within a day for this app's purposes (same "fetch once, apply
+    many" principle as price_refresh.py's AMFI handling).
+
+    Not tied to any one user — currency, not user_id, is the key,
+    since the rate for USD->INR is the same for every user who has
+    USD selected as their display currency.
+    """
+    __tablename__ = "fx_rate_cache"
+    currency   = db.Column(db.String(3), primary_key=True)
+    rate       = db.Column(db.Float, nullable=False)
+    # ^ INR per 1 unit of `currency` (e.g. currency="USD", rate=83.5
+    #   means 1 USD = INR 83.5) — same convention as fx_rates.py's
+    #   fetch_fx_rate(from_currency, "INR").
+    rate_date  = db.Column(db.Date, nullable=True)
+    # ^ the date Frankfurter says this rate is actually dated (may
+    #   lag `fetched_at` over a weekend/holiday — normal, not stale).
+    fetched_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<FxRateCache {self.currency}={self.rate} fetched={self.fetched_at}>"

@@ -733,10 +733,11 @@ def export_pdf():
     story.append(Spacer(1, 0.5*cm))
 
     # ── Summary Stats ──
+    import currency_display
     summary_rows = [
         ["Total Active Policies", str(stats.active_count()),
-         "Total Coverage", f"Rs.{stats.total_coverage():,.0f}"],
-        ["Annual Premium", f"Rs.{stats.total_annual_premium():,.0f}",
+         "Total Coverage", currency_display.format_money_pdf_safe(stats.total_coverage())],
+        ["Annual Premium", currency_display.format_money_pdf_safe(stats.total_annual_premium()),
          "Upcoming Renewals", str(stats.upcoming_renewals_count())],
     ]
     sum_tbl = Table(summary_rows, colWidths=[4.5*cm, 4*cm, 4.5*cm, 4*cm])
@@ -774,9 +775,9 @@ def export_pdf():
              "Status", p.status or "—"],
             ["Policy No.", p.policy_number or "—",
              "Policy Holder", p.policy_holder or "—"],
-            ["Coverage", f"Rs.{p.sum_assured:,.0f}",
-             "Annual Premium", f"Rs.{p.annual_premium:,.0f}"],
-            ["Premium", f"Rs.{p.premium_amount:,.0f} / {p.premium_frequency}",
+            ["Coverage", currency_display.format_money_pdf_safe(p.sum_assured),
+             "Annual Premium", currency_display.format_money_pdf_safe(p.annual_premium)],
+            ["Premium", f"{currency_display.format_money_pdf_safe(p.premium_amount)} / {p.premium_frequency}",
              "Start Date", str(p.start_date or "—")],
             ["Renewal Date", str(p.renewal_date or "—"),
              "Maturity/Expiry", str(p.maturity_date or p.expiry_date or "—")],

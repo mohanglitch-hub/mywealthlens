@@ -88,6 +88,17 @@ def dashboard():
 
     year_trend = services.get_year_trend(current_user.id, year)
 
+    # Global display currency (Sep 2026): convert the chart-feeding
+    # figures here, once, before they reach the template — the chart's
+    # JS then just needs the right symbol/notation, same pattern used
+    # in app.py's dashboard() and wealth/routes.py's history().
+    import currency_display
+    year_trend = dict(year_trend)
+    year_trend["income"] = [currency_display.to_display(v) for v in year_trend["income"]]
+    year_trend["expense"] = [currency_display.to_display(v) for v in year_trend["expense"]]
+    year_trend["net"] = [currency_display.to_display(v) for v in year_trend["net"]]
+    by_category_display = {k: currency_display.to_display(v) for k, v in summary["by_category"].items()}
+
     # ── P2 Insights ──
     savings_rate   = services.get_savings_rate(summary["total_income"], summary["total_expense"])
     safe_to_spend  = services.get_safe_to_spend(current_user.id, year, month)
@@ -108,6 +119,7 @@ def dashboard():
         next_month=adjacent_month_key(year, month, 1),
         is_current_month=is_current_month, self_url=self_url,
         quick_add=quick_add, year_trend=year_trend, trend_year=year,
+        by_category_display=by_category_display,
         savings_rate=savings_rate, safe_to_spend=safe_to_spend,
         prev_month_cmp=prev_month_cmp, top_expenses=top_expenses,
         unbudgeted=unbudgeted, avg_monthly_expense=avg_monthly_expense,

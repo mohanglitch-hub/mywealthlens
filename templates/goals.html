@@ -191,7 +191,7 @@
           <div style="font-size:1.5rem; margin-bottom:4px;">{{ g.emoji or "⭐" }}</div>
           <div style="font-weight:700; font-size:1.1rem; color:var(--text);">{{ g.name }}</div>
           <div style="color:var(--muted); font-size:0.82rem; margin-top:2px;">
-            Target: ₹{{ "{:,.0f}".format(g.target_amt) }} by {{ g.target_year }}
+            Target: {{ format_money(g.target_amt) }} by {{ g.target_year }}
             · {{ c.years_left }} year{% if c.years_left != 1 %}s{% endif %} left
           </div>
         </div>
@@ -300,33 +300,33 @@
       <div class="goal-numbers">
         <div class="goal-stat">
           <div class="stat-label">Projected Corpus</div>
-          <div class="stat-value" style="color:var(--accent);">₹{{ "{:,.0f}".format(c.projected) }}</div>
+          <div class="stat-value" style="color:var(--accent);">{{ format_money(c.projected) }}</div>
         </div>
         <div class="goal-stat">
           <div class="stat-label">Target</div>
-          <div class="stat-value">₹{{ "{:,.0f}".format(g.target_amt) }}</div>
+          <div class="stat-value">{{ format_money(g.target_amt) }}</div>
         </div>
         {% if c.inflation_applied %}
         <div class="goal-stat">
           <div class="stat-label">Target (Inflation-Adjusted)</div>
-          <div class="stat-value" style="color:var(--warning);">₹{{ "{:,.0f}".format(c.inflation_adjusted_target) }}</div>
+          <div class="stat-value" style="color:var(--warning);">{{ format_money(c.inflation_adjusted_target) }}</div>
           <div style="font-size:0.7rem; color:var(--muted); margin-top:2px;">at {{ g.inflation_rate }}%/yr over {{ c.years_left }}y — Shortfall/Progress use this figure</div>
         </div>
         {% endif %}
         {% if c.on_track %}
         <div class="goal-stat goal-stat-green">
           <div class="stat-label">Surplus</div>
-          <div class="stat-value" style="color:var(--up);">₹{{ "{:,.0f}".format(c.surplus) }}</div>
+          <div class="stat-value" style="color:var(--up);">{{ format_money(c.surplus) }}</div>
         </div>
         {% else %}
         <div class="goal-stat goal-stat-red">
           <div class="stat-label">Shortfall</div>
-          <div class="stat-value" style="color:var(--down);">₹{{ "{:,.0f}".format(c.shortfall) }}</div>
+          <div class="stat-value" style="color:var(--down);">{{ format_money(c.shortfall) }}</div>
         </div>
         {% endif %}
         <div class="goal-stat">
           <div class="stat-label">Monthly SIP</div>
-          <div class="stat-value">₹{{ "{:,.0f}".format(g.monthly_sip) }}</div>
+          <div class="stat-value">{{ format_money(g.monthly_sip) }}</div>
           {% if g.step_up_pct and g.step_up_pct > 0 %}
           <div style="font-size:0.7rem; color:var(--accent); margin-top:2px;">+{{ g.step_up_pct }}%/yr step-up</div>
           {% endif %}
@@ -334,14 +334,14 @@
         {% if item.linked_value > 0 %}
         <div class="goal-stat">
           <div class="stat-label">From Linked Holdings</div>
-          <div class="stat-value" style="color:#0ea5e9;">₹{{ "{:,.0f}".format(item.linked_value) }}</div>
+          <div class="stat-value" style="color:#0ea5e9;">{{ format_money(item.linked_value) }}</div>
         </div>
         {% endif %}
         {% if not c.on_track and c.required_sip > 0 %}
         <div class="goal-stat goal-stat-amber">
           <div class="stat-label">Required SIP</div>
-          <div class="stat-value" style="color:var(--warning);">₹{{ "{:,.0f}".format(g.monthly_sip + c.required_sip) }}</div>
-          <div style="font-size:0.7rem; color:var(--muted); margin-top:2px;">+₹{{ "{:,.0f}".format(c.required_sip) }} more/month</div>
+          <div class="stat-value" style="color:var(--warning);">{{ format_money(g.monthly_sip + c.required_sip) }}</div>
+          <div style="font-size:0.7rem; color:var(--muted); margin-top:2px;">+{{ format_money(c.required_sip) }} more/month</div>
         </div>
         {% endif %}
         <div class="goal-stat">
@@ -368,7 +368,7 @@
           <div class="link-row">
             <div>
               <div class="link-name">{{ row.name }} <span class="asset-class-badge asset-class-{{ row.link.asset_class }}">{{ row.link.asset_class }}</span></div>
-              <div class="link-meta">{{ row.link.allocation_pct }}% = ₹{{ "{:,.0f}".format(row.allocated_value) }}</div>
+              <div class="link-meta">{{ row.link.allocation_pct }}% = {{ format_money(row.allocated_value) }}</div>
             </div>
             <form method="POST" action="/goals/{{ g.id }}/unlink/{{ row.link.id }}" onsubmit="return confirm('Unlink this holding from the goal?')" style="margin:0;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
@@ -393,7 +393,7 @@
                 {% for mf in available_funds %}
                 {% set key = 'mutual_fund:' ~ mf.id %}
                 {% if key not in linked_holding_keys %}
-                <option value="{{ key }}" data-class="equity" data-remaining="{{ '%g'|format(mf.remaining_pct) }}">{{ mf.scheme }} — {{ '%g'|format(mf.remaining_pct) }}% / ₹{{ "{:,.0f}".format(mf.remaining_value) }} available{% if mf.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(mf.value) }}){% endif %}</option>
+                <option value="{{ key }}" data-class="equity" data-remaining="{{ '%g'|format(mf.remaining_pct) }}">{{ mf.scheme }} — {{ '%g'|format(mf.remaining_pct) }}% / {{ format_money(mf.remaining_value) }} available{% if mf.remaining_pct < 100 %} (of {{ format_money(mf.value) }}){% endif %}</option>
                 {% endif %}
                 {% endfor %}
               </optgroup>
@@ -403,7 +403,7 @@
                 {% for st in available_stocks %}
                 {% set key = 'stock:' ~ st.id %}
                 {% if key not in linked_holding_keys %}
-                <option value="{{ key }}" data-class="equity" data-remaining="{{ '%g'|format(st.remaining_pct) }}">{{ st.name }} — {{ '%g'|format(st.remaining_pct) }}% / ₹{{ "{:,.0f}".format(st.remaining_value) }} available{% if st.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(st.value) }}){% endif %}</option>
+                <option value="{{ key }}" data-class="equity" data-remaining="{{ '%g'|format(st.remaining_pct) }}">{{ st.name }} — {{ '%g'|format(st.remaining_pct) }}% / {{ format_money(st.remaining_value) }} available{% if st.remaining_pct < 100 %} (of {{ format_money(st.value) }}){% endif %}</option>
                 {% endif %}
                 {% endfor %}
               </optgroup>
@@ -413,7 +413,7 @@
                 {% for wa in available_wealth_assets %}
                 {% set key = 'wealth_asset:' ~ wa.id %}
                 {% if key not in linked_holding_keys %}
-                <option value="{{ key }}" data-class="{{ 'debt' if wa.category == 'Bank & Deposits' else 'other' }}" data-remaining="{{ '%g'|format(wa.remaining_pct) }}">{{ wa.name }} · {{ wa.asset_type or wa.category }} — {{ '%g'|format(wa.remaining_pct) }}% / ₹{{ "{:,.0f}".format(wa.remaining_value) }} available{% if wa.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(wa.current_value) }}){% endif %}</option>
+                <option value="{{ key }}" data-class="{{ 'debt' if wa.category == 'Bank & Deposits' else 'other' }}" data-remaining="{{ '%g'|format(wa.remaining_pct) }}">{{ wa.name }} · {{ wa.asset_type or wa.category }} — {{ '%g'|format(wa.remaining_pct) }}% / {{ format_money(wa.remaining_value) }} available{% if wa.remaining_pct < 100 %} (of {{ format_money(wa.current_value) }}){% endif %}</option>
                 {% endif %}
                 {% endfor %}
               </optgroup>
@@ -423,7 +423,7 @@
                 {% for rs in available_retirement_schemes %}
                 {% set key = 'retirement_scheme:' ~ rs.id %}
                 {% if key not in linked_holding_keys %}
-                <option value="{{ key }}" data-class="debt" data-remaining="{{ '%g'|format(rs.remaining_pct) }}">{{ rs.custom_type or rs.scheme_type }} — {{ '%g'|format(rs.remaining_pct) }}% / ₹{{ "{:,.0f}".format(rs.remaining_value) }} available{% if rs.remaining_pct < 100 %} (of ₹{{ "{:,.0f}".format(rs.current_balance) }}){% endif %}</option>
+                <option value="{{ key }}" data-class="debt" data-remaining="{{ '%g'|format(rs.remaining_pct) }}">{{ rs.custom_type or rs.scheme_type }} — {{ '%g'|format(rs.remaining_pct) }}% / {{ format_money(rs.remaining_value) }} available{% if rs.remaining_pct < 100 %} (of {{ format_money(rs.current_balance) }}){% endif %}</option>
                 {% endif %}
                 {% endfor %}
               </optgroup>
@@ -468,8 +468,8 @@
                   <td>{{ row.year }}</td>
                   <td>{{ row.equity_pct }}%</td>
                   <td>{{ row.debt_pct }}%</td>
-                  <td>₹{{ "{:,.0f}".format(row.monthly_sip) }}</td>
-                  <td>₹{{ "{:,.0f}".format(row.projected_corpus) }}</td>
+                  <td>{{ format_money(row.monthly_sip) }}</td>
+                  <td>{{ format_money(row.projected_corpus) }}</td>
                 </tr>
                 {% endfor %}
               </tbody>
@@ -499,12 +499,12 @@
             <div class="drawdown-chart">
               {% for row in item.drawdown.rows %}
               {% if loop.index0 % 2 == 0 or item.drawdown.rows|length <= 20 %}
-              <div class="drawdown-bar-row" title="Age {{ row.age }}: ₹{{ '{:,.0f}'.format(row.corpus) }}">
+              <div class="drawdown-bar-row" title="Age {{ row.age }}: {{ format_money(row.corpus) }}">
                 <div class="drawdown-bar-label">{{ row.age }}</div>
                 <div class="drawdown-bar-track">
                   <div class="drawdown-bar-fill" style="width:{{ (row.corpus / max_corpus * 100) if max_corpus > 0 else 0 }}%;"></div>
                 </div>
-                <div class="drawdown-bar-value">₹{{ "{:,.0f}".format(row.corpus) }}</div>
+                <div class="drawdown-bar-value">{{ format_money(row.corpus) }}</div>
               </div>
               {% endif %}
               {% endfor %}
