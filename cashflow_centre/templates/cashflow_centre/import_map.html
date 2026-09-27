@@ -28,7 +28,24 @@
     </table>
   </div>
 
-  <form method="POST" action="{{ url_for('cashflow_centre.import_review') }}" class="cf-card">
+  <div class="cf-card" style="margin-bottom:16px; overflow-x:auto;">
+    <div class="cf-card-heading">
+      How these rows would import
+      <span class="cf-hint" style="font-weight:500; text-transform:none; letter-spacing:normal; display:block; margin-top:2px;">
+        Updates live as you change the mapping below — nothing is saved yet.
+      </span>
+    </div>
+    <table class="cf-preview-table" id="cfParsedPreviewTable">
+      <thead>
+        <tr><th>Date</th><th>Type</th><th>Amount</th><th>Description</th></tr>
+      </thead>
+      <tbody id="cfParsedPreviewBody">
+        <!-- filled in by cfUpdateParsedPreview() -->
+      </tbody>
+    </table>
+  </div>
+
+  <form method="POST" action="{{ url_for('cashflow_centre.import_review') }}" class="cf-card" id="cfMapForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
     <input type="hidden" name="csv_b64" value="{{ csv_b64 }}" />
 
@@ -140,6 +157,8 @@
   .cf-preview-table th, .cf-preview-table td { padding:6px 10px; border-bottom:1px solid var(--border); text-align:left; }
   .cf-preview-table th { color:var(--muted); font-weight:600; }
   .cf-preview-table td { color:var(--text2); }
+  .cf-hint { font-size:0.78rem; color:var(--muted2); white-space:normal; }
+  .cf-error-text { color:var(--down); font-size:0.8rem; white-space:normal; }
 
   .cf-form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
   .cf-field { margin-bottom:14px; }
@@ -171,7 +190,145 @@
     const mode = document.querySelector('input[name="mode"]:checked').value;
     document.getElementById('cfSingleAmountFields').style.display = mode === 'single' ? 'grid' : 'none';
     document.getElementById('cfSplitAmountFields').style.display = mode === 'split' ? 'grid' : 'none';
+    cfUpdateParsedPreview();
   }
-  document.addEventListener('DOMContentLoaded', cfToggleMode);
+
+  // Sample rows from the uploaded file (first 5 data rows), rendered
+  // server-side above as raw CSV — this is the same data, used here to
+  // recompute "how would this parse as a transaction" live in the
+  // browser as the user changes the mapping, matching the design spec's
+  // "preview updates live" requirement without a round trip per change.
+  const cfSampleRows = {{ sample_rows_json|safe }};
+
+  const cfMonthAbbr = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const cfMonthLookup = {"jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,"jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12};
+
+  // Mirrors csv_import.DATE_FORMATS on the backend — same six formats,
+  // same parsing rules — so the live preview matches what the server
+  // will actually do on Review/Confirm.
+  function cfParseDate(raw, fmt) {
+    raw = (raw || "").trim();
+    if (!raw) return null;
+    let m, d, mo, y;
+    switch (fmt) {
+      case "%d/%m/%Y":
+        m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if (!m) return null;
+        d = +m[1]; mo = +m[2]; y = +m[3]; break;
+      case "%d-%m-%Y":
+        m = raw.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/); if (!m) return null;
+        d = +m[1]; mo = +m[2]; y = +m[3]; break;
+      case "%m/%d/%Y":
+        m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); if (!m) return null;
+        d = +m[2]; mo = +m[1]; y = +m[3]; break;
+      case "%Y-%m-%d":
+        m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if (!m) return null;
+        y = +m[1]; mo = +m[2]; d = +m[3]; break;
+      case "%d/%m/%y":
+        m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/); if (!m) return null;
+        d = +m[1]; mo = +m[2];
+        y = +m[3]; y = y < 69 ? 2000 + y : 1900 + y; // matches Python strptime's %y pivot
+        break;
+      case "%d %b %Y":
+        m = raw.match(/^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/); if (!m) return null;
+        d = +m[1]; mo = cfMonthLookup[m[2].toLowerCase()]; y = +m[3];
+        if (!mo) return null;
+        break;
+      default:
+        return null;
+    }
+    const dt = new Date(y, mo - 1, d);
+    // Reject dates that don't round-trip (e.g. day 31 in a 30-day month) —
+    // JS Date silently rolls those over instead of erroring.
+    if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+    return { y, mo, d };
+  }
+
+  function cfFormatParsedDate(p) {
+    return `${String(p.d).padStart(2, '0')} ${cfMonthAbbr[p.mo - 1]} ${p.y}`;
+  }
+
+  function cfParseAmount(raw) {
+    const cleaned = (raw || "").trim().replace(/,/g, "").replace(/₹/g, "");
+    if (!cleaned) return null;
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? null : n;
+  }
+
+  function cfFormatInr(n) {
+    return "₹" + Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  }
+
+  function cfEscapeHtml(s) {
+    const div = document.createElement('div');
+    div.textContent = s;
+    return div.innerHTML;
+  }
+
+  function cfUpdateParsedPreview() {
+    const form = document.getElementById('cfMapForm');
+    const fd = new FormData(form);
+    const dateCol = fd.get('date_col');
+    const descCol = fd.get('desc_col');
+    const dateFormat = fd.get('date_format');
+    const mode = fd.get('mode') || 'single';
+    const amountCol = fd.get('amount_col');
+    const debitCol = fd.get('debit_col');
+    const creditCol = fd.get('credit_col');
+    const negativeIsExpense = fd.get('negative_is_expense') === 'on';
+
+    const cell = (row, idx) => (idx !== null && idx !== "" && row[+idx] !== undefined) ? row[+idx].trim() : "";
+
+    const body = document.getElementById('cfParsedPreviewBody');
+    body.innerHTML = "";
+
+    if (dateCol === "" || dateCol === null || !dateFormat) {
+      body.innerHTML = '<tr><td colspan="4" class="cf-hint">Select a date column and format to see a preview.</td></tr>';
+      return;
+    }
+
+    cfSampleRows.forEach(row => {
+      const dateRaw = cell(row, dateCol);
+      const description = cell(row, descCol) || "—";
+      const parsedDate = cfParseDate(dateRaw, dateFormat);
+
+      let amount = null, type = null, error = null;
+      if (!parsedDate) {
+        error = `Couldn't parse date "${dateRaw}" as ${dateFormat}`;
+      } else if (mode === 'split') {
+        const debitRaw = cell(row, debitCol), creditRaw = cell(row, creditCol);
+        if (debitRaw) { amount = Math.abs(cfParseAmount(debitRaw)); type = 'expense'; }
+        else if (creditRaw) { amount = Math.abs(cfParseAmount(creditRaw)); type = 'income'; }
+        else { error = "No debit or credit amount on this row"; }
+        if (amount !== null && isNaN(amount)) { amount = null; error = "Couldn't read the amount on this row"; }
+      } else {
+        const raw = cfParseAmount(cell(row, amountCol));
+        if (raw === null) { error = "Couldn't read the amount on this row"; }
+        else if (raw === 0) { error = "Amount is zero"; }
+        else {
+          const isNegative = raw < 0;
+          type = (isNegative === negativeIsExpense) ? 'expense' : 'income';
+          amount = Math.abs(raw);
+        }
+      }
+
+      const tr = document.createElement('tr');
+      if (error) {
+        tr.innerHTML = `<td colspan="4" class="cf-error-text">${cfEscapeHtml(error)}</td>`;
+      } else {
+        tr.innerHTML = `
+          <td>${cfFormatParsedDate(parsedDate)}</td>
+          <td>${type === 'income' ? 'Income' : 'Expense'}</td>
+          <td>${cfFormatInr(amount)}</td>
+          <td>${cfEscapeHtml(description)}</td>`;
+      }
+      body.appendChild(tr);
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    cfToggleMode();
+    cfUpdateParsedPreview();
+    document.getElementById('cfMapForm').addEventListener('change', cfUpdateParsedPreview);
+  });
 </script>
 {% endblock %}

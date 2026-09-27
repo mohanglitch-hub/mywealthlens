@@ -5,6 +5,7 @@ Thin handlers — all logic lives in services.py. Every query filtered
 by current_user.id (IDOR check), matching every other module.
 """
 import base64
+import json
 from datetime import datetime
 
 from flask import render_template, request, redirect, url_for, flash
@@ -318,6 +319,13 @@ def import_transactions():
         guessed_date_format=header_info["guessed_date_format"],
         date_format_choices=csv_import.DATE_FORMAT_CHOICES,
         csv_b64=_b64_encode(file_bytes.decode("utf-8-sig")),
+        # Sample rows as JSON so the mapping page can re-render a live
+        # "how would this parse as a transaction" preview client-side,
+        # in real time as the user changes column/format selections —
+        # no round trip needed just to see the effect of a mapping choice.
+        # The </script> escape guards against a CSV cell that happens to
+        # contain that literal sequence breaking out of the <script> tag.
+        sample_rows_json=json.dumps(header_info["sample_rows"]).replace("</", "<\\/"),
     )
 
 
