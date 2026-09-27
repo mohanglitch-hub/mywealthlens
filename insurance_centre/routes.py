@@ -985,9 +985,3 @@ def _get_any_policy_or_404(policy_id):
         id=policy_id,
         user_id=current_user.id,
     ).first_or_404()
-
-
-def init_routes(bp):
-    """Register all routes onto the blueprint."""
-    # All routes are already registered via decorators above
-    pass
