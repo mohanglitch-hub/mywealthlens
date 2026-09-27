@@ -14,3 +14,5 @@ reportlab==4.2.5
 openpyxl==3.1.5
 casparser==1.4.1
 pyxirr==0.10.8
+pyotp==2.9.0
+qrcode==8.0
