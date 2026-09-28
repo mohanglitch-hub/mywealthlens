@@ -55,6 +55,31 @@
 </div>
 {% endif %}
 
+{% if nominees %}
+<div class="ic-card">
+  <div class="section-label">Nominees</div>
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead><tr><th>Name</th><th>Relationship</th><th>Percentage</th></tr></thead>
+      <tbody>
+        {% for n in nominees %}
+        <tr>
+          <td>{{ n.name }}</td>
+          <td>{{ n.relationship or '—' }}</td>
+          <td>{{ '%.1f'|format(n.percentage) + '%' if n.percentage is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if holding.total_nominees_percentage < 100 %}
+  <p style="color:var(--muted); font-size:0.8rem; margin-top:10px;">
+    Only {{ '%.1f'|format(holding.total_nominees_percentage) }}% of this holding has a nominee assigned — edit this holding to add more.
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if holding.broker_or_institution or holding.account_number_masked or holding.notes %}
 <div class="ic-card">
   <div class="section-label">Details</div>

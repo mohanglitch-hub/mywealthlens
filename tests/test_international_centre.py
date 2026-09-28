@@ -74,11 +74,19 @@ def main():
             return 1.0, date.today()
         if from_currency == "INR" and to_currency == "USD":
             return 1 / 83.0, on_date or date.today()
+        if from_currency == "USD" and to_currency == "INR":
+            return 83.0, on_date or date.today()
         if to_currency == "USD":
             return 1.0, date.today()  # treat every other native currency as already-USD-equivalent for simplicity
         raise services.FxRateError("no rate in this fake")
 
     services.fetch_fx_rate = fake_fetch_fx_rate
+    # currency_display.usd_to_inr() (used by portfolio_inr_value() and the
+    # main dashboard's net worth wiring, Sep 2026) goes through
+    # fx_rates.fetch_fx_rate independently of services.fetch_fx_rate above
+    # — same fake, same rate, so both paths agree in this test.
+    import fx_rates
+    fx_rates.fetch_fx_rate = fake_fetch_fx_rate
 
     with app.app_context():
         existing = User.query.filter_by(email=TEST_EMAIL).first()
@@ -94,22 +102,24 @@ def main():
         user_id = u.id
 
         # ── 1. Ticker-based holding creation ──
-        holding = services.create_holding(user_id, {
+        holding, _err = services.create_holding(user_id, {
             "asset_type": InternationalAssetType.US_STOCK,
             "name": "Apple Inc.", "ticker": "AAPL", "country": "United States",
             "native_currency": "USD", "quantity": "10", "avg_cost_native": "150",
         })
+        assert _err is None, _err
         assert holding.current_value_native == 1500.0, holding.current_value_native
         assert holding.usd_value == 1500.0, holding.usd_value  # USD->USD, rate 1.0
         assert holding.invested_native == 1500.0, holding.invested_native
         print("PASS: ticker-based holding creation computes value from quantity*avg_cost")
 
         # ── 2. Manually-valued holding, non-USD currency ──
-        bank_holding = services.create_holding(user_id, {
+        bank_holding, _err = services.create_holding(user_id, {
             "asset_type": InternationalAssetType.FOREIGN_BANK_ACCOUNT,
             "name": "Chase Checking", "native_currency": "USD",
             "current_value_native": "5000",
         })
+        assert _err is None, _err
         assert bank_holding.current_value_native == 5000.0
         assert bank_holding.usd_value == 5000.0
         print("PASS: manually-valued (non-ticker) holding stores current_value_native directly")
@@ -220,11 +230,12 @@ def main():
 
         # A second holding with NO snapshots at all -> falls back to
         # current value, flagged incomplete.
-        no_snap_holding = services.create_holding(user_id, {
+        no_snap_holding, _err = services.create_holding(user_id, {
             "asset_type": InternationalAssetType.FOREIGN_REAL_ESTATE,
             "name": "Condo, Austin TX", "country": "United States",
             "native_currency": "USD", "current_value_native": "300000",
         })
+        assert _err is None, _err
         fa2 = services.get_schedule_fa_summary(user_id, year)
         row2 = next(r for r in fa2["rows"] if r["holding"].id == no_snap_holding.id)
         assert row2["data_complete"] is False, row2
@@ -305,6 +316,111 @@ def main():
     assert fa_page.status_code == 200
     assert 'Schedule FA' in fa_page.get_data(as_text=True)
     print("PASS: Schedule FA report page renders")
+
+    # ── 10. Nominees (Sep 2026) + Family Centre wiring ──
+    from werkzeug.datastructures import MultiDict
+    from family_centre.routes import _build_people, _coverage_gaps
+
+    with app.app_context():
+        u3 = User.query.filter_by(email="international_nominee_test@example.com").first()
+        if u3:
+            InternationalHolding.query.filter_by(user_id=u3.id).delete()
+            db.session.delete(u3)
+            db.session.commit()
+        u3 = User(name="Nominee Test", email="international_nominee_test@example.com", password="unused")
+        db.session.add(u3)
+        db.session.commit()
+        n_user_id = u3.id
+
+        nom_holding, err = services.create_holding(n_user_id, {
+            "asset_type": InternationalAssetType.FOREIGN_BANK_ACCOUNT,
+            "name": "Singapore Savings", "native_currency": "USD",
+            "current_value_native": "10000",
+        })
+        assert err is None, err
+
+        # No nominee yet -> Family Centre's Coverage Gaps should flag it.
+        gaps = _coverage_gaps(n_user_id)
+        assert any(g["source"] == "International Investing" and g["item_name"] == "Singapore Savings"
+                   for g in gaps), gaps
+        print("PASS: holding with no nominee shows up in Family Centre's Coverage Gaps")
+
+        # Over-100% nominee split is rejected, nothing saved.
+        over_md = MultiDict([
+            ("nominee_name[]", "A"), ("nominee_percentage[]", "70"),
+            ("nominee_name[]", "B"), ("nominee_percentage[]", "40"),
+        ])
+        result, err2 = services.update_holding(nom_holding, {
+            "name": "Singapore Savings", "native_currency": "USD", "current_value_native": "10000",
+        }, multi_data=over_md)
+        assert result is None and err2 is not None, (result, err2)
+        assert nom_holding.nominees.count() == 0, "a rejected submission must not partially save"
+        print("PASS: nominee percentages over 100% are rejected without partial saves")
+
+        # Valid split saves, and now feeds both Coverage Gaps and People view.
+        ok_md = MultiDict([
+            ("nominee_name[]", "Priya Sharma"), ("nominee_relationship[]", "Daughter"), ("nominee_percentage[]", "100"),
+        ])
+        result2, err3 = services.update_holding(nom_holding, {
+            "name": "Singapore Savings", "native_currency": "USD", "current_value_native": "10000",
+        }, multi_data=ok_md)
+        assert err3 is None, err3
+        assert result2.total_nominees_percentage == 100.0
+
+        gaps2 = _coverage_gaps(n_user_id)
+        assert not any(g["source"] == "International Investing" for g in gaps2), gaps2
+        print("PASS: a fully-assigned nominee clears the Coverage Gap")
+
+        people = _build_people(n_user_id)
+        priya = next((p for p in people if p["display_name"] == "Priya Sharma"), None)
+        assert priya is not None, "nominee should appear in Family Centre's People view"
+        entry = next(e for e in priya["entries"] if e["source"] == "International Investing")
+        assert entry["item_name"] == "Singapore Savings" and entry["percentage"] == 100.0
+        assert entry["value_at_stake"] == 830000.0, entry  # 10000 USD * 83.0 INR/USD
+        print("PASS: nominee appears in Family Centre's People view with correct INR value at stake")
+
+        InternationalHolding.query.filter_by(user_id=n_user_id).delete()
+        db.session.delete(u3)
+        db.session.commit()
+
+    # ── 11. Net worth dashboard wiring (Sep 2026) ──
+    with app.app_context():
+        u4 = User.query.filter_by(email="international_networth_test@example.com").first()
+        if u4:
+            InternationalHolding.query.filter_by(user_id=u4.id).delete()
+            db.session.delete(u4)
+            db.session.commit()
+        u4 = User(name="NetWorth Test", email="international_networth_test@example.com", password="unused")
+        db.session.add(u4)
+        db.session.commit()
+        nw_user_id = u4.id
+
+        nw_holding, err = services.create_holding(nw_user_id, {
+            "asset_type": InternationalAssetType.FOREIGN_BANK_ACCOUNT,
+            "name": "London Account", "native_currency": "USD",
+            "current_value_native": "1000",
+        })
+        assert err is None, err
+        assert nw_holding.usd_value == 1000.0
+
+        totals = services.portfolio_totals(nw_user_id)
+        assert totals["total_usd"] == 1000.0 and totals["holdings_count"] == 1, totals
+
+        inr_value = services.portfolio_inr_value(nw_user_id)
+        assert inr_value == 83000.0, inr_value  # 1000 USD * 83.0 INR/USD (fake rate)
+        print("PASS: portfolio_inr_value() correctly bridges USD total into INR via usd_to_inr()")
+
+        # portfolio_inr_value() never returns None, even with zero holdings.
+        u5 = User(name="Empty Portfolio", email="international_empty_test@example.com", password="unused")
+        db.session.add(u5)
+        db.session.commit()
+        assert services.portfolio_inr_value(u5.id) == 0.0
+        print("PASS: portfolio_inr_value() returns 0.0 (never None) for a user with no holdings")
+
+        InternationalHolding.query.filter_by(user_id=nw_user_id).delete()
+        db.session.delete(u4)
+        db.session.delete(u5)
+        db.session.commit()
 
     # ── Cleanup ──
     with app.app_context():
