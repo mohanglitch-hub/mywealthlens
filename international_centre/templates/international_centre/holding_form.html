@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if holding else 'Add' }} International Holding — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ic-form-wrap">
+  <h1 class="ic-title">{{ 'Edit' if holding else 'Add' }} International Holding</h1>
+
+  <form method="POST" class="ic-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+
+    <div class="form-group">
+      <label>Asset Type</label>
+      <select name="asset_type" id="assetTypeSelect" required onchange="icToggleFields()">
+        <option value="">Select type…</option>
+        {% for t in asset_types %}
+        <option value="{{ t }}" {{ 'selected' if (holding and holding.asset_type == t) or (data.get('asset_type') == t) }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Name</label>
+      <input type="text" name="name" required maxlength="200"
+             value="{{ holding.name if holding else data.get('name', '') }}"
+             placeholder="e.g. Apple Inc., Chase Checking, Condo in Austin TX" />
+    </div>
+
+    <div id="icTickerFields">
+      <div class="form-group">
+        <label>Ticker Symbol</label>
+        <input type="text" name="ticker" maxlength="20"
+               value="{{ holding.ticker if holding else data.get('ticker', '') }}" placeholder="e.g. AAPL" />
+        <div class="field-hint">As it trades on its own exchange — no NSE-style suffix needed.</div>
+      </div>
+      <div class="ic-form-row">
+        <div class="form-group">
+          <label>Quantity</label>
+          <input type="number" step="any" name="quantity"
+                 value="{{ holding.quantity if holding and holding.quantity is not none else data.get('quantity', '') }}" />
+        </div>
+        <div class="form-group">
+          <label>Average Cost (per unit, native currency)</label>
+          <input type="number" step="any" name="avg_cost_native"
+                 value="{{ holding.avg_cost_native if holding and holding.avg_cost_native is not none else data.get('avg_cost_native', '') }}" />
+        </div>
+      </div>
+    </div>
+
+    <div id="icManualValueField">
+      <div class="form-group">
+        <label>Current Value (native currency)</label>
+        <input type="number" step="any" name="current_value_native"
+               value="{{ holding.current_value_native if holding and not holding.is_ticker_based else data.get('current_value_native', '') }}" />
+      </div>
+    </div>
+
+    <div class="ic-form-row">
+      <div class="form-group">
+        <label>Native Currency</label>
+        <select name="native_currency" required>
+          {% for code, label in currencies.items() %}
+          <option value="{{ code }}" {{ 'selected' if (holding and holding.native_currency == code) or (data.get('native_currency') == code) or (not holding and not data.get('native_currency') and code == 'USD') }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Country</label>
+        <select name="country">
+          <option value="">—</option>
+          {% for c in countries %}
+          <option value="{{ c }}" {{ 'selected' if (holding and holding.country == c) or (data.get('country') == c) }}>{{ c }}</option>
+          {% endfor %}
+        </select>
+        <div class="field-hint">Used for Schedule FA reporting.</div>
+      </div>
+    </div>
+
+    <div class="ic-form-row">
+      <div class="form-group">
+        <label>Broker / Institution</label>
+        <input type="text" name="broker_or_institution" maxlength="200"
+               value="{{ holding.broker_or_institution if holding else data.get('broker_or_institution', '') }}" placeholder="e.g. Interactive Brokers, Chase Bank" />
+      </div>
+      <div class="form-group">
+        <label>Account Number (last few digits only)</label>
+        <input type="text" name="account_number_masked" maxlength="50"
+               value="{{ holding.account_number_masked if holding else data.get('account_number_masked', '') }}" placeholder="e.g. xxxx1234" />
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Notes</label>
+      <textarea name="notes" rows="2">{{ holding.notes if holding else data.get('notes', '') }}</textarea>
+    </div>
+
+    <div style="display:flex; gap:10px; margin-top:10px;">
+      <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">{{ 'Save Changes' if holding else 'Add Holding' }}</button>
+      <a href="{{ url_for('international_centre.holding_detail', holding_id=holding.id) if holding else url_for('international_centre.dashboard') }}" class="ic-btn-secondary" style="text-decoration:none; display:inline-flex; align-items:center;">Cancel</a>
+    </div>
+  </form>
+</div>
+
+<style>
+  .ic-form-wrap { max-width:640px; margin:0 auto; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:20px; }
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:28px; box-shadow:var(--shadow-sm); }
+  .ic-form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .ic-btn-secondary {
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:10px 16px; color:var(--text); font-size:0.85rem; cursor:pointer;
+    font-family:'Inter',sans-serif; transition:all 0.2s;
+  }
+  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+  @media (max-width: 640px) { .ic-form-row { grid-template-columns:1fr; } }
+</style>
+
+<script>
+  const icTickerBasedTypes = {{ ticker_based_types|tojson }};
+  function icToggleFields() {
+    const sel = document.getElementById('assetTypeSelect').value;
+    const isTickerBased = icTickerBasedTypes.includes(sel);
+    document.getElementById('icTickerFields').style.display = isTickerBased ? '' : 'none';
+    document.getElementById('icManualValueField').style.display = isTickerBased ? 'none' : '';
+  }
+  document.addEventListener('DOMContentLoaded', icToggleFields);
+</script>
+{% endblock %}
