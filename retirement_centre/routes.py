@@ -318,6 +318,7 @@ def scheme_detail(scheme_id):
         cy = current_financial_year()
         fy_options.insert(0, {"year": cy, "label": f"FY {cy}-{str(cy + 1)[-2:]}"})
     summary        = services.contribution_summary(scheme_id)
+    scheme_xirr    = services.compute_scheme_xirr(scheme)
     nominees        = scheme.nominees.order_by(
         RetirementSchemeNominee.created_at.asc()).all()
     documents       = services.get_documents_for_scheme(scheme_id)
@@ -338,6 +339,7 @@ def scheme_detail(scheme_id):
         fy_filter=fy_filter,
         fy_arg=fy_arg,
         summary=summary,
+        scheme_xirr=scheme_xirr,
         nominees=nominees,
         nominee_relations=NomineeRelation.ALL,
         documents=documents,
@@ -362,6 +364,50 @@ def add_contribution(scheme_id):
     else:
         _, error = services.add_contribution(_db(), scheme, current_user.id, form)
         flash(error, "error") if error else flash("Contribution added.", "success")
+    return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
+
+
+@retirement_bp.route("/scheme/<int:scheme_id>/contributions/import-nps-csv", methods=["POST"])
+@login_required
+def import_nps_csv(scheme_id):
+    """
+    Bulk contribution-history import from an NPS CRA "Statement of
+    Transaction" CSV (Batch 4, Sep 2026) — see nps_import.py for the
+    parsing/classification/dedup logic. Only offered on NPS schemes
+    (also enforced here, not just hidden in the template).
+    """
+    scheme = _get_scheme_or_404(scheme_id)
+    if scheme.scheme_type != SchemeType.NPS:
+        flash("NPS CRA statement import is only available for NPS schemes.", "error")
+        return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
+
+    upload = request.files.get("nps_csv_file")
+    if not upload or not upload.filename:
+        flash("Please choose a CSV file to import.", "error")
+        return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
+    if not upload.filename.lower().endswith(".csv"):
+        flash("Please upload a .csv file exported from the NPS CRA portal.", "error")
+        return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
+
+    from .nps_import import import_nps_contributions, NpsImportError
+
+    try:
+        summary = import_nps_contributions(_db(), scheme, current_user.id, upload.read())
+    except NpsImportError as e:
+        flash(str(e), "error")
+        return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
+
+    parts = [f"{summary['imported']} contribution(s) imported"]
+    if summary["skipped_duplicate"]:
+        parts.append(f"{summary['skipped_duplicate']} already on file")
+    if summary["skipped_excluded"]:
+        parts.append(f"{summary['skipped_excluded']} non-contribution row(s) skipped (switches, withdrawals, charges, etc.)")
+    if summary["skipped_unrecognized"]:
+        parts.append(f"{summary['skipped_unrecognized']} row(s) with an unrecognized transaction type skipped")
+    if summary["skipped_invalid"]:
+        parts.append(f"{summary['skipped_invalid']} row(s) couldn't be read (bad date/amount)")
+    flash("NPS statement import: " + "; ".join(parts) + ".",
+          "success" if summary["imported"] else "warning")
     return redirect(url_for("retirement_centre.scheme_detail", scheme_id=scheme_id))
 
 

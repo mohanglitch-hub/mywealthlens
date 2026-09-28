@@ -44,9 +44,14 @@ def register_price_refresh_cli(app):
         click.echo(f"Stocks couldn't refresh: {summary['stocks_failed']}")
         click.echo(f"MF NAVs refreshed:       {summary['mfs_updated']}")
         click.echo(f"MFs missing AMFI code:   {summary['mfs_no_code']}")
-        click.echo(f"MFs not in AMFI file:    {summary['mfs_failed']}")
+        click.echo(f"MFs not found in source: {summary['mfs_failed']}")
         if summary["amfi_error"]:
             click.echo(f"AMFI file error:         {summary['amfi_error']}")
+        if summary["fallback_attempted"]:
+            if summary["nav_source"] == "mfapi_fallback":
+                click.echo("NAV source used:         mfapi.in (fallback -- AMFI's own file was unreachable this run)")
+            else:
+                click.echo("NAV source used:         none -- both AMFI and the mfapi.in fallback failed this run")
 
         click.echo("")
         click.echo("Refreshing foreign-currency Wealth Centre holdings...")
