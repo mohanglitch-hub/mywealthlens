@@ -251,6 +251,42 @@ def format_money_for_user(value_inr, user):
     return f"{sign}{symbol}{v:,.2f}"
 
 
+def usd_to_inr(usd_value):
+    """Converts a USD amount to INR using the same daily-cached FX rate
+    (FxRateCache, keyed by currency) as the global display-currency
+    conversion above. Returns None unchanged.
+
+    Added for international_centre (Sep 2026), whose holdings are
+    tracked in USD as a fixed reporting anchor regardless of a
+    holding's own native currency or the user's chosen display
+    currency (see international_centre/models.py's module docstring).
+    This bridges that USD anchor into the existing INR-based display
+    pipeline (to_display()/format_money() etc.) instead of building a
+    second, parallel currency-conversion path."""
+    if usd_value is None:
+        return None
+    rate = _get_cached_rate("USD")
+    if rate is None:
+        return None
+    return usd_value * rate
+
+
+def format_money_usd(usd_value):
+    """format_money(), for a value that's already in USD (international_
+    centre's anchor currency) rather than INR — converts USD -> INR
+    first via usd_to_inr(), then applies the normal INR -> display-
+    currency conversion/formatting. Falls back to a plain $-prefixed
+    figure if today's USD rate genuinely can't be fetched (network
+    down, no prior cache) rather than showing a wrong number."""
+    if usd_value is None:
+        return "—"
+    inr_equiv = usd_to_inr(usd_value)
+    if inr_equiv is None:
+        sign = "-" if usd_value < 0 else ""
+        return f"{sign}${abs(usd_value):,.2f}"
+    return format_money(inr_equiv)
+
+
 def display_symbol():
     """Just the current display currency's symbol — for templates
     and JS chart configs that need to build their own label."""
