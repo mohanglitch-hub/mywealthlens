@@ -467,12 +467,26 @@ def get_schedule_fa_summary(user_id, calendar_year):
 # ── Scheduled snapshot job ──────────────────────────────────────────
 
 def take_daily_snapshot(user_id=None):
-    """Records today's USD value for every active holding — run once a
+    """Refreshes every active holding's live price/FX (Sep 2026 fix —
+    see Batch 9.1 below), THEN records today's USD value — run once a
     day via `flask international snapshot` (see cli.py), mirroring
     `flask wealth snapshot`. Idempotent for the same day: the
     UniqueConstraint on (holding_id, date) means re-running today just
-    updates today's row rather than erroring or duplicating."""
+    updates today's row rather than erroring or duplicating.
+
+    Batch 9.1 bug fix: this function used to snapshot whatever
+    usd_value a holding ALREADY had, without ever refreshing it first.
+    Since this module has no separate scheduled price-refresh job
+    (unlike domestic stocks' `flask prices refresh`), a holding whose
+    owner never clicked "Refresh" on the dashboard would have the same
+    stale value recorded every single day — silently defeating
+    Schedule FA's whole reason for existing (a real daily value trail
+    to derive the year's true peak from). refresh_all_holdings() is
+    called first so every snapshot reflects a genuinely fresh price/FX
+    lookup, same as a manual "Refresh All" click would produce."""
     db = _db()
+    refresh_all_holdings(user_id)
+
     today = today_ist()
     query = InternationalHolding.query.filter_by(archived=False)
     if user_id is not None:
