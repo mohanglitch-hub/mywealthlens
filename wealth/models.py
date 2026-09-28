@@ -119,7 +119,11 @@ ASSET_TYPES_BY_CATEGORY = {
         "Savings Account", "Fixed Deposit", "Recurring Deposit", "Other Deposit",
     ],
     WealthAssetCategory.INVESTMENTS: [
-        "Bonds", "Other Investments",
+        "Bonds",
+        "SIF (Specialized Investment Fund)",
+        "AIF (Alternative Investment Fund)",
+        "PMS (Portfolio Management Services)",
+        "Other Investments",
     ],
     WealthAssetCategory.BUSINESS: [
         "Business Ownership", "Partnership", "Other Business Interest",

@@ -134,6 +134,13 @@
           <input type="file" name="csv_file" accept=".csv" required class="file-input" />
         </div>
         <div class="field-hint">Needs columns for symbol/ISIN, date, buy/sell, quantity and price — most broker exports already have these, just named slightly differently.</div>
+        <div class="field-hint" style="margin-top:10px;">
+          <label style="display:flex; align-items:flex-start; gap:6px; cursor:pointer; font-weight:400;">
+            <input type="checkbox" name="wipe_existing" style="margin-top:3px;" />
+            <span>Start over — discard all existing tradebook transactions and replace them with just this file<br/>
+            <span style="color:var(--muted2);">Leave unchecked to add this file's transactions to what's already there (recommended if your broker only lets you export one year at a time).</span></span>
+          </label>
+        </div>
         <button type="submit" class="btn-primary" style="margin-top:14px;">Import Tradebook</button>
       </form>
     </div>
