@@ -2,6 +2,7 @@
 {% block title %}Remittances — MyWealthLens{% endblock %}
 
 {% block content %}
+{% include "international_centre/_confirm_modal.html" %}
 <div class="ic-header">
   <div>
     <h1 class="ic-title">Remittances (LRS)</h1>
@@ -78,10 +79,10 @@
           <td>{{ r.purpose }}</td>
           <td>{{ r.remitting_bank or '—' }}</td>
           <td>
-            <form method="POST" action="{{ url_for('international_centre.delete_remittance', remit_id=r.id) }}" style="display:inline;"
-                  onsubmit="return confirm('Delete this remittance record?');">
+            <form method="POST" action="{{ url_for('international_centre.delete_remittance', remit_id=r.id) }}" style="display:inline;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="submit" class="ic-link-btn">Delete</button>
+              <button type="button" class="ic-link-btn"
+                      onclick="icConfirmAction(this.form, 'Delete Remittance Record?', 'This remittance record will be permanently removed and will no longer count toward your LRS usage for {{ lrs_status.fy_label }}.', 'Delete Record')">Delete</button>
             </form>
           </td>
         </tr>

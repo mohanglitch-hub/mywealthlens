@@ -2,6 +2,7 @@
 {% block title %}{{ holding.name }} — MyWealthLens{% endblock %}
 
 {% block content %}
+{% include "international_centre/_confirm_modal.html" %}
 <div class="ic-header">
   <div>
     <h1 class="ic-title">{{ holding.name }}</h1>
@@ -13,10 +14,10 @@
       <button type="submit" class="ic-btn-secondary">Refresh</button>
     </form>
     <a href="{{ url_for('international_centre.edit_holding', holding_id=holding.id) }}" class="ic-btn-secondary" style="text-decoration:none;">Edit</a>
-    <form method="POST" action="{{ url_for('international_centre.archive_holding', holding_id=holding.id) }}" style="display:inline;"
-          onsubmit="return confirm('Archive this holding? You can restore it later from Archived Holdings.');">
+    <form method="POST" action="{{ url_for('international_centre.archive_holding', holding_id=holding.id) }}" style="display:inline;" id="archiveHoldingForm">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <button type="submit" class="ic-btn-secondary">Archive</button>
+      <button type="button" class="ic-btn-secondary"
+              onclick="icConfirmAction(document.getElementById('archiveHoldingForm'), 'Archive this holding?', 'You can restore it later from Archived Holdings.', 'Archive')">Archive</button>
     </form>
   </div>
 </div>
@@ -129,17 +130,52 @@
       <thead><tr><th>Date</th><th>Type</th><th>Quantity</th><th>Price</th><th>Amount ({{ holding.native_currency }})</th><th></th></tr></thead>
       <tbody>
         {% for t in transactions %}
-        <tr>
+        <tr id="txnRow{{ t.id }}">
           <td>{{ format_date(t.date) }}</td>
           <td>{{ t.txn_type.title() }}</td>
           <td>{{ '{:,.4f}'.format(t.quantity) if t.quantity is not none else '—' }}</td>
           <td>{{ '{:,.2f}'.format(t.price_native) if t.price_native is not none else '—' }}</td>
           <td>{{ '{:,.2f}'.format(t.amount_native) }}</td>
-          <td>
-            <form method="POST" action="{{ url_for('international_centre.delete_transaction', txn_id=t.id) }}" style="display:inline;"
-                  onsubmit="return confirm('Delete this transaction?');">
+          <td style="display:flex; gap:10px;">
+            <button type="button" class="ic-link-btn" style="color:var(--accent);"
+                    onclick="icToggleTxnEdit({{ t.id }})">Edit</button>
+            <form method="POST" action="{{ url_for('international_centre.delete_transaction', txn_id=t.id) }}" style="display:inline;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="submit" class="ic-link-btn">Delete</button>
+              <button type="button" class="ic-link-btn"
+                      onclick="icConfirmAction(this.form, 'Delete Transaction?', 'This transaction will be permanently removed and invested/XIRR figures will be recomputed.', 'Delete Transaction')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <tr id="txnEditRow{{ t.id }}" style="display:none;">
+          <td colspan="6" style="background:var(--surface2);">
+            <form method="POST" action="{{ url_for('international_centre.edit_transaction', txn_id=t.id) }}" class="ic-txn-form" style="padding:10px 0;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label>Date</label>
+                <input type="date" name="date" required max="{{ today }}" value="{{ t.date.isoformat() }}" />
+              </div>
+              <div class="form-group">
+                <label>Type</label>
+                <select name="txn_type" required>
+                  {% for tt in txn_types %}<option value="{{ tt }}" {{ 'selected' if tt == t.txn_type }}>{{ tt.title() }}</option>{% endfor %}
+                </select>
+              </div>
+              {% if holding.is_ticker_based %}
+              <div class="form-group">
+                <label>Quantity</label>
+                <input type="number" step="any" name="quantity" value="{{ t.quantity if t.quantity is not none else '' }}" />
+              </div>
+              <div class="form-group">
+                <label>Price / unit ({{ holding.native_currency }})</label>
+                <input type="number" step="any" name="price_native" value="{{ t.price_native if t.price_native is not none else '' }}" />
+              </div>
+              {% endif %}
+              <div class="form-group">
+                <label>Amount ({{ holding.native_currency }})</label>
+                <input type="number" step="any" name="amount_native" required value="{{ t.amount_native }}" />
+              </div>
+              <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Save</button>
+              <button type="button" class="ic-btn-secondary" style="align-self:end;" onclick="icToggleTxnEdit({{ t.id }})">Cancel</button>
             </form>
           </td>
         </tr>
@@ -179,4 +215,15 @@
   .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
   .ic-link-btn:hover { text-decoration:underline; }
 </style>
+
+<script>
+  // Batch 9.2 (Sep 2026) — transaction edit was previously add/delete
+  // only; toggles the hidden inline edit row directly below a
+  // transaction, prefilled with its current values.
+  function icToggleTxnEdit(txnId) {
+    const editRow = document.getElementById('txnEditRow' + txnId);
+    if (!editRow) return;
+    editRow.style.display = editRow.style.display === 'none' ? 'table-row' : 'none';
+  }
+</script>
 {% endblock %}

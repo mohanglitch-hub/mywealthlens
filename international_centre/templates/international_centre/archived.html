@@ -2,6 +2,7 @@
 {% block title %}Archived Holdings — MyWealthLens{% endblock %}
 
 {% block content %}
+{% include "international_centre/_confirm_modal.html" %}
 <div class="ic-header">
   <h1 class="ic-title">Archived International Holdings</h1>
   <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
@@ -24,10 +25,10 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <button type="submit" class="ic-link-btn" style="color:var(--accent);">Restore</button>
             </form>
-            <form method="POST" action="{{ url_for('international_centre.delete_holding', holding_id=h.id) }}" style="display:inline;"
-                  onsubmit="return confirm('Permanently delete this holding and all its transaction history? This cannot be undone.');">
+            <form method="POST" action="{{ url_for('international_centre.delete_holding', holding_id=h.id) }}" style="display:inline;" id="deleteHoldingForm{{ h.id }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="submit" class="ic-link-btn">Delete Permanently</button>
+              <button type="button" class="ic-link-btn"
+                      onclick="icConfirmAction(document.getElementById('deleteHoldingForm{{ h.id }}'), 'Delete Holding Permanently?', 'This holding and all its transaction history will be permanently removed. This action cannot be undone.', 'Delete Permanently')">Delete Permanently</button>
             </form>
           </td>
         </tr>
