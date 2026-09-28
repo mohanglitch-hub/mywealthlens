@@ -4,10 +4,10 @@ International Investing Centre — Routes
 Thin handlers — all logic lives in services.py. Every query filtered
 by current_user.id (IDOR check), matching every other module.
 
-Transaction editing is add/delete only in this first version (no
-separate "edit a transaction" form) — a deliberate scope cut to keep
-v1 manageable; a mistaken entry is fixed by deleting and re-adding it.
-Everything else (holdings, remittances) has full edit support.
+Transaction editing (Batch 9.2, Sep 2026) is now a full edit route
+(edit_transaction), not just add/delete — an inline edit row on
+holding_detail.html, matching the same fix-a-mistake convenience every
+other editable thing in the app (holdings, remittances) already had.
 """
 from flask import render_template, request, redirect, url_for, flash, abort
 from flask_login import login_required, current_user
@@ -242,6 +242,26 @@ def add_transaction(holding_id):
     services.add_transaction(holding, data)
     flash("Transaction added.", "success")
     return redirect(url_for("international_centre.holding_detail", holding_id=holding.id))
+
+
+@international_bp.route("/transactions/<int:txn_id>/edit", methods=["POST"])
+@login_required
+def edit_transaction(txn_id):
+    """Batch 9.2 (Sep 2026) — was add/delete only; services.update_transaction()
+    already existed (written alongside add_transaction/delete_transaction
+    but never wired to a route). Submits back to holding_detail's inline
+    edit row (see holding_detail.html) rather than a separate page."""
+    txn = _get_txn_or_404(txn_id)
+    holding_id = txn.holding_id
+    data = request.form.to_dict()
+    errors = validate_transaction(data)
+    if errors:
+        for e in errors:
+            flash(e, "error")
+        return redirect(url_for("international_centre.holding_detail", holding_id=holding_id))
+    services.update_transaction(txn, data)
+    flash("Transaction updated.", "success")
+    return redirect(url_for("international_centre.holding_detail", holding_id=holding_id))
 
 
 @international_bp.route("/transactions/<int:txn_id>/delete", methods=["POST"])
