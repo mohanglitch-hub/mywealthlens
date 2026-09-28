@@ -63,6 +63,7 @@ def main():
         RemittancePurpose, LRS_ANNUAL_LIMIT_USD,
     )
     from international_centre import services
+    from wealth.timezone_utils import today_ist
 
     # Deterministic FX: 1 USD = 83.0 INR (so INR->USD rate = 1/83).
     def fake_fetch_fx_rate(from_currency, to_currency="INR", on_date=None):
@@ -243,16 +244,29 @@ def main():
         assert fa2["any_incomplete"] is True
         print("PASS: a holding with no tracked snapshots falls back to current value and is flagged incomplete")
 
-        # ── 8. take_daily_snapshot() idempotency ──
+        # ── 8. take_daily_snapshot() idempotency + Batch 9.1 refresh fix ──
+        # Before the fix, take_daily_snapshot() recorded whatever
+        # usd_value a holding already had, without refreshing it first
+        # -- a stale ticker price would get snapshotted day after day.
+        # Bump the fake live price and confirm the snapshot job itself
+        # picks up the NEW price, not the stale one from step 4.
+        svc_mod.fetch_ticker_price = lambda ticker: 250.0
         before_count = InternationalValueSnapshot.query.filter_by(holding_id=holding.id).count()
         n = services.take_daily_snapshot(user_id=user_id)
         assert n >= 2  # at least `holding` and `no_snap_holding`
+        db.session.refresh(holding)
+        assert holding.live_price_native == 250.0, \
+            "take_daily_snapshot() must refresh live price/FX before snapshotting (Batch 9.1)"
+        assert holding.usd_value == 2500.0, holding.usd_value  # 10 units * $250
+        today_snap = InternationalValueSnapshot.query.filter_by(holding_id=holding.id, date=today_ist()).first()
+        assert today_snap.usd_value == 2500.0, \
+            "today's snapshot must reflect the freshly-refreshed value, not a stale one"
         after_first = InternationalValueSnapshot.query.filter_by(holding_id=holding.id).count()
         assert after_first == before_count + 1, "expected exactly one new snapshot row for today"
         services.take_daily_snapshot(user_id=user_id)
         after_second = InternationalValueSnapshot.query.filter_by(holding_id=holding.id).count()
         assert after_second == after_first, "re-running the same day must update, not duplicate, today's snapshot"
-        print("PASS: take_daily_snapshot() is idempotent for repeat runs on the same day")
+        print("PASS: take_daily_snapshot() refreshes price/FX before snapshotting (Batch 9.1), and is idempotent for repeat runs on the same day")
 
     # ── 9. End-to-end HTTP ──
     client = app.test_client()
