@@ -167,6 +167,10 @@ class InternationalHolding(db.Model):
         "InternationalValueSnapshot", backref="holding", lazy=True,
         cascade="all, delete-orphan",
     )
+    nominees = db.relationship(
+        "InternationalHoldingNominee", backref="holding", lazy="dynamic",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self):
         return f"<InternationalHolding {self.name} {self.native_currency}{self.current_value_native}>"
@@ -174,6 +178,45 @@ class InternationalHolding(db.Model):
     @property
     def is_ticker_based(self):
         return self.asset_type in InternationalAssetType.TICKER_BASED
+
+    @property
+    def total_nominees_percentage(self):
+        return sum(n.percentage or 0 for n in self.nominees)
+
+
+class InternationalHoldingNominee(db.Model):
+    """Who should get this foreign holding — mirrors WealthAssetHeir/
+    InsuranceNominee/RetirementSchemeNominee exactly (Sep 2026, added
+    after Mohan flagged that international holdings were invisible to
+    Family Centre's "who's connected to my financial life" view and
+    Coverage Gaps check). One holding can have several nominees, each
+    with their own share; percentage is validated the same way (can't
+    exceed 100% on its own, nor push the holding's running total over
+    100% — see international_centre/services.py's create_holding/
+    update_holding, which do the wipe-and-rebuild-on-save handling the
+    same way wealth/services.py's create_asset/update_asset do for
+    heirs). Relationship is free text, matching WealthAssetHeir's own
+    convention, not a fixed list the way Insurance's nominee form
+    uses."""
+    __tablename__ = "international_holding_nominee"
+    __table_args__ = (
+        db.Index("ix_intl_holding_nominee_holding", "holding_id"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    holding_id = db.Column(db.Integer,
+                            db.ForeignKey("international_holding.id", ondelete="CASCADE"),
+                            nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    name         = db.Column(db.String(200), nullable=False)
+    relationship = db.Column(db.String(100), nullable=True)
+    percentage   = db.Column(db.Float, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<InternationalHoldingNominee {self.name} ({self.relationship})>"
 
 
 class InternationalTransaction(db.Model):

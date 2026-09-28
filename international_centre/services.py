@@ -27,8 +27,8 @@ from datetime import datetime, timedelta
 
 from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
-    InternationalValueSnapshot, InternationalAssetType, InternationalTxnType,
-    LRS_ANNUAL_LIMIT_USD,
+    InternationalValueSnapshot, InternationalHoldingNominee,
+    InternationalAssetType, InternationalTxnType, LRS_ANNUAL_LIMIT_USD,
 )
 from international_centre.utils import fy_bounds, fy_label, calendar_year_bounds, fetch_ticker_price
 from international_xirr import holding_xirr, portfolio_xirr as _portfolio_xirr_calc
@@ -82,7 +82,53 @@ def recompute_holding_financials(holding):
     holding.xirr = holding_xirr(txns, holding.current_value_native)
 
 
-def create_holding(user_id, data):
+def _replace_nominees(db, holding, user_id, multi_data):
+    """Wipe-and-rebuild a holding's nominee set from nominee_name[]/
+    nominee_relationship[]/nominee_percentage[] array fields — mirrors
+    wealth/services.py's create_asset/update_asset heir handling
+    exactly, including why: the form's nominee section is authoritative
+    on every save, not an incremental add on top of the old set.
+    Returns an error string (nothing committed/deleted yet) or None on
+    success. Caller must have already flushed `holding` so it has an id."""
+    if multi_data is None:
+        return None
+
+    names = multi_data.getlist("nominee_name[]")
+    rels = multi_data.getlist("nominee_relationship[]")
+    pcts = multi_data.getlist("nominee_percentage[]")
+
+    total_pct = 0
+    new_rows = []
+    for i, name in enumerate(names):
+        name = name.strip()
+        if not name:
+            continue
+        pct_raw = pcts[i] if i < len(pcts) else ""
+        pct = float(pct_raw) if pct_raw else None
+        if pct:
+            if pct < 0 or pct > 100:
+                return "Nominee percentage must be between 0 and 100."
+            total_pct += pct
+            if total_pct > 100:
+                return f"Total nominee percentage would exceed 100% ({total_pct:.1f}%). Please check nominee shares."
+        new_rows.append(InternationalHoldingNominee(
+            holding_id=holding.id,
+            user_id=user_id,
+            name=name,
+            relationship=(rels[i].strip() if i < len(rels) and rels[i].strip() else None),
+            percentage=pct,
+        ))
+
+    # Only touch the table once validation of the whole submitted set
+    # has passed — an existing nominee list is never partially cleared
+    # on a rejected submission.
+    holding.nominees.delete()
+    for row in new_rows:
+        db.session.add(row)
+    return None
+
+
+def create_holding(user_id, data, multi_data=None):
     db = _db()
     asset_type = data["asset_type"].strip()
     is_ticker_based = asset_type in InternationalAssetType.TICKER_BASED
@@ -110,13 +156,19 @@ def create_holding(user_id, data):
         holding.invested_native = holding.current_value_native
 
     db.session.add(holding)
-    db.session.flush()
+    db.session.flush()  # assigns holding.id, needed for nominees below
+
+    nominee_error = _replace_nominees(db, holding, user_id, multi_data)
+    if nominee_error:
+        db.session.rollback()
+        return None, nominee_error
+
     _convert_to_usd(holding)
     db.session.commit()
-    return holding
+    return holding, None
 
 
-def update_holding(holding, data):
+def update_holding(holding, data, multi_data=None):
     db = _db()
     holding.name = data["name"].strip()
     holding.ticker = (data.get("ticker") or "").strip().upper() or None
@@ -134,10 +186,15 @@ def update_holding(holding, data):
     else:
         holding.current_value_native = float(data["current_value_native"])
 
+    nominee_error = _replace_nominees(db, holding, holding.user_id, multi_data)
+    if nominee_error:
+        db.session.rollback()
+        return None, nominee_error
+
     _convert_to_usd(holding)
     recompute_holding_financials(holding)
     db.session.commit()
-    return holding
+    return holding, None
 
 
 def archive_holding(holding):
@@ -208,6 +265,24 @@ def portfolio_totals(user_id):
         "total_invested_usd_approx": round(total_invested_usd, 2),
         "holdings_count": len(holdings),
     }
+
+
+def portfolio_inr_value(user_id):
+    """INR-equivalent of the active portfolio's USD total (Sep 2026) —
+    for wiring international holdings into the main dashboard's net
+    worth total and NetWorthHistory, which otherwise have no idea this
+    module exists. Bridges through currency_display.usd_to_inr(), the
+    same USD->INR path format_money_usd() uses. Returns 0.0 (never
+    None) when there's nothing to convert or today's USD rate can't be
+    fetched — callers add this straight into a running INR total
+    without needing a None-check, matching this module's existing
+    "never guess, never crash" refresh philosophy."""
+    import currency_display
+    total_usd = portfolio_totals(user_id)["total_usd"]
+    if not total_usd:
+        return 0.0
+    inr_equiv = currency_display.usd_to_inr(total_usd)
+    return inr_equiv if inr_equiv is not None else 0.0
 
 
 def portfolio_usd_xirr(user_id):

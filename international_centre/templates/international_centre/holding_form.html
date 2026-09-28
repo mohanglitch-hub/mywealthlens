@@ -93,6 +93,48 @@
       <textarea name="notes" rows="2">{{ holding.notes if holding else data.get('notes', '') }}</textarea>
     </div>
 
+    <!-- ── Nominees — who should get this holding. Mirrors Wealth
+         Centre's "Intended Heirs" section exactly: wiped and rebuilt
+         from whatever's in the form on every save, not an incremental
+         add. Feeds Family Centre's "who's connected" view and
+         Coverage Gaps check (Sep 2026), same as every other module's
+         nominee/heir list. ── -->
+    <div class="ic-nominees-card">
+      <div class="ic-nominees-heading">
+        <span>Nominees</span>
+        <button type="button" class="ic-btn-add" onclick="icAddNominee()">+ Add Nominee</button>
+      </div>
+      <div id="icNomineesList">
+        {% if existing_nominees %}
+          {% for n in existing_nominees %}
+          <div class="ic-sub-card" data-nominee>
+            <div class="ic-sub-card-header">
+              <span>Nominee {{ loop.index }}</span>
+              <button type="button" class="ic-btn-remove" onclick="icRemoveNominee(this)">✕ Remove</button>
+            </div>
+            <div class="ic-form-row">
+              <div class="form-group">
+                <label>Name</label>
+                <input type="text" name="nominee_name[]" value="{{ n.name }}" required />
+              </div>
+              <div class="form-group">
+                <label>Relationship</label>
+                <input type="text" name="nominee_relationship[]" value="{{ n.relationship or '' }}" placeholder="e.g. Son" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Percentage (%)</label>
+              <input type="number" name="nominee_percentage[]" value="{{ n.percentage or '' }}" min="0" max="100" step="0.01" />
+            </div>
+          </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+      <div id="icNomineeEmpty" class="field-hint" {% if existing_nominees %}style="display:none;"{% endif %}>
+        No nominees added yet. Click "+ Add Nominee" to add.
+      </div>
+    </div>
+
     <div style="display:flex; gap:10px; margin-top:10px;">
       <button type="submit" class="btn-primary" style="width:auto; padding:10px 24px;">{{ 'Save Changes' if holding else 'Add Holding' }}</button>
       <a href="{{ url_for('international_centre.holding_detail', holding_id=holding.id) if holding else url_for('international_centre.dashboard') }}" class="ic-btn-secondary" style="text-decoration:none; display:inline-flex; align-items:center;">Cancel</a>
@@ -112,6 +154,16 @@
   }
   .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
   @media (max-width: 640px) { .ic-form-row { grid-template-columns:1fr; } }
+
+  .ic-nominees-card { border:1px solid var(--border); border-radius:10px; padding:16px; margin:6px 0 18px; background:var(--surface2); }
+  .ic-nominees-heading { display:flex; justify-content:space-between; align-items:center; font-weight:600; color:var(--text); margin-bottom:12px; }
+  .ic-btn-add {
+    background:var(--accent); color:#fff; border:none; border-radius:6px;
+    padding:5px 12px; font-size:0.78rem; font-weight:600; cursor:pointer;
+  }
+  .ic-sub-card { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:10px; }
+  .ic-sub-card-header { display:flex; justify-content:space-between; align-items:center; font-size:0.82rem; font-weight:600; color:var(--muted); margin-bottom:10px; }
+  .ic-btn-remove { background:none; border:none; color:var(--down); font-size:0.78rem; cursor:pointer; padding:0; }
 </style>
 
 <script>
@@ -123,5 +175,46 @@
     document.getElementById('icManualValueField').style.display = isTickerBased ? 'none' : '';
   }
   document.addEventListener('DOMContentLoaded', icToggleFields);
+
+  // ── Nominees ─────────────────────────────────────────────────
+  let icNomineeCount = {{ existing_nominees|length if existing_nominees else 0 }};
+  function icAddNominee() {
+    icNomineeCount++;
+    const wrap = document.createElement('div');
+    wrap.className = 'ic-sub-card';
+    wrap.setAttribute('data-nominee', '');
+    wrap.innerHTML = `
+      <div class="ic-sub-card-header">
+        <span>Nominee ${icNomineeCount}</span>
+        <button type="button" class="ic-btn-remove" onclick="icRemoveNominee(this)">✕ Remove</button>
+      </div>
+      <div class="ic-form-row">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" name="nominee_name[]" placeholder="e.g. Priya Sharma" required />
+        </div>
+        <div class="form-group">
+          <label>Relationship</label>
+          <input type="text" name="nominee_relationship[]" placeholder="e.g. Son" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Percentage (%)</label>
+        <input type="number" name="nominee_percentage[]" placeholder="e.g. 50" min="0" max="100" step="0.01" />
+      </div>`;
+    document.getElementById('icNomineesList').appendChild(wrap);
+    document.getElementById('icNomineeEmpty').style.display = 'none';
+  }
+  function icRemoveNominee(btn) {
+    btn.closest('[data-nominee]').remove();
+    const cards = document.querySelectorAll('#icNomineesList [data-nominee]');
+    cards.forEach(function (card, i) {
+      card.querySelector('.ic-sub-card-header span').textContent = `Nominee ${i + 1}`;
+    });
+    icNomineeCount = cards.length;
+    if (!cards.length) {
+      document.getElementById('icNomineeEmpty').style.display = '';
+    }
+  }
 </script>
 {% endblock %}

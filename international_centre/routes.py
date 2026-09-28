@@ -84,16 +84,27 @@ def add_holding():
                 flash(e, "error")
             return render_template(
                 "international_centre/holding_form.html", holding=None, data=data,
+                existing_nominees=[],
                 asset_types=InternationalAssetType.ALL,
                 ticker_based_types=list(InternationalAssetType.TICKER_BASED),
                 currencies=SUPPORTED_CURRENCIES, countries=COUNTRIES,
             )
-        holding = services.create_holding(current_user.id, data)
+        holding, error = services.create_holding(current_user.id, data, multi_data=request.form)
+        if error:
+            flash(error, "error")
+            return render_template(
+                "international_centre/holding_form.html", holding=None, data=data,
+                existing_nominees=[],
+                asset_types=InternationalAssetType.ALL,
+                ticker_based_types=list(InternationalAssetType.TICKER_BASED),
+                currencies=SUPPORTED_CURRENCIES, countries=COUNTRIES,
+            )
         flash(f'Added "{holding.name}" to your international holdings.', "success")
         return redirect(url_for("international_centre.holding_detail", holding_id=holding.id))
 
     return render_template(
         "international_centre/holding_form.html", holding=None, data={},
+        existing_nominees=[],
         asset_types=InternationalAssetType.ALL,
         ticker_based_types=list(InternationalAssetType.TICKER_BASED),
         currencies=SUPPORTED_CURRENCIES, countries=COUNTRIES,
@@ -110,6 +121,7 @@ def holding_detail(holding_id):
                      .all())
     return render_template(
         "international_centre/holding_detail.html", holding=holding, transactions=transactions,
+        nominees=holding.nominees.all(),
         txn_types=InternationalTxnType.ALL, format_date=format_date,
         format_money_usd=currency_display.format_money_usd,
         today=today_ist().isoformat(),
@@ -128,16 +140,27 @@ def edit_holding(holding_id):
                 flash(e, "error")
             return render_template(
                 "international_centre/holding_form.html", holding=holding, data=data,
+                existing_nominees=holding.nominees.all(),
                 asset_types=InternationalAssetType.ALL,
                 ticker_based_types=list(InternationalAssetType.TICKER_BASED),
                 currencies=SUPPORTED_CURRENCIES, countries=COUNTRIES,
             )
-        services.update_holding(holding, data)
-        flash(f'Updated "{holding.name}".', "success")
-        return redirect(url_for("international_centre.holding_detail", holding_id=holding.id))
+        updated, error = services.update_holding(holding, data, multi_data=request.form)
+        if error:
+            flash(error, "error")
+            return render_template(
+                "international_centre/holding_form.html", holding=holding, data=data,
+                existing_nominees=holding.nominees.all(),
+                asset_types=InternationalAssetType.ALL,
+                ticker_based_types=list(InternationalAssetType.TICKER_BASED),
+                currencies=SUPPORTED_CURRENCIES, countries=COUNTRIES,
+            )
+        flash(f'Updated "{updated.name}".', "success")
+        return redirect(url_for("international_centre.holding_detail", holding_id=updated.id))
 
     return render_template(
         "international_centre/holding_form.html", holding=holding, data={},
+        existing_nominees=holding.nominees.all(),
         asset_types=InternationalAssetType.ALL,
         ticker_based_types=list(InternationalAssetType.TICKER_BASED),
         currencies=SUPPORTED_CURRENCIES, countries=COUNTRIES,
