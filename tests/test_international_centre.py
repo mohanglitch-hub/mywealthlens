@@ -314,6 +314,29 @@ def main():
     assert 'XIRR' in detail_page2.get_data(as_text=True)
     print("PASS: transaction add via real HTTP form works")
 
+    # Batch 9.2: transaction edit (was add/delete only) + branded
+    # delete-confirmation modal replacing plain browser confirm().
+    body2 = detail_page2.get_data(as_text=True)
+    assert 'icConfirmAction' in body2 and 'icConfirmModalOverlay' in body2, \
+        "holding_detail.html must include the branded confirm modal, not a plain confirm() dialog"
+    with app.app_context():
+        added_txn = InternationalTransaction.query.filter_by(holding_id=h_id, amount_native=2000.0).first()
+        assert added_txn is not None
+        txn_id = added_txn.id
+
+    edit_csrf = get_csrf(detail_page2.data)
+    r = client.post(f'/international/transactions/{txn_id}/edit', data={
+        'csrf_token': edit_csrf, 'date': '2024-03-02', 'txn_type': 'BUY',
+        'quantity': '5', 'price_native': '420', 'amount_native': '2100',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        from models import db as _db2
+        edited_txn = _db2.session.get(InternationalTransaction, txn_id)
+        assert edited_txn.amount_native == 2100.0, edited_txn.amount_native
+        assert edited_txn.price_native == 420.0, edited_txn.price_native
+    print("PASS: transaction edit via real HTTP form works (was add/delete only)")
+
     remit_page = client.get('/international/remittances')
     assert remit_page.status_code == 200
     remit_csrf = get_csrf(remit_page.data)

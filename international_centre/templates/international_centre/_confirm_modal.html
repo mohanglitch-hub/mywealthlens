@@ -1,0 +1,78 @@
+{# ── Reusable confirmation modal — Batch 9.2 (Sep 2026). Mirrors
+     wealth/_confirm_modal.html's proven pattern exactly (own copy,
+     own class names, per this project's "each module keeps its own
+     copy" convention) — replaces this module's plain browser
+     confirm() dialogs, which were a known scope cut from the
+     module's first version. ── #}
+
+<div id="icConfirmModalOverlay" class="ic-modal-overlay" style="display:none;">
+  <div class="ic-modal">
+    <div class="ic-modal-title" id="icConfirmModalTitle"></div>
+    <div class="ic-modal-message" id="icConfirmModalMessage"></div>
+    <div class="ic-modal-actions">
+      <button type="button" class="ic-modal-cancel" onclick="icCloseConfirmModal()">Cancel</button>
+      <button type="button" class="ic-modal-confirm" id="icConfirmModalConfirmBtn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .ic-modal-overlay {
+    position: fixed; inset: 0; background: rgba(15,23,42,0.55);
+    display: flex; align-items: center; justify-content: center; z-index: 500;
+    padding: 20px;
+  }
+  .ic-modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; max-width: 380px; width: 100%;
+    box-shadow: var(--shadow-lg);
+  }
+  .ic-modal-title { font-weight: 700; font-size: 1rem; color: var(--text); margin-bottom: 8px; }
+  .ic-modal-message { font-size: 0.88rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; white-space: pre-line; }
+  .ic-modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+  .ic-modal-cancel {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: var(--text2); cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .ic-modal-cancel:hover { border-color: var(--muted2); }
+  .ic-modal-confirm {
+    background: var(--down); border: none; border-radius: 8px;
+    padding: 8px 16px; font-size: 0.85rem; color: #fff; font-weight: 600;
+    cursor: pointer; font-family: 'Inter', sans-serif;
+  }
+  .ic-modal-confirm:hover { opacity: 0.9; }
+</style>
+
+<script>
+  let _icPendingConfirmForm = null;
+
+  function icConfirmAction(formEl, title, message, confirmLabel) {
+    _icPendingConfirmForm = formEl;
+    document.getElementById('icConfirmModalTitle').textContent = title;
+    document.getElementById('icConfirmModalMessage').textContent = message;
+    document.getElementById('icConfirmModalConfirmBtn').textContent = confirmLabel || 'Confirm';
+    document.getElementById('icConfirmModalOverlay').style.display = 'flex';
+    return false;
+  }
+
+  function icCloseConfirmModal() {
+    document.getElementById('icConfirmModalOverlay').style.display = 'none';
+    _icPendingConfirmForm = null;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const confirmBtn = document.getElementById('icConfirmModalConfirmBtn');
+    if (confirmBtn) {
+      confirmBtn.addEventListener('click', function () {
+        if (_icPendingConfirmForm) _icPendingConfirmForm.submit();
+        icCloseConfirmModal();
+      });
+    }
+    const overlay = document.getElementById('icConfirmModalOverlay');
+    if (overlay) {
+      overlay.addEventListener('click', function (e) {
+        if (e.target === overlay) icCloseConfirmModal();
+      });
+    }
+  });
+</script>
