@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}International Investing — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">International Investing</h1>
+    <p class="ic-subtitle">Foreign holdings, tracked in their own currency and anchored to USD.</p>
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary" style="text-decoration:none; display:inline-block; width:auto; padding:10px 18px;">+ Add Holding</a>
+    <form method="POST" action="{{ url_for('international_centre.refresh_all') }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <button type="submit" class="ic-btn-secondary">Refresh Prices</button>
+    </form>
+    <a href="{{ url_for('international_centre.remittances') }}" class="ic-btn-secondary" style="text-decoration:none;">Remittances (LRS)</a>
+    <a href="{{ url_for('international_centre.schedule_fa') }}" class="ic-btn-secondary" style="text-decoration:none;">Schedule FA Report</a>
+  </div>
+</div>
+
+<div class="ic-summary-grid">
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Total Portfolio Value</div>
+    <div class="ic-summary-value">{{ format_money_usd(totals.total_usd) }}</div>
+    <div class="ic-summary-sub">${{ '{:,.2f}'.format(totals.total_usd) }} USD</div>
+  </div>
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Invested (approx.)</div>
+    <div class="ic-summary-value">{{ format_money_usd(totals.total_invested_usd_approx) }}</div>
+  </div>
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Portfolio XIRR</div>
+    {% if portfolio_xirr is not none %}
+      <div class="ic-summary-value {{ 'ic-up' if portfolio_xirr >= 0 else 'ic-down' }}">{{ '%.2f'|format(portfolio_xirr) }}%</div>
+      <div class="ic-summary-sub">approximate — see report notes</div>
+    {% else %}
+      <div class="ic-summary-value ic-muted">—</div>
+      <div class="ic-summary-sub">needs at least one buy/sell across holdings</div>
+    {% endif %}
+  </div>
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">LRS Used This {{ lrs_status.fy_label }}</div>
+    <div class="ic-summary-value {{ 'ic-down' if lrs_status.status != 'ok' else '' }}">{{ lrs_status.pct_used }}%</div>
+    <div class="ic-summary-sub">${{ '{:,.0f}'.format(lrs_status.total_usd) }} of ${{ '{:,.0f}'.format(lrs_status.limit_usd) }}</div>
+  </div>
+</div>
+
+{% if holdings %}
+<div class="ic-card">
+  <div class="section-label">Holdings ({{ holdings|length }})</div>
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead>
+        <tr>
+          <th>Name</th><th>Type</th><th>Country</th><th>Currency</th>
+          <th>Value (native)</th><th>Value (USD)</th><th>XIRR</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for h in holdings %}
+        <tr>
+          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="ic-link">{{ h.name }}</a></td>
+          <td>{{ h.asset_type }}</td>
+          <td>{{ h.country or '—' }}</td>
+          <td>{{ h.native_currency }}</td>
+          <td>{{ '{:,.2f}'.format(h.current_value_native) }}</td>
+          <td>{{ format_money_usd(h.usd_value) }}</td>
+          <td class="{{ 'ic-up' if h.xirr and h.xirr >= 0 else ('ic-down' if h.xirr else '') }}">
+            {{ '%.2f'|format(h.xirr) + '%' if h.xirr is not none else '—' }}
+          </td>
+          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="ic-link">View</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="ic-card ic-empty">
+  <p>No international holdings yet.</p>
+  <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary" style="text-decoration:none; display:inline-block; width:auto; padding:10px 18px; margin-top:10px;">+ Add your first holding</a>
+</div>
+{% endif %}
+
+<div class="ic-footer-links">
+  <a href="{{ url_for('international_centre.archived_holdings') }}" class="ic-link">View archived holdings</a>
+</div>
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+
+  .ic-btn-secondary {
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:10px 16px; color:var(--text); font-size:0.85rem; cursor:pointer;
+    font-family:'Inter',sans-serif; transition:all 0.2s;
+  }
+  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+
+  .ic-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:16px; margin-bottom:24px; }
+  .ic-summary-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
+  .ic-summary-label { font-size:0.75rem; color:var(--muted); font-weight:600; letter-spacing:0.05em; text-transform:uppercase; margin-bottom:8px; }
+  .ic-summary-value { font-size:1.4rem; font-weight:700; color:var(--text); font-family:var(--font-data); }
+  .ic-summary-sub { font-size:0.75rem; color:var(--muted2); margin-top:4px; }
+  .ic-up { color:var(--up); }
+  .ic-down { color:var(--down); }
+  .ic-muted { color:var(--muted2); }
+
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
+  .ic-empty { text-align:center; color:var(--muted); padding:40px 20px; }
+
+  .ic-table-wrap { overflow-x:auto; }
+  .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .ic-table th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); }
+  .ic-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); }
+  .ic-table tr:last-child td { border-bottom:none; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .ic-link:hover { text-decoration:underline; }
+
+  .ic-footer-links { text-align:center; margin-top:12px; font-size:0.85rem; }
+
+  @media (max-width: 768px) {
+    .ic-header { flex-direction:column; }
+    .ic-summary-grid { grid-template-columns:1fr 1fr; }
+  }
+</style>
+{% endblock %}
