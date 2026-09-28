@@ -19,6 +19,7 @@ from wealth import wealth_bp
 from family_centre import family_bp
 from backup import backup_bp
 from cashflow_centre import cashflow_bp
+from international_centre import international_bp
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory, WealthAsset
 from retirement_centre.models import RetirementScheme
@@ -3103,6 +3104,7 @@ app.register_blueprint(wealth_bp)
 app.register_blueprint(family_bp)
 app.register_blueprint(backup_bp)
 app.register_blueprint(cashflow_bp)
+app.register_blueprint(international_bp)
 
 # Phase I — Automatic Wealth Snapshots. Registers `flask wealth
 # snapshot`, invoked by Windows Task Scheduler (see the Phase I
@@ -3128,6 +3130,12 @@ register_price_refresh_cli(app)
 # the CLI commands above; see notifications_cli.py / notifications_service.py.
 from notifications_cli import register_notifications_cli
 register_notifications_cli(app)
+
+# International Investing Centre — `flask international snapshot`
+# (Sep 2026), for Schedule FA's opening/peak/closing-value tracking.
+# Same Task Scheduler pattern as the CLI commands above.
+from international_centre.cli import register_cli as register_international_cli
+register_international_cli(app)
 
 if __name__ == '__main__':
     import os

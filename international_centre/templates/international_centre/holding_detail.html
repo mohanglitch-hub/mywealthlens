@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}{{ holding.name }} — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">{{ holding.name }}</h1>
+    <p class="ic-subtitle">{{ holding.asset_type }}{{ ' · ' + holding.ticker if holding.ticker }}{{ ' · ' + holding.country if holding.country }}</p>
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <form method="POST" action="{{ url_for('international_centre.refresh_holding', holding_id=holding.id) }}" style="display:inline;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <button type="submit" class="ic-btn-secondary">Refresh</button>
+    </form>
+    <a href="{{ url_for('international_centre.edit_holding', holding_id=holding.id) }}" class="ic-btn-secondary" style="text-decoration:none;">Edit</a>
+    <form method="POST" action="{{ url_for('international_centre.archive_holding', holding_id=holding.id) }}" style="display:inline;"
+          onsubmit="return confirm('Archive this holding? You can restore it later from Archived Holdings.');">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <button type="submit" class="ic-btn-secondary">Archive</button>
+    </form>
+  </div>
+</div>
+
+<div class="ic-summary-grid">
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Value ({{ holding.native_currency }})</div>
+    <div class="ic-summary-value">{{ '{:,.2f}'.format(holding.current_value_native) }}</div>
+  </div>
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Value (USD)</div>
+    <div class="ic-summary-value">{{ format_money_usd(holding.usd_value) }}</div>
+    {% if holding.fx_rate_date %}
+    <div class="ic-summary-sub">rate as of {{ format_date(holding.fx_rate_date) }}</div>
+    {% endif %}
+  </div>
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Invested ({{ holding.native_currency }})</div>
+    <div class="ic-summary-value">{{ '{:,.2f}'.format(holding.invested_native) if holding.invested_native is not none else '—' }}</div>
+  </div>
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">XIRR</div>
+    {% if holding.xirr is not none %}
+    <div class="ic-summary-value {{ 'ic-up' if holding.xirr >= 0 else 'ic-down' }}">{{ '%.2f'|format(holding.xirr) }}%</div>
+    {% else %}
+    <div class="ic-summary-value ic-muted">—</div>
+    <div class="ic-summary-sub">needs at least one buy and a matching value</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if holding.is_ticker_based %}
+<div class="ic-card" style="font-size:0.85rem; color:var(--muted);">
+  {{ holding.quantity }} units @ {{ '{:,.2f}'.format(holding.live_price_native) if holding.live_price_native else '—' }} {{ holding.native_currency }}/unit
+  {% if holding.price_updated_at %} · price last refreshed {{ format_date(holding.price_updated_at) }}{% endif %}
+</div>
+{% endif %}
+
+{% if holding.broker_or_institution or holding.account_number_masked or holding.notes %}
+<div class="ic-card">
+  <div class="section-label">Details</div>
+  {% if holding.broker_or_institution %}<p style="margin-bottom:6px;"><strong>Broker/Institution:</strong> {{ holding.broker_or_institution }}</p>{% endif %}
+  {% if holding.account_number_masked %}<p style="margin-bottom:6px;"><strong>Account:</strong> {{ holding.account_number_masked }}</p>{% endif %}
+  {% if holding.notes %}<p style="white-space:pre-wrap;">{{ holding.notes }}</p>{% endif %}
+</div>
+{% endif %}
+
+<div class="ic-card">
+  <div class="section-label">Add Transaction</div>
+  <form method="POST" action="{{ url_for('international_centre.add_transaction', holding_id=holding.id) }}" class="ic-txn-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="form-group">
+      <label>Date</label>
+      <input type="date" name="date" required max="{{ today }}" value="{{ today }}" />
+    </div>
+    <div class="form-group">
+      <label>Type</label>
+      <select name="txn_type" required>
+        {% for t in txn_types %}<option value="{{ t }}">{{ t.title() }}</option>{% endfor %}
+      </select>
+    </div>
+    {% if holding.is_ticker_based %}
+    <div class="form-group">
+      <label>Quantity</label>
+      <input type="number" step="any" name="quantity" />
+    </div>
+    <div class="form-group">
+      <label>Price / unit ({{ holding.native_currency }})</label>
+      <input type="number" step="any" name="price_native" />
+    </div>
+    {% endif %}
+    <div class="form-group">
+      <label>Amount ({{ holding.native_currency }})</label>
+      <input type="number" step="any" name="amount_native" required />
+    </div>
+    <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Add</button>
+  </form>
+</div>
+
+<div class="ic-card">
+  <div class="section-label">Transaction History ({{ transactions|length }})</div>
+  {% if transactions %}
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead><tr><th>Date</th><th>Type</th><th>Quantity</th><th>Price</th><th>Amount ({{ holding.native_currency }})</th><th></th></tr></thead>
+      <tbody>
+        {% for t in transactions %}
+        <tr>
+          <td>{{ format_date(t.date) }}</td>
+          <td>{{ t.txn_type.title() }}</td>
+          <td>{{ '{:,.4f}'.format(t.quantity) if t.quantity is not none else '—' }}</td>
+          <td>{{ '{:,.2f}'.format(t.price_native) if t.price_native is not none else '—' }}</td>
+          <td>{{ '{:,.2f}'.format(t.amount_native) }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('international_centre.delete_transaction', txn_id=t.id) }}" style="display:inline;"
+                  onsubmit="return confirm('Delete this transaction?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="submit" class="ic-link-btn">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem;">No transactions recorded yet — the invested/XIRR figures above use only the value entered when this holding was added.</p>
+  {% endif %}
+</div>
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+  .ic-btn-secondary {
+    background:var(--surface); border:1px solid var(--border); border-radius:8px;
+    padding:10px 16px; color:var(--text); font-size:0.85rem; cursor:pointer;
+    font-family:'Inter',sans-serif; transition:all 0.2s;
+  }
+  .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+  .ic-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:16px; margin-bottom:20px; }
+  .ic-summary-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
+  .ic-summary-label { font-size:0.75rem; color:var(--muted); font-weight:600; letter-spacing:0.05em; text-transform:uppercase; margin-bottom:8px; }
+  .ic-summary-value { font-size:1.3rem; font-weight:700; color:var(--text); font-family:var(--font-data); }
+  .ic-summary-sub { font-size:0.75rem; color:var(--muted2); margin-top:4px; }
+  .ic-up { color:var(--up); } .ic-down { color:var(--down); } .ic-muted { color:var(--muted2); }
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
+  .ic-txn-form { display:flex; gap:14px; flex-wrap:wrap; align-items:end; }
+  .ic-txn-form .form-group { margin-bottom:0; min-width:130px; }
+  .ic-table-wrap { overflow-x:auto; }
+  .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .ic-table th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); }
+  .ic-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); }
+  .ic-table tr:last-child td { border-bottom:none; }
+  .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
+  .ic-link-btn:hover { text-decoration:underline; }
+</style>
+{% endblock %}
