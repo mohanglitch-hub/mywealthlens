@@ -666,7 +666,10 @@ def refresh_prices():
         failed_ccy = ", ".join(f["currency"] for f in fx_summary["currencies_failed"])
         flash(f"Couldn't refresh exchange rates for: {failed_ccy}. Those holdings' INR values are unchanged.", "warning")
 
-    if summary["amfi_error"]:
+    if summary["amfi_error"] and summary["nav_source"] == "mfapi_fallback":
+        flash("AMFI's NAV file was unreachable, so mutual fund NAVs were refreshed from a backup source instead. "
+              + "Refreshed: " + ". ".join(parts) + ".", "warning")
+    elif summary["amfi_error"]:
         flash(f"Stock prices were refreshed, but mutual fund NAVs couldn't be — {summary['amfi_error']}", "error")
     elif not parts:
         flash("No stock or mutual fund holdings to refresh yet — upload a CAS or tradebook first.", "warning")
