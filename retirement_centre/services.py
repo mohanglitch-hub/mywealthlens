@@ -623,6 +623,21 @@ def contribution_summary(scheme_id):
     }
 
 
+def compute_scheme_xirr(scheme):
+    """
+    Per-scheme XIRR (Batch 4, Sep 2026) — thin wrapper around
+    retirement_xirr.compute_retirement_xirr(), fetching that scheme's
+    full contribution history (all years, not FY-filtered — XIRR needs
+    the whole cash-flow history to mean anything). Returns a percentage
+    (float) or None if there isn't enough data yet (see that module for
+    exactly when None is returned).
+    """
+    from retirement_xirr import compute_retirement_xirr
+
+    all_contributions = RetirementContribution.query.filter_by(scheme_id=scheme.id).all()
+    return compute_retirement_xirr(all_contributions, scheme.current_balance)
+
+
 def group_contributions(contributions, group_by):
     """
     Groups a list of RetirementContribution rows for the Contribution

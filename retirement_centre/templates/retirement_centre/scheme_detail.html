@@ -96,7 +96,12 @@
   <div class="ret-card">
     <div class="ret-card-heading">
       <span class="ret-card-num">2</span><span class="ret-card-title">Contribution History</span>
-      <button type="button" class="ret-btn-small" style="margin-left:auto;" onclick="toggle('contribForm')">+ Add Contribution</button>
+      <div style="margin-left:auto; display:flex; gap:8px;">
+        {% if scheme.scheme_type == 'NPS' %}
+        <button type="button" class="ret-btn-small" onclick="toggle('npsImportForm')">Import NPS CRA CSV</button>
+        {% endif %}
+        <button type="button" class="ret-btn-small" onclick="toggle('contribForm')">+ Add Contribution</button>
+      </div>
     </div>
 
     <div class="ret-summary-row">
@@ -106,10 +111,33 @@
       {% if summary.total_interest > 0 %}
       <div class="ret-summary-item"><span class="ret-summary-label">Total Interest Credited</span><span class="ret-summary-value" style="color:#D97706;">{{ format_inr(summary.total_interest) }}</span></div>
       {% endif %}
+      {% if scheme_xirr is not none %}
+      <div class="ret-summary-item"><span class="ret-summary-label">XIRR</span><span class="ret-summary-value" style="color:{{ '#16A34A' if scheme_xirr >= 0 else '#DC2626' }};">{{ scheme_xirr }}%</span></div>
+      {% endif %}
     </div>
     <div style="font-size:0.74rem; color:var(--muted); margin-bottom:14px;">
       Interest credits count toward your balance but not toward "Contributions" above — they're growth, not money you deposited.
+      {% if scheme_xirr is none %}XIRR needs at least one recorded deposit and a current balance to calculate.{% endif %}
     </div>
+
+    {% if scheme.scheme_type == 'NPS' %}
+    <div id="npsImportForm" class="ret-inline-form" style="display:none;">
+      <form method="POST" action="{{ url_for('retirement_centre.import_nps_csv', scheme_id=scheme.id) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <div class="form-group">
+          <label>NPS CRA Statement (CSV)</label>
+          <input type="file" name="nps_csv_file" accept=".csv" required />
+        </div>
+        <div style="font-size:0.75rem; color:var(--muted); margin-bottom:10px;">
+          Export your "Statement of Transaction" as a CSV from the NPS CRA portal (Protean/NSDL or KFintech) and upload it here.
+          Only actual contribution rows are imported — switches, withdrawals and charges are skipped automatically, and rows
+          already on file (from a previous import) won't be added twice. This does not change your Current Balance above —
+          update that separately via Edit Scheme if needed.
+        </div>
+        <button type="submit" class="btn-primary" style="width:auto; padding:9px 20px;">Import</button>
+      </form>
+    </div>
+    {% endif %}
 
     <div id="contribForm" class="ret-inline-form" style="display:none;">
       <form method="POST" action="{{ url_for('retirement_centre.add_contribution', scheme_id=scheme.id) }}">
