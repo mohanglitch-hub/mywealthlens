@@ -1216,13 +1216,19 @@ def delete_all_stocks():
 # differently-cased or differently-ordered but similarly-named columns
 # still have a reasonable chance of matching. Ambiguous or missing
 # columns fail loudly (see import_tradebook()) rather than guessing.
+# Batch 5 (Sep 2026): broadened past Zerodha's own column names with a
+# few more variants seen across other Indian brokers' exports (Groww's
+# "Company", Upstox's "Scrip", etc.) — hints are still tried in order
+# per field, so a specific match (e.g. "trade_date") always wins over
+# a generic one (e.g. plain "date", which could otherwise match an
+# unrelated "Settlement Date" column on a file that has both).
 _TRADEBOOK_COLUMN_HINTS = {
-    'symbol':   ['tradingsymbol', 'symbol', 'scrip', 'stock name', 'company'],
+    'symbol':   ['tradingsymbol', 'trading symbol', 'symbol', 'scrip', 'instrument', 'stock name', 'company'],
     'isin':     ['isin'],
-    'date':     ['trade_date', 'trade date', 'date'],
-    'type':     ['trade_type', 'transaction_type', 'txn_type', 'type', 'side'],
+    'date':     ['trade_date', 'trade date', 'order execution time', 'execution date', 'date'],
+    'type':     ['trade_type', 'transaction_type', 'txn_type', 'buy/sell', 'buy_sell', 'type', 'side'],
     'quantity': ['quantity', 'qty'],
-    'price':    ['price', 'rate', 'trade_price'],
+    'price':    ['trade_price', 'trade price', 'price', 'rate'],
 }
 
 
@@ -1271,8 +1277,14 @@ def _parse_tradebook_csv(file_text):
             isin = (raw.get(cols['isin']) or '').strip() or None
             date_str = (raw.get(cols['date']) or '').strip()
             type_str = (raw.get(cols['type']) or '').strip().upper()
-            qty = float(raw.get(cols['quantity']) or 0)
-            price = float(raw.get(cols['price']) or 0)
+            # Batch 5 (Sep 2026): some brokers export quantity/price with
+            # thousand-separator commas (e.g. "1,234.50") or a stray "Rs."/"₹"
+            # symbol -- strip those before the float() conversion instead of
+            # letting the row silently get skipped by the except below.
+            qty_raw = (raw.get(cols['quantity']) or '0').strip().replace(',', '').replace('₹', '').replace('Rs.', '').replace('Rs', '')
+            price_raw = (raw.get(cols['price']) or '0').strip().replace(',', '').replace('₹', '').replace('Rs.', '').replace('Rs', '')
+            qty = float(qty_raw or 0)
+            price = float(price_raw or 0)
 
             if type_str in ('BUY', 'B'):
                 txn_type = 'BUY'
@@ -1304,16 +1316,41 @@ def _parse_tradebook_csv(file_text):
     return rows, skipped
 
 
-def import_tradebook(rows, user_id):
+def _tradebook_txn_key(symbol, isin, date_val, txn_type, quantity, price):
+    """Natural key used to detect a tradebook row that's already been
+    imported, when merging a new upload with existing history (Batch 5,
+    Sep 2026). Quantity/price are rounded so float-representation noise
+    doesn't produce a false "this is new" negative."""
+    return (symbol, isin or '', date_val, txn_type, round(quantity or 0, 4), round(price or 0, 4))
+
+
+def import_tradebook(rows, user_id, wipe=False):
     """
     Rebuilds this user's TRADEBOOK-sourced stock holdings from a list
-    of parsed BUY/SELL rows (see _parse_tradebook_csv()). Mirrors
-    import_detailed_cas()'s wipe-and-rebuild approach: only rows with
-    source='tradebook' are wiped first, so stocks imported via the
+    of parsed BUY/SELL rows (see _parse_tradebook_csv()). Only rows with
+    source='tradebook' are ever touched, so stocks imported via the
     separate CDSL/NSDL CAS upload (source='cdsl') are left untouched —
     the two import paths are independent, matching how a real investor
     might use CDSL for a snapshot balance and a broker tradebook for
     the transaction history behind it.
+
+    Batch 5 (Sep 2026): by default this MERGES the new upload with the
+    existing tradebook transaction history instead of replacing it
+    outright (the original behavior, kept as an explicit opt-in via
+    wipe=True). This matters because most Indian brokers only let you
+    export one financial year's tradebook at a time — always wiping
+    would silently destroy prior years' transactions (and with them any
+    real long-term XIRR) the moment someone uploads a second year's
+    file. A row is matched against existing history on a natural key
+    (symbol, isin, date, txn_type, quantity, price); anything not
+    already present is treated as new and added. wipe=True discards all
+    existing tradebook history first and rebuilds from just this file —
+    for deliberately starting over, e.g. correcting a bad import.
+
+    If merging and every row in this upload already exists (a repeat
+    upload of the same file), nothing is touched at all — existing
+    holdings, their ids, and any Goal links to them are left exactly as
+    they were, and (0 new transactions) is reported back.
 
     Grouped by (symbol, isin): closing quantity = sum(BUY qty) -
     sum(SELL qty). Only positive-quantity positions become a holding
@@ -1322,21 +1359,81 @@ def import_tradebook(rows, user_id):
     falls back to the last transaction's price if that fails.
 
     Returns (holdings_count, transactions_count, portfolio_rate,
-    affected_goal_names) — see import_detailed_cas()'s docstring for
-    why the last element exists (Goals-page audit, Sep 2026): new stock
-    rows get new ids on every re-upload, so any GoalHoldingLink to the
-    old tradebook-sourced ids is explicitly cleaned up here rather than
+    affected_goal_names, new_transactions_count). affected_goal_names —
+    see import_detailed_cas()'s docstring for why it exists (Goals-page
+    audit, Sep 2026): whenever holdings actually get rebuilt, the new
+    Stock rows get new ids, so any GoalHoldingLink to the old
+    tradebook-sourced ids is explicitly cleaned up here rather than
     left to go stale.
     """
-    stale_stock_ids = [row.id for row in
-        Stock.query.filter_by(user_id=user_id, source='tradebook').with_entities(Stock.id).all()]
+    existing_stocks = Stock.query.filter_by(user_id=user_id, source='tradebook').all()
+
+    if wipe:
+        combined_rows = list(rows)
+        new_count = len(rows)
+    else:
+        existing_rows = [
+            {'symbol': t.symbol, 'isin': t.isin, 'date': t.date,
+             'txn_type': t.txn_type, 'quantity': t.quantity,
+             'price': t.price, 'amount': t.amount}
+            for s in existing_stocks for t in s.transactions
+        ]
+        existing_keys = {
+            _tradebook_txn_key(r['symbol'], r['isin'], r['date'], r['txn_type'], r['quantity'], r['price'])
+            for r in existing_rows
+        }
+        new_rows = [
+            r for r in rows
+            if _tradebook_txn_key(r['symbol'], r['isin'], r['date'], r['txn_type'], r['quantity'], r['price'])
+            not in existing_keys
+        ]
+        combined_rows = existing_rows + new_rows
+        new_count = len(new_rows)
+
+        if new_count == 0:
+            # Nothing new to add -- leave existing holdings/ids/goal links
+            # completely untouched rather than doing a pointless rebuild.
+            all_existing_txns = [t for s in existing_stocks for t in s.transactions]
+            total_value = sum(s.value for s in existing_stocks)
+            portfolio_rate = _portfolio_stock_xirr(all_existing_txns, total_value)
+            return len(existing_stocks), len(all_existing_txns), portfolio_rate, [], 0
+
+    stale_stock_ids = [s.id for s in existing_stocks]
+    # Batch 5 (Sep 2026) bug fix: Stock.query...delete() is a bulk DELETE
+    # that bypasses the ORM-level cascade="all, delete-orphan" on
+    # Stock.transactions (that cascade only fires for session.delete(obj),
+    # never for Query.delete()), and there's no ON DELETE CASCADE at the DB
+    # level either -- so the StockTransaction rows under a wiped Stock were
+    # silently left behind, orphaned. That was mostly harmless before (the
+    # old rows just sat there unreachable) EXCEPT that SQLite reuses a
+    # deleted integer rowid when there's no AUTOINCREMENT column, so a
+    # freshly-created Stock could silently inherit a stale, already-deleted
+    # Stock's id -- and its relationship would then "reattach" to that old
+    # stock's orphaned transactions, corrupting the rebuilt holding with
+    # transactions from a completely different import. Deleting the child
+    # rows explicitly, first, closes that gap for good.
+    if stale_stock_ids:
+        # synchronize_session='fetch' (not the default 'evaluate'/False) so
+        # SQLAlchemy also evicts these rows from its in-session identity
+        # map -- the merge path above may have already loaded some of them
+        # via s.transactions, and leaving stale entries behind is exactly
+        # what produces the "identity map already had an identity, replacing
+        # it" warning once new rows with the same (reused) ids get flushed.
+        StockTransaction.query.filter(StockTransaction.stock_id.in_(stale_stock_ids)).delete(synchronize_session='fetch')
     Stock.query.filter_by(user_id=user_id, source='tradebook').delete()
     affected_goal_names = _cleanup_goal_links_for_deleted_holdings(
         user_id, 'stock', stale_stock_ids)
     db.session.flush()
+    # SQLite reuses a deleted integer rowid (no AUTOINCREMENT column here),
+    # so the StockTransaction rows created just below can legitimately get
+    # the same ids the just-deleted rows had. expire_all() clears those
+    # stale identity-map entries so SQLAlchemy doesn't warn about (or risk
+    # confusing) the replacement -- the deletes above are already flushed,
+    # so there's nothing pending to lose.
+    db.session.expire_all()
 
     groups = {}
-    for r in rows:
+    for r in combined_rows:
         key = (r['symbol'], r['isin'])
         groups.setdefault(key, []).append(r)
 
@@ -1384,7 +1481,7 @@ def import_tradebook(rows, user_id):
 
     portfolio_rate = _portfolio_stock_xirr(all_transactions_for_portfolio, total_current_value)
     db.session.commit()
-    return holdings_count, transactions_count, portfolio_rate, affected_goal_names
+    return holdings_count, transactions_count, portfolio_rate, affected_goal_names, new_count
 
 
 @app.route('/upload/tradebook', methods=['POST'])
@@ -1411,16 +1508,33 @@ def upload_tradebook():
         flash('No valid BUY/SELL rows found in this file.', 'error')
         return redirect(url_for('upload'))
 
-    holdings_count, transactions_count, portfolio_rate, affected_goal_names = import_tradebook(rows, current_user.id)
+    # Batch 5 (Sep 2026): merge-by-default so a second year's tradebook
+    # export doesn't wipe out an earlier year's transaction history (see
+    # import_tradebook()'s docstring). The "start over" checkbox on the
+    # upload form opts back into the old wipe-and-rebuild behavior, for
+    # deliberately discarding everything and re-importing from scratch.
+    wipe = request.form.get('wipe_existing') == 'on'
+    holdings_count, transactions_count, portfolio_rate, affected_goal_names, new_count = \
+        import_tradebook(rows, current_user.id, wipe=wipe)
 
     if holdings_count == 0:
         flash('No open positions found (all holdings in this tradebook may be fully sold).', 'error')
         return redirect(url_for('upload'))
 
-    xirr_msg = f' Portfolio XIRR: {portfolio_rate}%.' if portfolio_rate is not None else ''
     skip_msg = f' ({skipped} row(s) skipped — unrecognised format.)' if skipped else ''
-    flash(f'Imported {holdings_count} stock holdings ({transactions_count} transactions).'
-          f'{xirr_msg}{skip_msg}', 'success')
+
+    if not wipe and new_count == 0:
+        flash(f'Nothing new in this file — every transaction was already in your tradebook history.'
+              f'{skip_msg}', 'success')
+        return redirect(url_for('upload'))
+
+    xirr_msg = f' Portfolio XIRR: {portfolio_rate}%.' if portfolio_rate is not None else ''
+    if wipe:
+        summary_msg = f'Imported {holdings_count} stock holdings ({transactions_count} transactions).'
+    else:
+        summary_msg = (f'Added {new_count} new transaction(s). Holdings now: {holdings_count} '
+                        f'({transactions_count} transactions total).')
+    flash(f'{summary_msg}{xirr_msg}{skip_msg}', 'success')
     if affected_goal_names:
         goal_list = ', '.join(affected_goal_names)
         flash(f'This re-upload replaced your tradebook stock holdings with new entries, so '
