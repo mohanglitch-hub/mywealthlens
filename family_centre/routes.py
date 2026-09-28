@@ -1,7 +1,7 @@
 """
 Family Centre — Routes
 ========================
-Aggregates four things into one People view:
+Aggregates five things into one People view:
 
   - InsuranceNominee    (insurance_centre) — who receives a policy's
     payout, and what share
@@ -9,6 +9,10 @@ Aggregates four things into one People view:
     scheme's balance, and what share
   - WealthAsset.is_family_or_inherited (wealth) — assets that came
     FROM a named person (inherited, gifted, family-owned)
+  - InternationalHoldingNominee (international_centre, Sep 2026) — who
+    receives a foreign holding, and what share; same shape as
+    WealthAssetHeir, added after Mohan flagged that international
+    holdings were otherwise invisible here
   - FamilyPerson (family_centre's own table) — anyone added directly,
     with no nominee entry or gifted asset of their own
 
@@ -53,6 +57,7 @@ from family_centre.models import FamilyPerson
 from insurance_centre.models import InsuranceNominee, InsurancePolicy
 from retirement_centre.models import RetirementSchemeNominee, RetirementScheme
 from wealth.models import WealthAsset, WealthAssetHeir
+from international_centre.models import InternationalHoldingNominee, InternationalHolding
 
 
 DUPLICATE_THRESHOLD = 0.90
@@ -165,6 +170,35 @@ def _build_people(user_id):
             "percentage": h.percentage,
             "value_at_stake": (h.percentage / 100 * h.asset.current_value) if h.percentage else None,
             "link": f"/wealth/assets/{h.asset_id}",
+        })
+
+    # ── International Holding Nominees (active holdings only) ──
+    # Same shape/reasoning as the Intended Heirs block above —
+    # value_at_stake is converted USD->INR via currency_display so it
+    # sums correctly alongside every other source's INR figures below
+    # (this module's holdings are tracked in USD as a fixed anchor,
+    # see international_centre/models.py's docstring).
+    import currency_display
+    intl_nominee_rows = (
+        InternationalHoldingNominee.query
+        .join(InternationalHolding, InternationalHoldingNominee.holding_id == InternationalHolding.id)
+        .filter(InternationalHolding.user_id == user_id,
+                InternationalHolding.archived == False)
+        .all()
+    )
+    for n in intl_nominee_rows:
+        value_inr = None
+        if n.percentage:
+            usd_share = n.percentage / 100 * (n.holding.usd_value or 0)
+            value_inr = currency_display.usd_to_inr(usd_share)
+        _add(n.name, {
+            "direction": "nominee",
+            "relationship": n.relationship,
+            "source": "International Investing",
+            "item_name": n.holding.name,
+            "percentage": n.percentage,
+            "value_at_stake": value_inr,
+            "link": f"/international/holdings/{n.holding_id}",
         })
 
     # ── Manually-added family members ──
@@ -336,6 +370,22 @@ def _coverage_gaps(user_id):
                 "source": "Wealth", "item_name": a.name,
                 "issue": f"Heirs total {total_pct:.0f}%, not 100%",
                 "link": f"/wealth/assets/{a.id}",
+            })
+
+    intl_holdings = InternationalHolding.query.filter_by(
+        user_id=user_id, archived=False).all()
+    for h in intl_holdings:
+        total_pct = h.total_nominees_percentage
+        if h.nominees.count() == 0:
+            gaps.append({
+                "source": "International Investing", "item_name": h.name,
+                "issue": "No nominee added", "link": f"/international/holdings/{h.id}",
+            })
+        elif total_pct < 100:
+            gaps.append({
+                "source": "International Investing", "item_name": h.name,
+                "issue": f"Nominees total {total_pct:.0f}%, not 100%",
+                "link": f"/international/holdings/{h.id}",
             })
 
     return gaps

@@ -151,6 +151,24 @@
   </div>
   {% endif %}
 
+  {% if international_holdings_count > 0 %}
+  <div class="holdings-card">
+    <div class="holdings-header">
+      <div class="card-label" style="margin-bottom:0;">🌐 International Investments <span class="count-badge">{{ international_holdings_count }}</span></div>
+      <a href="/international" class="ls-link">View all →</a>
+    </div>
+    <div class="h-row">
+      <div class="h-info">
+        <div class="h-name">Across {{ international_holdings_count }} foreign holding{% if international_holdings_count != 1 %}s{% endif %}</div>
+        <div class="h-meta">Tracked in USD, converted to your display currency</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="h-value" style="color:#EC4899;">₹{{ "{:,.0f}".format(international) }}</div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ── Charts Script ── -->
   <script>
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -167,6 +185,7 @@
       { label:"Investments",       value:{{ investments |round(0) }}, color:"#F59E0B" },
       { label:"Vehicles",          value:{{ vehicles    |round(0) }}, color:"#64748B" },
       { label:"Business",         value:{{ business    |round(0) }}, color:"#7C3AED" },
+      { label:"International Investments", value:{{ international |round(0) }}, color:"#EC4899" },
       { label:"Other",             value:{{ other       |round(0) }}, color:"#DC2626" },
     ].filter(d => d.value > 0);
 
@@ -228,6 +247,7 @@
               { label:'Real Estate', data: historyRaw.map(d=>d.realestate), backgroundColor:'rgba(15,118,110,0.3)',  borderColor:'#0F766E', fill:true, tension:0.4, pointRadius:2 },
               { label:'Cash',        data: historyRaw.map(d=>d.cash),       backgroundColor:'rgba(71,85,105,0.3)',   borderColor:'#475569', fill:true, tension:0.4, pointRadius:2 },
               { label:'Other',       data: historyRaw.map(d=>d.other),      backgroundColor:'rgba(220,38,38,0.3)',   borderColor:'#DC2626', fill:true, tension:0.4, pointRadius:2 },
+              { label:'International', data: historyRaw.map(d=>d.international || 0), backgroundColor:'rgba(236,72,153,0.3)', borderColor:'#EC4899', fill:true, tension:0.4, pointRadius:2 },
             ]
           },
           options: {
