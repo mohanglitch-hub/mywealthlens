@@ -20,6 +20,7 @@ from family_centre import family_bp
 from backup import backup_bp
 from cashflow_centre import cashflow_bp
 from international_centre import international_bp
+from international_centre import services as international_services
 from wealth.services import WealthStatisticsService
 from wealth.models import WealthAssetCategory, WealthAsset
 from retirement_centre.models import RetirementScheme
@@ -463,7 +464,7 @@ def reset_password(token):
 
     return render_template('reset_password.html', token=token)
 
-def _save_snapshot(user_id, cat_totals, mfs, stocks, liabilities_total):
+def _save_snapshot(user_id, cat_totals, mfs, stocks, liabilities_total, international_total=0.0):
     """
     Save one net worth snapshot per day.
 
@@ -483,6 +484,13 @@ def _save_snapshot(user_id, cat_totals, mfs, stocks, liabilities_total):
       debt        -> Bank & Deposits + Investments (fixed-income-like)
       cash        -> not distinguished under the new taxonomy; kept at 0
       other       -> Vehicles + Business + Other
+
+    international_total (Sep 2026): International Investing Centre's
+    active-holdings total, already converted to INR by the caller via
+    international_services.portfolio_inr_value(). Stored in its own
+    `international` column (added alongside this module) rather than
+    folded into `other`, so the history chart can show it as its own
+    series instead of silently inflating an unrelated category.
     """
     from datetime import date as _date
     today = _date.today()
@@ -500,11 +508,13 @@ def _save_snapshot(user_id, cat_totals, mfs, stocks, liabilities_total):
               + cat_totals.get(WealthAssetCategory.BUSINESS, 0)
               + cat_totals.get(WealthAssetCategory.OTHER, 0))
     liab   = liabilities_total
-    total  = equity + debt + gold + re_val + cash + other - liab
+    intl   = international_total or 0.0
+    total  = equity + debt + gold + re_val + cash + other + intl - liab
     snap   = NetWorthHistory(
         user_id=user_id, snapshot_date=today, total=total,
         equity=equity, debt=debt, gold=gold,
-        realestate=re_val, cash=cash, other=other, liabilities=liab)
+        realestate=re_val, cash=cash, other=other, liabilities=liab,
+        international=intl)
     db.session.add(snap)
     db.session.commit()
 
@@ -533,18 +543,26 @@ def dashboard():
     mf_value    = sum(m.value for m in mfs)
     stock_value = sum(s.value for s in stocks)
 
+    # International Investing Centre (Sep 2026): active holdings' USD
+    # total, converted to INR so it can sit in the same raw-INR hero
+    # figure as everything else on this page — see
+    # international_services.portfolio_inr_value()'s docstring for why
+    # this is safe to add directly (never None, falls back to 0.0).
+    international_totals = international_services.portfolio_totals(current_user.id)
+    international_value  = international_services.portfolio_inr_value(current_user.id)
+
     # Matches the old dashboard's "Total" exactly in spirit: sum of all
     # holdings, no liability subtraction here (the old dashboard never
     # subtracted liabilities from this hero figure either — see the
     # Wealth Net Worth page for the liability-adjusted figure).
     wealth_assets_total = wstats.total_assets()
-    total_value  = wealth_assets_total + mf_value + stock_value
-    asset_count  = wstats.asset_count() + len(mfs) + len(stocks)
+    total_value  = wealth_assets_total + mf_value + stock_value + international_value
+    asset_count  = wstats.asset_count() + len(mfs) + len(stocks) + international_totals["holdings_count"]
 
     # Auto daily snapshot — now sourced from WealthAsset + WealthLiability
     if total_value > 0:
         _save_snapshot(current_user.id, cat_totals, mfs, stocks,
-                       wstats.total_liabilities())
+                       wstats.total_liabilities(), international_value)
 
     # ── Upcoming Commitments (Section: consolidated dashboard view) ──
     # Pulls together anything with a genuinely tracked, near-term due
@@ -584,6 +602,7 @@ def dashboard():
         'realestate':  currency_display.to_display(h.realestate),
         'cash':        currency_display.to_display(h.cash),
         'other':       currency_display.to_display(h.other),
+        'international': currency_display.to_display(h.international),
     } for h in history]
 
     # ── Unified cross-module Recent Activity (Wealth, Insurance,
@@ -610,6 +629,8 @@ def dashboard():
         investments=investments_value, business=business_value, other=other_value,
         mf=mf_value, stocks=stock_value, mf_count=len(mfs),
         stock_count=len(stocks), mutual_funds=mfs, stock_list=stocks,
+        international=international_value,
+        international_holdings_count=international_totals["holdings_count"],
         asset_count=asset_count, history_data=history_data,
         upcoming_renewals=upcoming_renewals,
         has_any_renewal_dates=has_any_renewal_dates,

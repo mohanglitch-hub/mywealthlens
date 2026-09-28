@@ -421,6 +421,15 @@ class NetWorthHistory(db.Model):
     cash          = db.Column(db.Float, default=0)
     other         = db.Column(db.Float, default=0)
     liabilities   = db.Column(db.Float, default=0)
+    # International Investing Centre's active-holdings total, converted
+    # USD->INR via currency_display.usd_to_inr() (Sep 2026) — added so
+    # the main dashboard's net worth figure actually includes foreign
+    # holdings, which it didn't when that module first shipped. 0 for
+    # every pre-existing row (nullable=False with a server default via
+    # the migration), same "immutable history" treatment as every other
+    # column here — old snapshots aren't backfilled, they just predate
+    # this module.
+    international = db.Column(db.Float, default=0)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
     __table_args__ = (
         db.UniqueConstraint("user_id", "snapshot_date", name="uq_user_snapshot_date"),
