@@ -24,6 +24,14 @@ Covers:
   9. End-to-end HTTP: add a holding, add a transaction, view the
      detail page (renders XIRR), log a remittance, view the Schedule
      FA report page.
+  12. Document Vault (Batch 9.3, Sep 2026): save/fetch/delete document
+      metadata with ownership (IDOR) checks, secure_file_path() rejects
+      path traversal, delete_holding_permanently() cascade-deletes
+      document rows, and end-to-end HTTP covering upload (valid +
+      rejected file type), download (exact bytes), preview, the
+      standalone Document Vault page, delete, and that permanently
+      deleting a holding removes its documents' physical files from
+      disk (not just the DB rows).
 
 This test never makes a real network call — international_centre.
 services.fetch_fx_rate and .fetch_ticker_price are monkeypatched
@@ -459,12 +467,210 @@ def main():
         db.session.delete(u5)
         db.session.commit()
 
+    # ── 12. Document Vault (Batch 9.3, Sep 2026) ──
+    from international_centre.models import InternationalHoldingDocument, DocumentType
+    from international_centre import utils as intl_utils
+    from io import BytesIO
+
+    with app.app_context():
+        u6 = User.query.filter_by(email="international_vault_test@example.com").first()
+        if u6:
+            for h in InternationalHolding.query.filter_by(user_id=u6.id).all():
+                for d in h.documents:
+                    intl_utils.delete_document_file(d.file_path)
+            InternationalHolding.query.filter_by(user_id=u6.id).delete()
+            db.session.delete(u6)
+            db.session.commit()
+        u6 = User(name="Vault Test", email="international_vault_test@example.com", password="unused")
+        db.session.add(u6)
+        db.session.commit()
+        v_user_id = u6.id
+
+        v_holding, err = services.create_holding(v_user_id, {
+            "asset_type": InternationalAssetType.FOREIGN_BANK_ACCOUNT,
+            "name": "Zurich Savings", "native_currency": "USD",
+            "current_value_native": "20000",
+        })
+        assert err is None, err
+
+        # Service-level: save + fetch metadata (file saved to a real
+        # scratch path via utils.save_document_file, matching what the
+        # upload route actually does).
+        class _FakeUpload:
+            filename = "statement.pdf"
+            def save(self, path):
+                with open(path, "wb") as fh:
+                    fh.write(b"%PDF-1.4 fake pdf bytes for testing")
+
+        stored_name, file_path, file_size = intl_utils.save_document_file(_FakeUpload(), v_holding.id)
+        assert os.path.exists(file_path), "save_document_file must actually write the file to disk"
+        assert intl_utils.secure_file_path(file_path, v_holding.id), \
+            "a file saved via save_document_file must pass its own secure_file_path check"
+
+        doc = services.save_document_metadata(
+            db, v_holding, v_user_id, doc_type=DocumentType.ACCOUNT_STATEMENT,
+            original_name="statement.pdf", stored_name=stored_name, file_path=file_path,
+            file_size=file_size, notes="Year-end statement",
+        )
+        assert doc.id is not None
+        assert doc.display_name == "statement.pdf"  # no title given -> falls back to original_name
+        assert doc.is_encrypted is False and doc.iv is None
+        print("PASS: save_document_metadata() persists a document row with the file actually on disk")
+
+        # secure_file_path must reject a path traversal attempt.
+        assert not intl_utils.secure_file_path("/etc/passwd", v_holding.id), \
+            "secure_file_path must reject a path outside the holding's own document directory"
+        assert not intl_utils.secure_file_path(
+            os.path.join(os.path.dirname(file_path), "..", "999", "x.pdf"), v_holding.id
+        ), "secure_file_path must reject a path traversal into another holding's directory"
+        print("PASS: secure_file_path() rejects paths outside the holding's own document directory")
+
+        # get_vault_documents / vault_summary
+        vault_docs = services.get_vault_documents(v_user_id)
+        assert len(vault_docs) == 1 and vault_docs[0].id == doc.id
+        vault_docs_q = services.get_vault_documents(v_user_id, q="statement")
+        assert len(vault_docs_q) == 1
+        vault_docs_miss = services.get_vault_documents(v_user_id, q="nonexistent-term-xyz")
+        assert len(vault_docs_miss) == 0
+        summary = services.vault_summary(v_user_id)
+        assert summary["total"] == 1
+        assert any(a["asset_type"] == InternationalAssetType.FOREIGN_BANK_ACCOUNT and a["count"] == 1
+                   for a in summary["by_asset_type"]), summary
+        print("PASS: get_vault_documents()/vault_summary() list and filter documents correctly")
+
+        # delete_document enforces ownership (IDOR check) before removing metadata.
+        ok, delerr = services.delete_document(db, doc, user_id=999999)
+        assert ok is False and delerr is not None, "delete_document must refuse a mismatched user_id"
+        assert db.session.get(InternationalHoldingDocument, doc.id) is not None
+        print("PASS: delete_document() refuses to delete a document belonging to a different user")
+
+        # delete_holding_permanently cascades document ROWS via the ORM
+        # relationship (file itself is the route's job -- see routes.py's
+        # delete_holding, tested over HTTP below).
+        v_holding_id = v_holding.id
+        services.archive_holding(v_holding)
+        services.delete_holding_permanently(v_holding)
+        assert db.session.get(InternationalHolding, v_holding_id) is None
+        assert InternationalHoldingDocument.query.filter_by(holding_id=v_holding_id).count() == 0, \
+            "delete_holding_permanently must cascade-delete document rows"
+        print("PASS: delete_holding_permanently() cascade-deletes document metadata rows")
+
+        intl_utils.delete_document_file(file_path)  # clean up the scratch file itself
+        db.session.delete(u6)
+        db.session.commit()
+
+    # ── 12b. Document Vault end-to-end HTTP ──
+    dv_page = client.get('/international/holdings/add')
+    dv_csrf = get_csrf(dv_page.data)
+    r = client.post('/international/holdings/add', data={
+        'csrf_token': dv_csrf, 'asset_type': InternationalAssetType.FOREIGN_BANK_ACCOUNT,
+        'name': 'Singapore DBS', 'native_currency': 'USD', 'current_value_native': '5000',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        u7 = User.query.filter_by(email="international_http_test@example.com").first()
+        dv_holding = InternationalHolding.query.filter_by(user_id=u7.id, name='Singapore DBS').first()
+        assert dv_holding is not None
+        dv_holding_id = dv_holding.id
+
+    detail_for_upload = client.get(f'/international/holdings/{dv_holding_id}')
+    upload_csrf = get_csrf(detail_for_upload.data)
+    r = client.post(f'/international/holdings/{dv_holding_id}/documents/upload', data={
+        'csrf_token': upload_csrf, 'doc_type': DocumentType.ACCOUNT_STATEMENT,
+        'doc_title': 'DBS Statement', 'doc_notes': 'Test upload',
+        'document': (BytesIO(b'%PDF-1.4 fake pdf'), 'dbs_statement.pdf'),
+    }, content_type='multipart/form-data', follow_redirects=True)
+    assert r.status_code == 200
+    body_upload = r.get_data(as_text=True)
+    assert 'DBS Statement' in body_upload
+    print("PASS: document upload via real HTTP multipart form works and shows on the holding detail page")
+
+    with app.app_context():
+        uploaded_doc = InternationalHoldingDocument.query.filter_by(holding_id=dv_holding_id).first()
+        assert uploaded_doc is not None
+        assert uploaded_doc.original_name == 'dbs_statement.pdf'
+        doc_id = uploaded_doc.id
+
+    dl = client.get(f'/international/documents/{doc_id}/download')
+    assert dl.status_code == 200
+    assert dl.data == b'%PDF-1.4 fake pdf'
+    print("PASS: document download serves back the exact uploaded bytes")
+
+    pv = client.get(f'/international/documents/{doc_id}/preview')
+    assert pv.status_code == 200
+    print("PASS: PDF document preview route works")
+
+    # Wrong file type is rejected by validate_document before ever touching disk.
+    bad_csrf = get_csrf(client.get(f'/international/holdings/{dv_holding_id}').data)
+    r = client.post(f'/international/holdings/{dv_holding_id}/documents/upload', data={
+        'csrf_token': bad_csrf, 'doc_type': DocumentType.OTHER_DOCUMENTS,
+        'document': (BytesIO(b'not a real exe but wrong extension'), 'malware.exe'),
+    }, content_type='multipart/form-data', follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        assert InternationalHoldingDocument.query.filter_by(
+            holding_id=dv_holding_id, original_name='malware.exe').count() == 0, \
+            "a disallowed file extension must be rejected, not saved"
+    print("PASS: disallowed file extension (.exe) is rejected by validate_document")
+
+    # Document Vault standalone page renders and lists the uploaded document.
+    vault_page = client.get('/international/documents')
+    assert vault_page.status_code == 200
+    vault_body = vault_page.get_data(as_text=True)
+    assert 'DBS Statement' in vault_body
+    assert 'icConfirmAction' in vault_body, \
+        "Document Vault delete must use the branded confirm modal, not a plain confirm() dialog"
+    print("PASS: standalone Document Vault page renders and lists documents across holdings")
+
+    # Delete via the vault (next=vault) redirects back to the vault, not
+    # the holding detail page.
+    del_csrf = get_csrf(vault_page.data)
+    r = client.post(f'/international/documents/{doc_id}/delete', data={
+        'csrf_token': del_csrf, 'next': 'vault',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    assert 'Document deleted' in r.get_data(as_text=True) or '/international/documents' in r.request.path
+    with app.app_context():
+        assert db.session.get(InternationalHoldingDocument, doc_id) is None, \
+            "document metadata row must be gone after delete"
+    print("PASS: document delete via real HTTP form works and removes the metadata row")
+
+    # Archiving then permanently deleting the holding must also remove
+    # the physical file from disk (routes.py's delete_holding cleanup —
+    # service-level cascade is already covered above, this proves the
+    # route's file cleanup on top of it).
+    detail_page3 = client.get(f'/international/holdings/{dv_holding_id}')
+    upload_csrf2 = get_csrf(detail_page3.data)
+    client.post(f'/international/holdings/{dv_holding_id}/documents/upload', data={
+        'csrf_token': upload_csrf2, 'doc_type': DocumentType.OTHER_DOCUMENTS,
+        'document': (BytesIO(b'to be permanently deleted'), 'temp.pdf'),
+    }, content_type='multipart/form-data', follow_redirects=True)
+    with app.app_context():
+        temp_doc = InternationalHoldingDocument.query.filter_by(
+            holding_id=dv_holding_id, original_name='temp.pdf').first()
+        assert temp_doc is not None
+        temp_doc_path = temp_doc.file_path
+        assert os.path.exists(temp_doc_path)
+
+    archive_csrf = get_csrf(client.get(f'/international/holdings/{dv_holding_id}').data)
+    client.post(f'/international/holdings/{dv_holding_id}/archive', data={'csrf_token': archive_csrf}, follow_redirects=True)
+    del_holding_page = client.get(f'/international/holdings/{dv_holding_id}')
+    del_holding_csrf = get_csrf(del_holding_page.data)
+    r = client.post(f'/international/holdings/{dv_holding_id}/delete', data={'csrf_token': del_holding_csrf}, follow_redirects=True)
+    assert r.status_code == 200
+    assert not os.path.exists(temp_doc_path), \
+        "permanently deleting a holding must remove its documents' physical files from disk, not just the DB rows"
+    print("PASS: permanently deleting a holding removes its documents' physical files from disk (not just DB rows)")
+
     # ── Cleanup ──
     with app.app_context():
         from models import db as _db
         for email in (TEST_EMAIL, "international_http_test@example.com"):
             u = User.query.filter_by(email=email).first()
             if u:
+                for h in InternationalHolding.query.filter_by(user_id=u.id).all():
+                    for d in h.documents:
+                        intl_utils.delete_document_file(d.file_path)
                 InternationalHolding.query.filter_by(user_id=u.id).delete()
                 RemittanceRecord.query.filter_by(user_id=u.id).delete()
                 _db.session.delete(u)
