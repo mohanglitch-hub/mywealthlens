@@ -662,6 +662,230 @@ def main():
         "permanently deleting a holding must remove its documents' physical files from disk, not just the DB rows"
     print("PASS: permanently deleting a holding removes its documents' physical files from disk (not just DB rows)")
 
+    # ── 13. TCS on LRS remittances (Batch 9.4, Sep 2026) ──
+    from international_centre.models import TCS_THRESHOLD_INR, TCS_RATE
+
+    with app.app_context():
+        u7 = User.query.filter_by(email="international_tcs_test@example.com").first()
+        if u7:
+            RemittanceRecord.query.filter_by(user_id=u7.id).delete()
+            db.session.delete(u7)
+            db.session.commit()
+        u7 = User(name="TCS Test", email="international_tcs_test@example.com", password="unused")
+        db.session.add(u7)
+        db.session.commit()
+        tcs_user_id = u7.id
+
+        # First remittance, entirely below the 7L threshold -> no TCS.
+        r_below = services.add_remittance(tcs_user_id, {
+            "date": "2026-05-01", "amount_inr": "500000",
+            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
+        })
+        assert r_below.tcs_amount_inr == 0.0, r_below.tcs_amount_inr
+        print("PASS: a remittance that stays below the ₹7L/FY TCS threshold collects no TCS")
+
+        # Second remittance in the SAME FY pushes cumulative total past
+        # the threshold -> TCS applies only to the portion above it.
+        r_cross = services.add_remittance(tcs_user_id, {
+            "date": "2026-06-01", "amount_inr": "400000",  # 500k + 400k = 900k, 200k over threshold
+            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
+        })
+        expected_tcs = round((500000 + 400000 - TCS_THRESHOLD_INR) * TCS_RATE, 2)
+        assert r_cross.tcs_amount_inr == expected_tcs, (r_cross.tcs_amount_inr, expected_tcs)
+        print(f"PASS: TCS is charged only on the portion of a remittance crossing the ₹7L threshold (₹{r_cross.tcs_amount_inr:,.0f})")
+
+        # Third remittance, entirely above the threshold already -> the
+        # WHOLE amount is taxed at TCS_RATE (no re-taxing of prior years).
+        r_above = services.add_remittance(tcs_user_id, {
+            "date": "2026-07-01", "amount_inr": "100000",
+            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
+        })
+        assert r_above.tcs_amount_inr == round(100000 * TCS_RATE, 2), r_above.tcs_amount_inr
+        print("PASS: a remittance entirely above the threshold is taxed in full at 20%")
+
+        status_tcs = services.get_lrs_status(tcs_user_id, anchor_date=date(2026, 8, 1))
+        expected_total_tcs = round(r_below.tcs_amount_inr + r_cross.tcs_amount_inr + r_above.tcs_amount_inr, 2)
+        assert status_tcs["total_tcs_inr"] == expected_total_tcs, (status_tcs["total_tcs_inr"], expected_total_tcs)
+        print(f"PASS: get_lrs_status() reports the correct cumulative TCS for the FY (₹{status_tcs['total_tcs_inr']:,.0f})")
+
+        # A remittance in the NEXT financial year starts the ₹7L
+        # threshold fresh (per-FY, not a running lifetime total).
+        r_next_fy = services.add_remittance(tcs_user_id, {
+            "date": "2026-04-15", "amount_inr": "300000",  # FY 2026-27 vs the FY 2026-27 remittances above? see note below
+            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
+        })
+        # 2026-04-15 and 2026-05-01/06-01/07-01 are ALL within the same
+        # Indian FY (1 Apr 2026 - 31 Mar 2027) -- this remittance simply
+        # adds to that FY's running total, so it's fully taxed too.
+        assert r_next_fy.tcs_amount_inr == round(300000 * TCS_RATE, 2), r_next_fy.tcs_amount_inr
+        print("PASS: TCS threshold tracking is scoped per financial year, accumulating correctly within it")
+
+        RemittanceRecord.query.filter_by(user_id=tcs_user_id).delete()
+        db.session.delete(u7)
+        db.session.commit()
+
+    # ── 14. DTAA / Form 67 dividend withholding summary (Batch 9.5, Sep 2026) ──
+    with app.app_context():
+        u8 = User.query.filter_by(email="international_dtaa_test@example.com").first()
+        if u8:
+            InternationalHolding.query.filter_by(user_id=u8.id).delete()
+            db.session.delete(u8)
+            db.session.commit()
+        u8 = User(name="DTAA Test", email="international_dtaa_test@example.com", password="unused")
+        db.session.add(u8)
+        db.session.commit()
+        dtaa_user_id = u8.id
+
+        div_holding, err = services.create_holding(dtaa_user_id, {
+            "asset_type": InternationalAssetType.US_STOCK,
+            "name": "Microsoft Corp.", "ticker": "MSFT", "country": "United States",
+            "native_currency": "USD", "quantity": "20", "avg_cost_native": "300",
+        })
+        assert err is None, err
+
+        # Dividend WITH gross/withheld detail entered.
+        services.add_transaction(div_holding, {
+            "date": "2026-06-15", "txn_type": "DIVIDEND",
+            "amount_native": "80", "gross_amount_native": "100", "tax_withheld_native": "20",
+        })
+        # A second dividend in the same FY, no gross/withheld given at
+        # all -> must fall back to amount_native as the gross figure,
+        # with zero withheld (never crash on the missing optional data).
+        services.add_transaction(div_holding, {
+            "date": "2026-09-01", "txn_type": "DIVIDEND", "amount_native": "50",
+        })
+        db.session.commit()
+
+        dtaa = services.get_dtaa_summary(dtaa_user_id, fy_start_year=2026)
+        assert dtaa["fy_label"] == "FY 2026-27", dtaa["fy_label"]
+        row = next(r for r in dtaa["rows"] if r["holding"].id == div_holding.id)
+        assert row["gross_native"] == 150.0, row  # 100 + 50
+        assert row["withheld_native"] == 20.0, row
+        assert row["net_native"] == 130.0, row  # 80 + 50
+        # USD-native holding -> fx_rate_used is 1.0 (fake rate), so the
+        # INR bridge is just usd_to_inr() at the fake 83.0 INR/USD rate.
+        assert row["gross_inr"] == 12450.0, row  # 150 * 83.0
+        assert row["withheld_inr"] == 1660.0, row  # 20 * 83.0
+        print("PASS: get_dtaa_summary() aggregates gross/withheld/net dividend figures per holding, with a fallback for dividends missing the optional detail")
+
+        # Validator: withheld cannot exceed gross.
+        from international_centre.validators import validate_transaction
+        bad_errors = validate_transaction({
+            "date": "2026-06-15", "txn_type": "DIVIDEND", "amount_native": "80",
+            "gross_amount_native": "100", "tax_withheld_native": "150",
+        })
+        assert any("cannot exceed" in e for e in bad_errors), bad_errors
+        print("PASS: validate_transaction() rejects tax withheld greater than gross dividend")
+
+        InternationalHolding.query.filter_by(user_id=dtaa_user_id).delete()
+        db.session.delete(u8)
+        db.session.commit()
+
+    # ── 15. LTCG/STCG capital gains classification (Batch 9.6, Sep 2026) ──
+    with app.app_context():
+        from international_centre.utils import is_long_term
+        from international_centre.services import classify_capital_gains
+
+        # is_long_term(): exactly-24-months boundary must NOT be long-term
+        # (the rule is "more than 24 months"), one day past it must be.
+        assert is_long_term(date(2024, 1, 15), date(2026, 1, 16)) is True, \
+            "1 day past the 24-month mark must be long-term"
+        assert is_long_term(date(2024, 1, 15), date(2026, 1, 15)) is False, \
+            "exactly 24 months must NOT be long-term (rule is 'more than 24 months')"
+        assert is_long_term(date(2024, 1, 15), date(2025, 6, 1)) is False, \
+            "well under 24 months must be short-term"
+        print("PASS: is_long_term() applies the >24-calendar-month boundary correctly, including the exact-boundary edge case")
+
+        u9 = User.query.filter_by(email="international_cg_test@example.com").first()
+        if u9:
+            InternationalHolding.query.filter_by(user_id=u9.id).delete()
+            db.session.delete(u9)
+            db.session.commit()
+        u9 = User(name="CapGains Test", email="international_cg_test@example.com", password="unused")
+        db.session.add(u9)
+        db.session.commit()
+        cg_user_id = u9.id
+
+        cg_holding, err = services.create_holding(cg_user_id, {
+            "asset_type": InternationalAssetType.US_STOCK,
+            "name": "Amazon.com Inc.", "ticker": "AMZN", "country": "United States",
+            "native_currency": "USD", "quantity": "10", "avg_cost_native": "100",
+        })
+        assert err is None, err
+        # Two FIFO lots: an older long-term-eligible lot, then a newer
+        # short-term one -- a SELL spanning both must split into two
+        # correctly-classified gain records.
+        services.add_transaction(cg_holding, {
+            "date": "2023-01-01", "txn_type": "BUY", "quantity": "10", "price_native": "100", "amount_native": "1000",
+        })
+        services.add_transaction(cg_holding, {
+            "date": "2026-01-01", "txn_type": "BUY", "quantity": "10", "price_native": "150", "amount_native": "1500",
+        })
+        services.add_transaction(cg_holding, {
+            "date": "2026-06-01", "txn_type": "SELL", "quantity": "15", "price_native": "200", "amount_native": "3000",
+        })
+        db.session.commit()
+
+        gains = classify_capital_gains(cg_holding)
+        assert len(gains) == 2, gains
+        ltcg_row = next(g for g in gains if g["classification"] == "LTCG")
+        stcg_row = next(g for g in gains if g["classification"] == "STCG")
+        assert ltcg_row["quantity"] == 10.0, ltcg_row  # all of the 2023 lot (held > 24mo by 2026-06-01)
+        assert ltcg_row["acquisition_date"] == date(2023, 1, 1), ltcg_row
+        assert ltcg_row["gain_native"] == 10 * (200 - 100), ltcg_row
+        assert stcg_row["quantity"] == 5.0, stcg_row  # remaining 5 units drawn from the 2026 lot (< 24mo)
+        assert stcg_row["gain_native"] == 5 * (200 - 150), stcg_row
+        print("PASS: classify_capital_gains() FIFO-matches a SELL spanning two lots into correctly-classified LTCG/STCG records")
+
+        cg_summary = services.get_capital_gains_summary(cg_user_id, fy_start_year=2026)
+        assert cg_summary["fy_label"] == "FY 2026-27", cg_summary["fy_label"]
+        assert cg_summary["ltcg_total_usd"] == 1000.0, cg_summary  # (200-100)*10 * rate 1.0
+        assert cg_summary["stcg_total_usd"] == 250.0, cg_summary  # (200-150)*5 * rate 1.0
+        print("PASS: get_capital_gains_summary() correctly totals LTCG/STCG gains for the FY, bridged to USD")
+
+        InternationalHolding.query.filter_by(user_id=cg_user_id).delete()
+        db.session.delete(u9)
+        db.session.commit()
+
+    # ── 16. HTTP: TCS column, dividend fields, DTAA/capital-gains report pages ──
+    remit_page2 = client.get('/international/remittances')
+    remit_csrf2 = get_csrf(remit_page2.data)
+    # A remittance large enough on its own to cross the ₹7L threshold,
+    # against the international_http_test user used throughout section 9.
+    r = client.post('/international/remittances/add', data={
+        'csrf_token': remit_csrf2, 'date': '2026-05-10', 'amount_inr': '900000',
+        'purpose': RemittancePurpose.INVESTMENT_SECURITIES,
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    remit_body = client.get('/international/remittances').get_data(as_text=True)
+    assert 'TCS Collected This FY' in remit_body, "remittances page must show the TCS summary tile once TCS has been collected"
+    print("PASS: TCS column + summary tile render on the remittances page via real HTTP")
+
+    # Dividend transaction with gross/withheld via real HTTP form.
+    detail_page4 = client.get(f'/international/holdings/{h_id}')
+    div_csrf = get_csrf(detail_page4.data)
+    r = client.post(f'/international/holdings/{h_id}/transactions/add', data={
+        'csrf_token': div_csrf, 'date': '2026-06-01', 'txn_type': 'DIVIDEND',
+        'amount_native': '80', 'gross_amount_native': '100', 'tax_withheld_native': '20',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        div_txn = InternationalTransaction.query.filter_by(holding_id=h_id, txn_type='DIVIDEND').first()
+        assert div_txn is not None
+        assert div_txn.gross_amount_native == 100.0, div_txn.gross_amount_native
+        assert div_txn.tax_withheld_native == 20.0, div_txn.tax_withheld_native
+    print("PASS: dividend gross/withheld fields submit and persist via real HTTP form")
+
+    dtaa_page = client.get('/international/dtaa-summary')
+    assert dtaa_page.status_code == 200
+    assert 'DTAA' in dtaa_page.get_data(as_text=True)
+    print("PASS: DTAA / Form 67 summary report page renders")
+
+    cg_page = client.get('/international/capital-gains')
+    assert cg_page.status_code == 200
+    assert 'Capital Gains' in cg_page.get_data(as_text=True)
+    print("PASS: Capital Gains (LTCG/STCG) report page renders")
+
     # ── Cleanup ──
     with app.app_context():
         from models import db as _db

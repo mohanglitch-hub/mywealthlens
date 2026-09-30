@@ -120,6 +120,30 @@ def validate_transaction(data):
         except ValueError:
             errors.append("Please enter a valid quantity for a buy/sell transaction.")
 
+    # Batch 9.5 (Sep 2026) — optional withholding-tax detail, DIVIDEND only.
+    if txn_type == InternationalTxnType.DIVIDEND:
+        gross_raw = (data.get("gross_amount_native") or "").strip()
+        withheld_raw = (data.get("tax_withheld_native") or "").strip()
+        if gross_raw:
+            try:
+                gross = float(gross_raw)
+                if gross <= 0:
+                    errors.append("Gross dividend amount must be greater than zero.")
+            except ValueError:
+                errors.append("Please enter a valid gross dividend amount.")
+                gross = None
+            if withheld_raw:
+                try:
+                    withheld = float(withheld_raw)
+                    if withheld < 0:
+                        errors.append("Tax withheld cannot be negative.")
+                    elif gross is not None and withheld > gross:
+                        errors.append("Tax withheld cannot exceed the gross dividend amount.")
+                except ValueError:
+                    errors.append("Please enter a valid tax-withheld amount.")
+        elif withheld_raw:
+            errors.append("Enter the gross dividend amount before entering tax withheld.")
+
     return errors
 
 

@@ -180,7 +180,7 @@
     </div>
     <div class="form-group">
       <label>Type</label>
-      <select name="txn_type" required>
+      <select name="txn_type" required onchange="icToggleDividendFields(this)">
         {% for t in txn_types %}<option value="{{ t }}">{{ t.title() }}</option>{% endfor %}
       </select>
     </div>
@@ -197,6 +197,14 @@
     <div class="form-group">
       <label>Amount ({{ holding.native_currency }})</label>
       <input type="number" step="any" name="amount_native" required />
+    </div>
+    <div class="form-group ic-div-field" style="display:none;">
+      <label>Gross Dividend ({{ holding.native_currency }}, optional)</label>
+      <input type="number" step="any" name="gross_amount_native" />
+    </div>
+    <div class="form-group ic-div-field" style="display:none;">
+      <label>Tax Withheld ({{ holding.native_currency }}, optional)</label>
+      <input type="number" step="any" name="tax_withheld_native" />
     </div>
     <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Add</button>
   </form>
@@ -236,7 +244,7 @@
               </div>
               <div class="form-group">
                 <label>Type</label>
-                <select name="txn_type" required>
+                <select name="txn_type" required onchange="icToggleDividendFields(this)">
                   {% for tt in txn_types %}<option value="{{ tt }}" {{ 'selected' if tt == t.txn_type }}>{{ tt.title() }}</option>{% endfor %}
                 </select>
               </div>
@@ -253,6 +261,14 @@
               <div class="form-group">
                 <label>Amount ({{ holding.native_currency }})</label>
                 <input type="number" step="any" name="amount_native" required value="{{ t.amount_native }}" />
+              </div>
+              <div class="form-group ic-div-field" style="display:{{ 'flex' if t.txn_type == 'DIVIDEND' else 'none' }};">
+                <label>Gross Dividend ({{ holding.native_currency }}, optional)</label>
+                <input type="number" step="any" name="gross_amount_native" value="{{ t.gross_amount_native if t.gross_amount_native is not none else '' }}" />
+              </div>
+              <div class="form-group ic-div-field" style="display:{{ 'flex' if t.txn_type == 'DIVIDEND' else 'none' }};">
+                <label>Tax Withheld ({{ holding.native_currency }}, optional)</label>
+                <input type="number" step="any" name="tax_withheld_native" value="{{ t.tax_withheld_native if t.tax_withheld_native is not none else '' }}" />
               </div>
               <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Save</button>
               <button type="button" class="ic-btn-secondary" style="align-self:end;" onclick="icToggleTxnEdit({{ t.id }})">Cancel</button>
@@ -311,6 +327,18 @@
     const form = document.getElementById('icUploadForm');
     if (!form) return;
     form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  }
+
+  // Batch 9.5 (Sep 2026) — Gross/Withheld fields are DIVIDEND-only;
+  // show them only when that transaction type is selected, in both
+  // the Add form and any open inline Edit row.
+  function icToggleDividendFields(selectEl) {
+    const show = selectEl.value === 'DIVIDEND';
+    const form = selectEl.closest('form');
+    if (!form) return;
+    form.querySelectorAll('.ic-div-field').forEach(function (el) {
+      el.style.display = show ? 'flex' : 'none';
+    });
   }
 </script>
 {% endblock %}

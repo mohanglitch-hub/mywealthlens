@@ -59,6 +59,9 @@ CBDT-compliant filing document. The Income Tax Department prescribes
 its own conversion rate (SBI's TT buying rate as of the relevant date)
 for actual filing purposes, which can differ from Frankfurter's. This
 is stated plainly on the report itself — see templates/schedule_fa.html.
+The same disclaimer, for the same reason, applies to every other tax-
+adjacent report this module produces (TCS estimate, DTAA/Form 67
+summary, LTCG/STCG classification — Batch 9.4/9.5/9.6, Sep 2026).
 """
 from datetime import datetime
 from models import db
@@ -121,6 +124,23 @@ class RemittancePurpose:
 # change by government notification, so it's kept as a single named
 # constant, easy to find and update if it ever does.
 LRS_ANNUAL_LIMIT_USD = 250_000
+
+# TCS (Tax Collected at Source) on LRS remittances (Batch 9.4, Sep 2026).
+# Finance Act 2023 / CBDT notification: 20% TCS on the AGGREGATE amount
+# remitted under LRS in a financial year that exceeds ₹7,00,000 — this
+# is the GENERAL-PURPOSE rate (investment, gift, maintenance of
+# relatives abroad, etc.), which is what this module already restricts
+# RemittancePurpose to. NOT applied here: the lower rates that apply
+# specifically to education funded by an education loan (0.5% above
+# 7L) or to medical treatment/education NOT funded by a loan (5% above
+# 7L) — those are real, different rates under the same law, but this
+# module has no way to know "was this education remittance loan-
+# funded?" from the data it collects, and guessing wrong would silently
+# misstate a tax figure. Kept as named constants, easy to find and
+# update if the threshold/rate changes by a future notification —
+# same pattern as LRS_ANNUAL_LIMIT_USD above.
+TCS_THRESHOLD_INR = 700_000
+TCS_RATE = 0.20
 
 
 class InternationalHolding(db.Model):
@@ -255,7 +275,21 @@ class InternationalTransaction(db.Model):
     txn_type = db.Column(db.String(10), nullable=False)  # InternationalTxnType.ALL
     quantity      = db.Column(db.Float, nullable=True)  # null for a DIVIDEND, or a lump-sum bank/property entry
     price_native  = db.Column(db.Float, nullable=True)
-    amount_native = db.Column(db.Float, nullable=False)  # always populated — quantity*price for BUY/SELL, the payout for DIVIDEND
+    amount_native = db.Column(db.Float, nullable=False)  # always populated — quantity*price for BUY/SELL. For a DIVIDEND, the NET amount actually received (after any withholding) — this is what XIRR uses as the real cash flow, unaffected by Batch 9.5 below.
+
+    gross_amount_native  = db.Column(db.Float, nullable=True)
+    tax_withheld_native  = db.Column(db.Float, nullable=True)
+    # Batch 9.5 (Sep 2026) — DIVIDEND only. Optional: most foreign
+    # brokers withhold tax at source (e.g. the US's 25% treaty rate
+    # under the India-US DTAA) before crediting a dividend, so what
+    # actually lands in the account is already net. When given,
+    # gross_amount_native is what was DECLARED (before withholding) and
+    # tax_withheld_native is what was withheld; amount_native (the real
+    # cash flow) is derived as gross - withheld — see
+    # services.add_transaction()/update_transaction(). Left null (as
+    # every dividend before this batch already is) for a manually-
+    # entered net-only dividend, or for BUY/SELL, where they're
+    # meaningless. Powers get_dtaa_summary()'s Form 67 support figures.
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -290,6 +324,19 @@ class RemittanceRecord(db.Model):
     purpose        = db.Column(db.String(50), nullable=False, default=RemittancePurpose.INVESTMENT_SECURITIES)
     remitting_bank = db.Column(db.String(100), nullable=True)
     notes          = db.Column(db.Text, nullable=True)
+
+    tcs_amount_inr = db.Column(db.Float, nullable=False, default=0.0)
+    # Batch 9.4 (Sep 2026) — computed once, at save time, from the
+    # portion of THIS remittance that falls above the running
+    # TCS_THRESHOLD_INR total for its financial year (see
+    # services.add_remittance()). Like amount_usd's fx_rate_used, this
+    # is locked in at creation and does NOT recompute if an earlier
+    # remittance in the same FY is later deleted — same "tracking aid,
+    # not a live-recomputed ledger" honesty as the rest of this module.
+    # An authorized dealer (bank) actually collects TCS at the time of
+    # remittance based on the cumulative total IT reports for that
+    # FY, which this module has no way to see — this is Mohan's own
+    # estimate from what he's logged here, not his bank's figure.
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
