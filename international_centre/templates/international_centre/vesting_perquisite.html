@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}RSU/ESPP Perquisite Report — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">RSU/ESPP Perquisite Report — {{ summary.fy_label }}</h1>
+    <p class="ic-subtitle">Taxable perquisite (salary income) from vesting tranches, for the Indian financial year ({{ format_date(summary.fy_start) }} – {{ format_date(summary.fy_end) }}).</p>
+  </div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <form method="GET">
+      <select name="fy" onchange="this.form.submit()">
+        {% for y in range(current_fy_start_year, current_fy_start_year - 6, -1) %}
+        <option value="{{ y }}" {{ 'selected' if y == summary.fy_start.year }}>FY {{ y }}-{{ '%02d' % ((y + 1) % 100) }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+  </div>
+</div>
+
+<div class="ic-notice">
+  <strong>Not a filing document.</strong> Perquisite value is (FMV at vest − price actually paid) × quantity,
+  taxable as SALARY income in the FY the shares vested — a separate, earlier event from any capital gain when
+  those shares are later sold (see the Capital Gains report, which uses this same FMV as the cost basis). Your
+  employer's actual reported figure (Form 12BA/Form 16) may value FMV differently — always confirm with your
+  employer's records and a CA before filing.
+  {% if summary.any_missing_rate %}
+  <br/><br/><strong>Some rows below show "—" for the INR figure</strong> — no exchange rate has been captured yet
+  for that holding.
+  {% endif %}
+</div>
+
+{% if summary.rows %}
+<div class="ic-card">
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead>
+        <tr>
+          <th>Holding</th><th>Plan</th><th>Vest Date</th><th>Qty</th>
+          <th>FMV</th><th>Price Paid</th><th>Perquisite Value</th><th>Perquisite (₹ approx.)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in summary.rows %}
+        <tr>
+          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=row.holding.id) }}" class="ic-link">{{ row.holding.name }}</a></td>
+          <td>{{ row.plan_type }}</td>
+          <td>{{ format_date(row.vest_date) }}</td>
+          <td>{{ '{:,.4f}'.format(row.quantity) }}</td>
+          <td>{{ row.currency }} {{ '{:,.2f}'.format(row.fmv_native) }}</td>
+          <td>{{ row.currency }} {{ '{:,.2f}'.format(row.purchase_price_native) }}</td>
+          <td>{{ row.currency }} {{ '{:,.2f}'.format(row.perquisite_native) }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.perquisite_inr) if row.perquisite_inr is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="7" style="text-align:right; font-weight:600;">Total</td>
+          <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_perquisite_inr) }}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="ic-card ic-empty"><p>No vesting tranches recorded for {{ summary.fy_label }}.</p></div>
+{% endif %}
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:20px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .ic-link:hover { text-decoration:underline; }
+
+  .ic-notice {
+    background:var(--warning-bg); border:1px solid var(--warning); border-radius:10px;
+    padding:16px 20px; margin-bottom:20px; font-size:0.82rem; color:var(--text2); line-height:1.6;
+  }
+
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); }
+  .ic-empty { text-align:center; color:var(--muted); padding:40px 20px; }
+  .ic-table-wrap { overflow-x:auto; }
+  .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .ic-table th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .ic-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }
+  .ic-table tr:last-child td { border-bottom:none; }
+  .ic-table tfoot td { border-top:2px solid var(--border); border-bottom:none; }
+</style>
+{% endblock %}

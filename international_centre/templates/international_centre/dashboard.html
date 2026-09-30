@@ -17,6 +17,7 @@
     <a href="{{ url_for('international_centre.schedule_fa') }}" class="ic-btn-secondary" style="text-decoration:none;">Schedule FA Report</a>
     <a href="{{ url_for('international_centre.dtaa_summary') }}" class="ic-btn-secondary" style="text-decoration:none;">DTAA / Form 67</a>
     <a href="{{ url_for('international_centre.capital_gains') }}" class="ic-btn-secondary" style="text-decoration:none;">Capital Gains</a>
+    <a href="{{ url_for('international_centre.vesting_perquisite') }}" class="ic-btn-secondary" style="text-decoration:none;">RSU/ESPP Perquisite</a>
     <a href="{{ url_for('international_centre.document_vault') }}" class="ic-btn-secondary" style="text-decoration:none;">Document Vault</a>
   </div>
 </div>
@@ -49,6 +50,17 @@
 </div>
 
 {% if holdings %}
+<div class="ic-chart-grid">
+  <div class="ic-card">
+    <div class="section-label">Asset Allocation</div>
+    <div class="ic-chart-wrap"><canvas id="assetAllocationChart"></canvas></div>
+  </div>
+  <div class="ic-card">
+    <div class="section-label">Currency Exposure</div>
+    <div class="ic-chart-wrap"><canvas id="currencyExposureChart"></canvas></div>
+  </div>
+</div>
+
 <div class="ic-card">
   <div class="section-label">Holdings ({{ holdings|length }})</div>
   <div class="ic-table-wrap">
@@ -89,6 +101,57 @@
   <a href="{{ url_for('international_centre.archived_holdings') }}" class="ic-link">View archived holdings</a>
 </div>
 
+{% if holdings %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  // Batch 9.8 (Sep 2026) — Asset Allocation + Currency Exposure
+  // doughnut charts, same Chart.js conventions as the main dashboard
+  // (templates/dashboard.html) and Wealth Centre's own charts.
+  const icIsDark    = document.documentElement.getAttribute('data-theme') === 'dark';
+  const icBorderCol = icIsDark ? '#13161f' : '#FFFFFF';
+  const icLabelCol  = icIsDark ? '#64748b' : '#64748B';
+  Chart.defaults.color = icLabelCol;
+  Chart.defaults.font.family = "'Inter', sans-serif";
+  Chart.defaults.font.size = 11;
+
+  const icPalette = ['#6366f1', '#0ea5e9', '#8b5cf6', '#D97706', '#0F766E', '#16A34A', '#F59E0B', '#DC2626', '#64748B', '#7C3AED'];
+
+  function icDoughnut(canvasId, rawData) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !rawData.length) return;
+    const labels = rawData.map(d => d.label);
+    const values = rawData.map(d => d.value);
+    const colors = rawData.map((_, i) => icPalette[i % icPalette.length]);
+    new Chart(canvas, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: icBorderCol, borderWidth: 3, hoverOffset: 6 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '60%',
+        plugins: {
+          legend: { position: 'bottom', labels: { padding: 12, usePointStyle: true, font: { size: 10 } } },
+          tooltip: { callbacks: { label: ctx => {
+            const t = ctx.dataset.data.reduce((a, b) => a + b, 0);
+            return ' $' + ctx.parsed.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' (' + (ctx.parsed / t * 100).toFixed(1) + '%)';
+          } } }
+        }
+      }
+    });
+  }
+
+  icDoughnut('assetAllocationChart', [
+    {% for asset_type, info in by_type.items() %}
+    { label: {{ asset_type|tojson }}, value: {{ info.usd_value|round(2) }} },
+    {% endfor %}
+  ]);
+
+  icDoughnut('currencyExposureChart', [
+    {% for currency, info in by_currency.items() %}
+    { label: {{ currency|tojson }}, value: {{ info.usd_value|round(2) }} },
+    {% endfor %}
+  ]);
+</script>
+{% endif %}
+
 <style>
   .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
@@ -112,6 +175,9 @@
 
   .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
   .ic-empty { text-align:center; color:var(--muted); padding:40px 20px; }
+
+  .ic-chart-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:16px; margin-bottom:20px; }
+  .ic-chart-wrap { position:relative; height:260px; }
 
   .ic-table-wrap { overflow-x:auto; }
   .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }

@@ -19,8 +19,9 @@ from flask_login import login_required, current_user
 from international_centre import international_bp
 from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
-    InternationalHoldingDocument,
+    InternationalHoldingDocument, VestingTranche,
     InternationalAssetType, InternationalTxnType, RemittancePurpose, DocumentType,
+    VestingPlanType,
 )
 from international_centre import services
 from international_centre.utils import (
@@ -31,6 +32,7 @@ from international_centre.utils import (
 from fx_rates import SUPPORTED_CURRENCIES
 from international_centre.validators import (
     validate_holding, validate_transaction, validate_remittance, validate_document,
+    validate_vesting_tranche,
 )
 from wealth.timezone_utils import today_ist
 import os
@@ -72,6 +74,13 @@ def _get_remittance_or_404(remit_id):
     return remit
 
 
+def _get_tranche_or_404(tranche_id):
+    tranche = VestingTranche.query.filter_by(id=tranche_id, user_id=current_user.id).first()
+    if not tranche:
+        abort(404)
+    return tranche
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────
 
 @international_bp.route("/")
@@ -83,15 +92,20 @@ def dashboard():
     lrs_status = services.get_lrs_status(current_user.id)
 
     by_type = {}
+    by_currency = {}
     for h in holdings:
         by_type.setdefault(h.asset_type, {"count": 0, "usd_value": 0.0})
         by_type[h.asset_type]["count"] += 1
         by_type[h.asset_type]["usd_value"] += h.usd_value or 0.0
 
+        by_currency.setdefault(h.native_currency, {"count": 0, "usd_value": 0.0})
+        by_currency[h.native_currency]["count"] += 1
+        by_currency[h.native_currency]["usd_value"] += h.usd_value or 0.0
+
     return render_template(
         "international_centre/dashboard.html",
         holdings=holdings, totals=totals, portfolio_xirr=portfolio_xirr,
-        lrs_status=lrs_status, by_type=by_type,
+        lrs_status=lrs_status, by_type=by_type, by_currency=by_currency,
         format_money_usd=currency_display.format_money_usd, format_date=format_date,
     )
 
@@ -148,10 +162,15 @@ def holding_detail(holding_id):
                  .filter_by(holding_id=holding.id)
                  .order_by(InternationalHoldingDocument.uploaded_at.desc())
                  .all())
+    vesting_tranches = (VestingTranche.query
+                        .filter_by(holding_id=holding.id)
+                        .order_by(VestingTranche.vest_date.desc())
+                        .all())
     return render_template(
         "international_centre/holding_detail.html", holding=holding, transactions=transactions,
         nominees=holding.nominees.all(),
         documents=documents, doc_types=DocumentType.ALL,
+        vesting_tranches=vesting_tranches, plan_types=VestingPlanType.ALL,
         txn_types=InternationalTxnType.ALL, format_date=format_date,
         format_money_usd=currency_display.format_money_usd,
         today=today_ist().isoformat(),
@@ -317,9 +336,11 @@ def delete_transaction(txn_id):
 @login_required
 def remittances():
     lrs_status = services.get_lrs_status(current_user.id)
+    lrs_history = services.get_lrs_history(current_user.id)  # Batch 9.8
     holdings = services.get_holdings(current_user.id, archived=False)
     return render_template(
-        "international_centre/remittances.html", lrs_status=lrs_status, holdings=holdings,
+        "international_centre/remittances.html", lrs_status=lrs_status, lrs_history=lrs_history,
+        holdings=holdings,
         purposes=RemittancePurpose.ALL, format_date=format_date,
         today=today_ist().isoformat(),
     )
@@ -404,6 +425,66 @@ def capital_gains():
     summary = services.get_capital_gains_summary(current_user.id, fy_start_year)
     return render_template(
         "international_centre/capital_gains.html", summary=summary,
+        format_date=format_date, current_fy_start_year=default_fy_start_year,
+    )
+
+
+# ── RSU/ESPP Vesting Tranches (Batch 9.7, Sep 2026) ───────────────────
+
+@international_bp.route("/holdings/<int:holding_id>/vesting/add", methods=["POST"])
+@login_required
+def add_vesting_tranche(holding_id):
+    holding = _get_holding_or_404(holding_id)
+    data = request.form.to_dict()
+    errors = validate_vesting_tranche(data)
+    if errors:
+        for e in errors:
+            flash(e, "error")
+        return redirect(url_for("international_centre.holding_detail", holding_id=holding.id))
+    services.add_vesting_tranche(holding, data)
+    flash("Vesting tranche added.", "success")
+    return redirect(url_for("international_centre.holding_detail", holding_id=holding.id))
+
+
+@international_bp.route("/vesting/<int:tranche_id>/edit", methods=["POST"])
+@login_required
+def edit_vesting_tranche(tranche_id):
+    tranche = _get_tranche_or_404(tranche_id)
+    holding_id = tranche.holding_id
+    data = request.form.to_dict()
+    errors = validate_vesting_tranche(data)
+    if errors:
+        for e in errors:
+            flash(e, "error")
+        return redirect(url_for("international_centre.holding_detail", holding_id=holding_id))
+    services.update_vesting_tranche(tranche, data)
+    flash("Vesting tranche updated.", "success")
+    return redirect(url_for("international_centre.holding_detail", holding_id=holding_id))
+
+
+@international_bp.route("/vesting/<int:tranche_id>/delete", methods=["POST"])
+@login_required
+def delete_vesting_tranche(tranche_id):
+    tranche = _get_tranche_or_404(tranche_id)
+    holding_id = tranche.holding_id
+    services.delete_vesting_tranche(tranche)
+    flash("Vesting tranche deleted.", "success")
+    return redirect(url_for("international_centre.holding_detail", holding_id=holding_id))
+
+
+@international_bp.route("/vesting-perquisite")
+@login_required
+def vesting_perquisite():
+    fy_raw = request.args.get("fy")
+    default_fy_start_year = fy_bounds(today_ist())[0].year
+    try:
+        fy_start_year = int(fy_raw) if fy_raw else default_fy_start_year
+    except ValueError:
+        fy_start_year = default_fy_start_year
+
+    summary = services.get_vesting_perquisite_summary(current_user.id, fy_start_year)
+    return render_template(
+        "international_centre/vesting_perquisite.html", summary=summary,
         format_date=format_date, current_fy_start_year=default_fy_start_year,
     )
 

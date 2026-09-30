@@ -31,7 +31,7 @@ from datetime import date as _date
 from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
     InternationalValueSnapshot, InternationalHoldingNominee,
-    InternationalHoldingDocument,
+    InternationalHoldingDocument, VestingTranche,
     InternationalAssetType, InternationalTxnType, LRS_ANNUAL_LIMIT_USD,
     TCS_THRESHOLD_INR, TCS_RATE,
 )
@@ -383,6 +383,105 @@ def delete_transaction(txn):
     db.session.commit()
 
 
+# ── RSU/ESPP Vesting Tranches (Batch 9.7, Sep 2026) ───────────────────
+# CRUD only here -- these don't feed recompute_holding_financials() the
+# way BUY/SELL/DIVIDEND transactions do (a vesting event isn't a cash
+# flow XIRR should see; Mohan still enters the holding's running
+# quantity by hand, same as everywhere else in this module). What they
+# DO feed: classify_capital_gains()'s FIFO lot-matching below (as an
+# acquisition lot, cost-based at FMV) and get_vesting_perquisite_summary().
+
+def add_vesting_tranche(holding, data):
+    db = _db()
+    tranche = VestingTranche(
+        user_id=holding.user_id,
+        holding_id=holding.id,
+        plan_type=data["plan_type"].strip().upper(),
+        grant_date=(datetime.strptime(data["grant_date"], "%Y-%m-%d").date()
+                    if (data.get("grant_date") or "").strip() else None),
+        vest_date=datetime.strptime(data["vest_date"], "%Y-%m-%d").date(),
+        quantity=float(data["quantity"]),
+        fmv_native=float(data["fmv_native"]),
+        purchase_price_native=(float(data["purchase_price_native"])
+                                if (data.get("purchase_price_native") or "").strip() else None),
+        notes=(data.get("notes") or "").strip() or None,
+    )
+    db.session.add(tranche)
+    db.session.commit()
+    return tranche
+
+
+def update_vesting_tranche(tranche, data):
+    db = _db()
+    tranche.plan_type = data["plan_type"].strip().upper()
+    tranche.grant_date = (datetime.strptime(data["grant_date"], "%Y-%m-%d").date()
+                           if (data.get("grant_date") or "").strip() else None)
+    tranche.vest_date = datetime.strptime(data["vest_date"], "%Y-%m-%d").date()
+    tranche.quantity = float(data["quantity"])
+    tranche.fmv_native = float(data["fmv_native"])
+    tranche.purchase_price_native = (float(data["purchase_price_native"])
+                                      if (data.get("purchase_price_native") or "").strip() else None)
+    tranche.notes = (data.get("notes") or "").strip() or None
+    db.session.commit()
+    return tranche
+
+
+def delete_vesting_tranche(tranche):
+    db = _db()
+    db.session.delete(tranche)
+    db.session.commit()
+
+
+def get_vesting_perquisite_summary(user_id, fy_start_year):
+    """RSU/ESPP vesting tranches and their taxable PERQUISITE value
+    -- (FMV_at_vest - price_paid) * quantity -- which Indian tax law
+    treats as SALARY income in the FY the shares actually vested (a
+    completely separate, earlier event from any capital gain realized
+    when those shares are later sold -- see classify_capital_gains(),
+    which uses this same FMV as the eventual cost basis). Scoped to the
+    Indian FY starting 1 Apr `fy_start_year`, matching TCS/DTAA/capital
+    gains' own FY-based reporting. Same 'not a filing document, confirm
+    with a CA' honesty as every other tax-adjacent report in this
+    module -- the actual perquisite value your employer reports is
+    whatever they put on your Form 12BA/Form 16, which may value FMV
+    differently (e.g. the closing price on a specific exchange on the
+    vest date) than what's entered here."""
+    import currency_display
+    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    holdings = (InternationalHolding.query
+                .filter_by(user_id=user_id, asset_type=InternationalAssetType.RSU_ESPP)
+                .all())
+
+    rows = []
+    any_missing_rate = False
+    for h in holdings:
+        tranches = [v for v in h.vesting_tranches if fy_start <= v.vest_date <= fy_end]
+        if not tranches:
+            continue
+        rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else None)
+        for v in tranches:
+            if rate is None:
+                any_missing_rate = True
+                perquisite_inr = None
+            else:
+                perquisite_inr = currency_display.usd_to_inr(round(v.perquisite_value_native * rate, 2))
+            rows.append({
+                "holding": h, "tranche": v, "currency": h.native_currency,
+                "plan_type": v.plan_type, "vest_date": v.vest_date, "quantity": v.quantity,
+                "fmv_native": v.fmv_native, "purchase_price_native": v.purchase_price_native or 0.0,
+                "perquisite_native": v.perquisite_value_native, "perquisite_inr": perquisite_inr,
+            })
+
+    rows.sort(key=lambda r: r["vest_date"])
+    total_perquisite_inr = sum(r["perquisite_inr"] for r in rows if r["perquisite_inr"] is not None)
+
+    return {
+        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
+        "rows": rows, "total_perquisite_inr": round(total_perquisite_inr, 2),
+        "any_missing_rate": any_missing_rate,
+    }
+
+
 # ── Remittances (LRS) ───────────────────────────────────────────────
 
 def _compute_tcs(user_id, remit_date, amount_inr):
@@ -477,6 +576,38 @@ def get_lrs_status(user_id, anchor_date=None):
         "limit_usd": LRS_ANNUAL_LIMIT_USD, "pct_used": pct_used, "status": status,
         "remittances": remittances, "total_tcs_inr": total_tcs_inr,
     }
+
+
+def get_lrs_history(user_id, years=5, anchor_date=None):
+    """Per-financial-year LRS usage totals for the last `years` Indian
+    financial years INCLUDING the current one, oldest first. Batch 9.8
+    (Sep 2026) — unlike get_lrs_status() (a live gauge for a single
+    FY), this is a multi-year trend view: each entry is independent and
+    always included even if $0 was remitted that year, so a genuinely
+    quiet year shows as a gap in the trend rather than being silently
+    skipped."""
+    anchor_date = anchor_date or today_ist()
+    current_fy_start_year = fy_bounds(anchor_date)[0].year
+
+    history = []
+    for i in range(years - 1, -1, -1):
+        start_year = current_fy_start_year - i
+        fy_start, fy_end = fy_bounds(_date(start_year, 4, 1))
+        remittances = (RemittanceRecord.query
+                       .filter_by(user_id=user_id)
+                       .filter(RemittanceRecord.date >= fy_start, RemittanceRecord.date <= fy_end)
+                       .all())
+        total_usd = sum(r.amount_usd for r in remittances)
+        history.append({
+            "fy_label": fy_label(_date(start_year, 4, 1)),
+            "fy_start": fy_start, "fy_end": fy_end,
+            "count": len(remittances),
+            "total_usd": round(total_usd, 2),
+            "total_inr": round(sum(r.amount_inr for r in remittances), 2),
+            "total_tcs_inr": round(sum(r.tcs_amount_inr or 0.0 for r in remittances), 2),
+            "pct_used": min(100.0, round((total_usd / LRS_ANNUAL_LIMIT_USD) * 100, 1)) if LRS_ANNUAL_LIMIT_USD else 0.0,
+        })
+    return history
 
 
 # ── Schedule FA ─────────────────────────────────────────────────────
@@ -736,24 +867,50 @@ def get_dtaa_summary(user_id, fy_start_year):
 def classify_capital_gains(holding):
     """Returns a list of realized-gain records for one holding, oldest
     SELL first, by matching each SELL against the earliest still-open
-    BUY lot(s) (FIFO) — a single SELL that spans more than one lot
-    produces one record per lot it draws from, since each lot can have
-    its own acquisition date and therefore its own LTCG/STCG
+    acquisition lot(s) (FIFO) — a single SELL that spans more than one
+    lot produces one record per lot it draws from, since each lot can
+    have its own acquisition date and therefore its own LTCG/STCG
     classification. Ticker-based holdings only (quantity is the whole
     basis for lot-matching, and only ticker-based holdings' BUY/SELL
-    transactions carry a quantity — see holding_detail.html)."""
+    transactions and RSU_ESPP holdings' vesting tranches carry a
+    quantity — see holding_detail.html).
+
+    Batch 9.7 (Sep 2026): an acquisition lot can now come from either a
+    BUY transaction OR a VestingTranche (RSU_ESPP holdings) — a vesting
+    event is economically identical to a purchase for FIFO purposes,
+    just cost-based at FMV-at-vest rather than a price actually paid
+    (see VestingTranche.cost_basis_native's own docstring for why FMV,
+    not purchase price, is the correct capital-gains cost basis even
+    for a discounted ESPP purchase — the discount was already taxed
+    once, as perquisite income). BUY/VEST events on the same date sort
+    before a SELL on that date (rank 0 vs. 1) so a same-day acquisition
+    is available to match a same-day disposal, matching how a human
+    would read the day's activity."""
     if not holding.is_ticker_based:
         return []
 
-    txns = sorted(holding.transactions, key=lambda t: (t.date, t.id))
+    events = []
+    for t in holding.transactions:
+        if t.txn_type == InternationalTxnType.BUY:
+            events.append((t.date, 0, t.id, "BUY", t))
+        elif t.txn_type == InternationalTxnType.SELL:
+            events.append((t.date, 1, t.id, "SELL", t))
+    for v in holding.vesting_tranches:
+        events.append((v.vest_date, 0, v.id, "VEST", v))
+    events.sort(key=lambda e: (e[0], e[1], e[2]))
+
     lots = deque()
     gains = []
 
-    for t in txns:
-        if t.txn_type == InternationalTxnType.BUY:
-            if t.quantity and t.quantity > 0:
-                lots.append({"date": t.date, "qty": t.quantity, "unit_cost": t.amount_native / t.quantity})
-        elif t.txn_type == InternationalTxnType.SELL:
+    for event_date, _rank, _id, kind, obj in events:
+        if kind == "BUY":
+            if obj.quantity and obj.quantity > 0:
+                lots.append({"date": obj.date, "qty": obj.quantity, "unit_cost": obj.amount_native / obj.quantity})
+        elif kind == "VEST":
+            if obj.quantity and obj.quantity > 0:
+                lots.append({"date": obj.vest_date, "qty": obj.quantity, "unit_cost": obj.fmv_native})
+        elif kind == "SELL":
+            t = obj
             if not t.quantity or t.quantity <= 0:
                 continue
             qty_to_sell = t.quantity
@@ -761,9 +918,9 @@ def classify_capital_gains(holding):
             while qty_to_sell > 1e-9 and lots:
                 lot = lots[0]
                 matched_qty = min(qty_to_sell, lot["qty"])
-                long_term = is_long_term(lot["date"], t.date)
+                long_term = is_long_term(lot["date"], event_date)
                 gains.append({
-                    "sell_date": t.date, "acquisition_date": lot["date"],
+                    "sell_date": event_date, "acquisition_date": lot["date"],
                     "quantity": round(matched_qty, 6),
                     "classification": "LTCG" if long_term else "STCG",
                     "cost_basis_native": round(matched_qty * lot["unit_cost"], 2),
@@ -775,13 +932,13 @@ def classify_capital_gains(holding):
                 if lot["qty"] <= 1e-9:
                     lots.popleft()
             # qty_to_sell > 0 here means a SELL for more than was ever
-            # bought through recorded transactions (e.g. the holding's
-            # opening quantity was seeded directly rather than via a
-            # BUY transaction) — that unmatched portion has no known
-            # cost basis, so it's silently left unclassified rather
-            # than guessing a cost basis of zero (which would overstate
-            # the gain). Same "never guess" philosophy as the rest of
-            # this module.
+            # acquired through recorded BUY transactions/vesting
+            # tranches (e.g. the holding's opening quantity was seeded
+            # directly rather than via a BUY) — that unmatched portion
+            # has no known cost basis, so it's silently left
+            # unclassified rather than guessing a cost basis of zero
+            # (which would overstate the gain). Same "never guess"
+            # philosophy as the rest of this module.
 
     return gains
 
