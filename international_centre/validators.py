@@ -10,7 +10,7 @@ from datetime import datetime
 
 from international_centre.models import (
     InternationalAssetType, InternationalTxnType, RemittancePurpose,
-    DocumentType,
+    DocumentType, VestingPlanType,
 )
 from fx_rates import SUPPORTED_CURRENCIES
 from wealth.timezone_utils import today_ist
@@ -170,6 +170,58 @@ def validate_remittance(data):
     purpose = (data.get("purpose") or "").strip()
     if purpose not in RemittancePurpose.ALL:
         errors.append("Please select a valid purpose.")
+
+    return errors
+
+
+def validate_vesting_tranche(data):
+    """data: flat dict with keys plan_type, grant_date (optional),
+    vest_date, quantity, fmv_native, purchase_price_native (optional).
+    Batch 9.7 (Sep 2026)."""
+    errors = []
+
+    plan_type = (data.get("plan_type") or "").strip().upper()
+    if plan_type not in VestingPlanType.ALL:
+        errors.append("Please select a valid plan type (RSU or ESPP).")
+
+    grant_raw = (data.get("grant_date") or "").strip()
+    if grant_raw and not _parse_date(grant_raw):
+        errors.append("Please enter a valid grant date.")
+
+    vest_raw = (data.get("vest_date") or "").strip()
+    vest_date = _parse_date(vest_raw)
+    if not vest_date:
+        errors.append("Please enter a valid vest date.")
+    elif vest_date > today_ist():
+        errors.append("Vest date cannot be in the future.")
+
+    qty_raw = (data.get("quantity") or "").strip()
+    try:
+        quantity = float(qty_raw)
+        if quantity <= 0:
+            errors.append("Quantity must be greater than zero.")
+    except ValueError:
+        errors.append("Please enter a valid quantity.")
+
+    fmv = None
+    fmv_raw = (data.get("fmv_native") or "").strip()
+    try:
+        fmv = float(fmv_raw)
+        if fmv <= 0:
+            errors.append("Fair market value must be greater than zero.")
+    except ValueError:
+        errors.append("Please enter a valid fair market value.")
+
+    price_raw = (data.get("purchase_price_native") or "").strip()
+    if price_raw:
+        try:
+            price = float(price_raw)
+            if price < 0:
+                errors.append("Purchase price cannot be negative.")
+            elif fmv is not None and price > fmv:
+                errors.append("Purchase price cannot exceed the fair market value.")
+        except ValueError:
+            errors.append("Please enter a valid purchase price.")
 
     return errors
 

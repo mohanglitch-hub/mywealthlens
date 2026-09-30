@@ -102,6 +102,68 @@
   {% endif %}
 </div>
 
+<div class="ic-card">
+  <div class="section-label">LRS History (Last {{ lrs_history|length }} Years)</div>
+  <div class="ic-chart-wrap"><canvas id="lrsHistoryChart"></canvas></div>
+  <div class="ic-table-wrap" style="margin-top:16px;">
+    <table class="ic-table">
+      <thead><tr><th>Financial Year</th><th>Remittances</th><th>Total (USD)</th><th>Total (INR)</th><th>TCS (INR)</th><th>% of LRS Cap</th></tr></thead>
+      <tbody>
+        {% for yr in lrs_history %}
+        <tr>
+          <td>{{ yr.fy_label }}</td>
+          <td>{{ yr.count }}</td>
+          <td>${{ '{:,.0f}'.format(yr.total_usd) }}</td>
+          <td>₹{{ '{:,.0f}'.format(yr.total_inr) }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(yr.total_tcs_inr) if yr.total_tcs_inr else '—' }}</td>
+          <td>{{ yr.pct_used }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if lrs_history %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  // Batch 9.8 (Sep 2026) — multi-year LRS usage trend, same Chart.js
+  // conventions as the International dashboard's own charts.
+  const icIsDark2   = document.documentElement.getAttribute('data-theme') === 'dark';
+  const icGridCol2  = icIsDark2 ? '#1e2130' : '#E2E8F0';
+  const icLabelCol2 = icIsDark2 ? '#64748b' : '#64748B';
+  Chart.defaults.color = icLabelCol2;
+  Chart.defaults.font.family = "'Inter', sans-serif";
+  Chart.defaults.font.size = 11;
+
+  const lrsHistoryLabels = {{ lrs_history | map(attribute='fy_label') | list | tojson }};
+  const lrsHistoryValues = {{ lrs_history | map(attribute='total_usd') | list | tojson }};
+  const lrsHistoryLimit  = {{ lrs_status.limit_usd }};
+
+  new Chart(document.getElementById('lrsHistoryChart'), {
+    type: 'bar',
+    data: {
+      labels: lrsHistoryLabels,
+      datasets: [{
+        label: 'LRS Used (USD)', data: lrsHistoryValues,
+        backgroundColor: '#6366f1cc', borderColor: '#6366f1', borderWidth: 1, borderRadius: 6,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ' $' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' of $' + lrsHistoryLimit.toLocaleString('en-US') + ' cap' } },
+      },
+      scales: {
+        x: { grid: { color: icGridCol2 }, ticks: { color: icLabelCol2 } },
+        y: { grid: { color: icGridCol2 }, ticks: { color: icLabelCol2, callback: v => '$' + v.toLocaleString('en-US') } },
+      },
+    },
+  });
+</script>
+{% endif %}
+
 <style>
   .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
@@ -109,6 +171,7 @@
   .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
   .ic-link:hover { text-decoration:underline; }
   .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
+  .ic-chart-wrap { position:relative; height:220px; }
 
   .ic-gauge-track { width:100%; height:14px; background:var(--surface2); border-radius:7px; overflow:hidden; }
   .ic-gauge-fill { height:100%; background:var(--accent); border-radius:7px; transition:width 0.3s; }

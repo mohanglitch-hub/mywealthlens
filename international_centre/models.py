@@ -47,6 +47,12 @@ Four tables:
                                   period is the calendar year, a
                                   well-known quirk for Indian filers
                                   with foreign assets)
+  5. VestingTranche             — RSU/ESPP vesting events, RSU_ESPP
+                                  holdings only (Batch 9.7, Sep 2026) —
+                                  FMV-at-vest sets both the taxable
+                                  perquisite value and, later, the
+                                  capital-gains cost basis; see the
+                                  table's own docstring
 
 Archive→Restore lifecycle for holdings, matching the rest of the app
 (never a direct hard delete of something with transaction/snapshot
@@ -104,6 +110,19 @@ class InternationalTxnType:
     SELL = "SELL"
     DIVIDEND = "DIVIDEND"
     ALL = [BUY, SELL, DIVIDEND]
+
+
+class VestingPlanType:
+    """Batch 9.7 (Sep 2026) — RSU/ESPP vesting tranches, RSU_ESPP
+    holdings only. Both plan types are tracked the same way (a dated
+    event that grants/purchases shares at a known fair market value),
+    but the tax treatment of the price actually paid differs: RSU
+    grants are free (no purchase_price_native), while ESPP shares are
+    bought at a discount to FMV -- see VestingTranche's own docstring
+    for how that discount becomes taxable perquisite income."""
+    RSU = "RSU"
+    ESPP = "ESPP"
+    ALL = [RSU, ESPP]
 
 
 class RemittancePurpose:
@@ -210,6 +229,10 @@ class InternationalHolding(db.Model):
         "InternationalHoldingDocument", backref="holding", lazy=True,
         cascade="all, delete-orphan",
     )
+    vesting_tranches = db.relationship(
+        "VestingTranche", backref="holding", lazy=True,
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self):
         return f"<InternationalHolding {self.name} {self.native_currency}{self.current_value_native}>"
@@ -217,6 +240,14 @@ class InternationalHolding(db.Model):
     @property
     def is_ticker_based(self):
         return self.asset_type in InternationalAssetType.TICKER_BASED
+
+    @property
+    def is_rsu_espp(self):
+        """Batch 9.7 (Sep 2026) — gates the Vesting Tranches section on
+        holding_detail.html, same pattern as is_ticker_based above
+        (avoids hardcoding the asset type's display string in a
+        template)."""
+        return self.asset_type == InternationalAssetType.RSU_ESPP
 
     @property
     def total_nominees_percentage(self):
@@ -368,6 +399,77 @@ class InternationalValueSnapshot(db.Model):
 
     def __repr__(self):
         return f"<InternationalSnapshot holding={self.holding_id} {self.date} ${self.usd_value}>"
+
+
+class VestingTranche(db.Model):
+    """Batch 9.7 (Sep 2026) — one RSU/ESPP vesting event: a dated grant
+    of shares (RSU) or a discounted purchase (ESPP), RSU_ESPP holdings
+    only. Kept as its own table rather than folded into
+    InternationalTransaction because a vesting event isn't really a
+    BUY -- there's no price "paid" for an RSU grant, and an ESPP
+    purchase's price paid is deliberately NOT its capital-gains cost
+    basis (see below), which InternationalTransaction's BUY handling
+    has no room to represent.
+
+    Tax treatment (India), which is why this table exists:
+      1. PERQUISITE (taxable as salary income, in the FY of vesting):
+         (fmv_native - purchase_price_native) * quantity -- the full
+         value of an RSU grant (purchase_price_native is None/0), or
+         just the discount on an ESPP purchase. See
+         perquisite_value_native below and services.
+         get_vesting_perquisite_summary().
+      2. CAPITAL GAINS (later, when the shares are eventually SOLD):
+         cost basis is FMV at vest, NOT what was actually paid --
+         perquisite tax was already charged on the FMV-vs-paid
+         difference, so taxing it again via a lower capital-gains cost
+         basis would be double taxation. See cost_basis_native below,
+         and services.classify_capital_gains(), which folds these
+         tranches into the same FIFO lot-matching BUY transactions use
+         (Batch 9.6), keyed on vest_date/fmv_native exactly as a BUY is
+         keyed on its own date/price.
+
+    grant_date is optional and purely informational (RSU grant date /
+    ESPP offering-period start) -- every actual tax/FIFO calculation
+    here uses vest_date, the date shares were actually received."""
+    __tablename__ = "international_vesting_tranche"
+    __table_args__ = (
+        db.Index("ix_intl_vesting_holding", "holding_id"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    holding_id = db.Column(db.Integer, db.ForeignKey("international_holding.id"), nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    plan_type  = db.Column(db.String(10), nullable=False, default=VestingPlanType.RSU)  # VestingPlanType.ALL
+    grant_date = db.Column(db.Date, nullable=True)   # informational only — see docstring
+    vest_date  = db.Column(db.Date, nullable=False)  # the date shares actually vested / the ESPP purchase settled
+
+    quantity   = db.Column(db.Float, nullable=False)
+    fmv_native = db.Column(db.Float, nullable=False)  # fair market value PER SHARE at vest, native currency
+
+    purchase_price_native = db.Column(db.Float, nullable=True)
+    # ^ ESPP only: the discounted price actually paid per share. Null
+    #   (treated as 0) for RSU, which is a free grant.
+
+    notes = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def perquisite_value_native(self):
+        """Taxable as salary income in the FY of vesting — see class
+        docstring point 1."""
+        paid = self.purchase_price_native or 0.0
+        return round((self.fmv_native - paid) * self.quantity, 2)
+
+    @property
+    def cost_basis_native(self):
+        """The cost basis a later SALE of these shares uses for capital
+        gains — FMV at vest, not what was actually paid. See class
+        docstring point 2."""
+        return round(self.fmv_native * self.quantity, 2)
+
+    def __repr__(self):
+        return f"<VestingTranche {self.plan_type} {self.vest_date} qty={self.quantity}>"
 
 
 class InternationalHoldingDocument(db.Model):

@@ -170,6 +170,122 @@
   {% endif %}
 </div>
 
+{% if holding.is_rsu_espp %}
+<div class="ic-card" id="vestingSection">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+    <div class="section-label" style="margin-bottom:0;">Vesting Tranches
+      {% if vesting_tranches %}
+      <span style="font-size:0.75rem; color:var(--muted); font-weight:400; margin-left:8px; text-transform:none; letter-spacing:normal;">
+        {{ vesting_tranches|length }} tranche{{ 's' if vesting_tranches|length != 1 else '' }}
+      </span>
+      {% endif %}
+    </div>
+    <a href="{{ url_for('international_centre.vesting_perquisite') }}" class="ic-link" style="font-size:0.82rem;">View Perquisite Report →</a>
+  </div>
+  <p style="font-size:0.78rem; color:var(--muted2); margin-bottom:16px;">
+    Each RSU vest or ESPP purchase, at its fair market value (FMV) on that date. FMV sets both the taxable
+    perquisite value (salary income in the year of vesting) and the eventual capital-gains cost basis when
+    these shares are sold — see the Perquisite Report and Capital Gains report.
+  </p>
+  <form method="POST" action="{{ url_for('international_centre.add_vesting_tranche', holding_id=holding.id) }}" class="ic-txn-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="form-group">
+      <label>Plan Type</label>
+      <select name="plan_type" required onchange="icTogglePurchasePrice(this)">
+        {% for pt in plan_types %}<option value="{{ pt }}">{{ pt }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Grant Date (optional)</label>
+      <input type="date" name="grant_date" max="{{ today }}" />
+    </div>
+    <div class="form-group">
+      <label>Vest Date</label>
+      <input type="date" name="vest_date" required max="{{ today }}" value="{{ today }}" />
+    </div>
+    <div class="form-group">
+      <label>Quantity</label>
+      <input type="number" step="any" name="quantity" required />
+    </div>
+    <div class="form-group">
+      <label>FMV / unit ({{ holding.native_currency }})</label>
+      <input type="number" step="any" name="fmv_native" required />
+    </div>
+    <div class="form-group ic-espp-field" style="display:none;">
+      <label>Price Paid / unit ({{ holding.native_currency }}, ESPP only)</label>
+      <input type="number" step="any" name="purchase_price_native" />
+    </div>
+    <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Add</button>
+  </form>
+
+  {% if vesting_tranches %}
+  <div class="ic-table-wrap" style="margin-top:20px;">
+    <table class="ic-table">
+      <thead><tr><th>Plan</th><th>Vest Date</th><th>Qty</th><th>FMV</th><th>Price Paid</th><th>Perquisite Value</th><th></th></tr></thead>
+      <tbody>
+        {% for v in vesting_tranches %}
+        <tr id="vestRow{{ v.id }}">
+          <td>{{ v.plan_type }}</td>
+          <td>{{ format_date(v.vest_date) }}</td>
+          <td>{{ '{:,.4f}'.format(v.quantity) }}</td>
+          <td>{{ holding.native_currency }} {{ '{:,.2f}'.format(v.fmv_native) }}</td>
+          <td>{{ holding.native_currency + ' ' + '{:,.2f}'.format(v.purchase_price_native) if v.purchase_price_native is not none else '—' }}</td>
+          <td>{{ holding.native_currency }} {{ '{:,.2f}'.format(v.perquisite_value_native) }}</td>
+          <td style="display:flex; gap:10px;">
+            <button type="button" class="ic-link-btn" style="color:var(--accent);"
+                    onclick="icToggleVestEdit({{ v.id }})">Edit</button>
+            <form method="POST" action="{{ url_for('international_centre.delete_vesting_tranche', tranche_id=v.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="button" class="ic-link-btn"
+                      onclick="icConfirmAction(this.form, 'Delete Vesting Tranche?', 'This vesting tranche will be permanently removed and perquisite/capital-gains figures will be recomputed.', 'Delete Tranche')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <tr id="vestEditRow{{ v.id }}" style="display:none;">
+          <td colspan="7" style="background:var(--surface2);">
+            <form method="POST" action="{{ url_for('international_centre.edit_vesting_tranche', tranche_id=v.id) }}" class="ic-txn-form" style="padding:10px 0;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label>Plan Type</label>
+                <select name="plan_type" required onchange="icTogglePurchasePrice(this)">
+                  {% for pt in plan_types %}<option value="{{ pt }}" {{ 'selected' if pt == v.plan_type }}>{{ pt }}</option>{% endfor %}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Grant Date (optional)</label>
+                <input type="date" name="grant_date" max="{{ today }}" value="{{ v.grant_date.isoformat() if v.grant_date else '' }}" />
+              </div>
+              <div class="form-group">
+                <label>Vest Date</label>
+                <input type="date" name="vest_date" required max="{{ today }}" value="{{ v.vest_date.isoformat() }}" />
+              </div>
+              <div class="form-group">
+                <label>Quantity</label>
+                <input type="number" step="any" name="quantity" required value="{{ v.quantity }}" />
+              </div>
+              <div class="form-group">
+                <label>FMV / unit ({{ holding.native_currency }})</label>
+                <input type="number" step="any" name="fmv_native" required value="{{ v.fmv_native }}" />
+              </div>
+              <div class="form-group ic-espp-field" style="display:{{ 'flex' if v.plan_type == 'ESPP' else 'none' }};">
+                <label>Price Paid / unit ({{ holding.native_currency }}, ESPP only)</label>
+                <input type="number" step="any" name="purchase_price_native" value="{{ v.purchase_price_native if v.purchase_price_native is not none else '' }}" />
+              </div>
+              <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Save</button>
+              <button type="button" class="ic-btn-secondary" style="align-self:end;" onclick="icToggleVestEdit({{ v.id }})">Cancel</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem; margin-top:16px;">No vesting tranches recorded yet.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="ic-card">
   <div class="section-label">Add Transaction</div>
   <form method="POST" action="{{ url_for('international_centre.add_transaction', holding_id=holding.id) }}" class="ic-txn-form">
@@ -337,6 +453,25 @@
     const form = selectEl.closest('form');
     if (!form) return;
     form.querySelectorAll('.ic-div-field').forEach(function (el) {
+      el.style.display = show ? 'flex' : 'none';
+    });
+  }
+
+  // Batch 9.7 (Sep 2026) — vesting tranche edit row toggle, mirrors
+  // icToggleTxnEdit() above.
+  function icToggleVestEdit(tranchId) {
+    const editRow = document.getElementById('vestEditRow' + tranchId);
+    if (!editRow) return;
+    editRow.style.display = editRow.style.display === 'none' ? 'table-row' : 'none';
+  }
+
+  // Batch 9.7 (Sep 2026) — Price Paid is ESPP-only (RSU is a free
+  // grant); show it only when that plan type is selected.
+  function icTogglePurchasePrice(selectEl) {
+    const show = selectEl.value === 'ESPP';
+    const form = selectEl.closest('form');
+    if (!form) return;
+    form.querySelectorAll('.ic-espp-field').forEach(function (el) {
       el.style.display = show ? 'flex' : 'none';
     });
   }

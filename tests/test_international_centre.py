@@ -777,7 +777,14 @@ def main():
         assert any("cannot exceed" in e for e in bad_errors), bad_errors
         print("PASS: validate_transaction() rejects tax withheld greater than gross dividend")
 
-        InternationalHolding.query.filter_by(user_id=dtaa_user_id).delete()
+        # Plain session.delete() per holding, NOT a bulk Query.delete()
+        # -- a bulk delete skips the ORM cascade="all, delete-orphan" on
+        # transactions, leaving orphaned rows that a later test's newly
+        # created holding can silently "inherit" via SQLite rowid reuse
+        # (the same class of bug Batch 5 fixed for domestic Stock/
+        # StockTransaction -- see this project's own history notes).
+        for h in InternationalHolding.query.filter_by(user_id=dtaa_user_id).all():
+            db.session.delete(h)
         db.session.delete(u8)
         db.session.commit()
 
@@ -843,7 +850,8 @@ def main():
         assert cg_summary["stcg_total_usd"] == 250.0, cg_summary  # (200-150)*5 * rate 1.0
         print("PASS: get_capital_gains_summary() correctly totals LTCG/STCG gains for the FY, bridged to USD")
 
-        InternationalHolding.query.filter_by(user_id=cg_user_id).delete()
+        for h in InternationalHolding.query.filter_by(user_id=cg_user_id).all():
+            db.session.delete(h)
         db.session.delete(u9)
         db.session.commit()
 
@@ -885,6 +893,168 @@ def main():
     assert cg_page.status_code == 200
     assert 'Capital Gains' in cg_page.get_data(as_text=True)
     print("PASS: Capital Gains (LTCG/STCG) report page renders")
+
+    # ── 17. RSU/ESPP vesting tranches (Batch 9.7, Sep 2026) ──
+    with app.app_context():
+        from international_centre.models import VestingTranche
+        from international_centre.validators import validate_vesting_tranche
+
+        u10 = User.query.filter_by(email="international_vesting_test@example.com").first()
+        if u10:
+            InternationalHolding.query.filter_by(user_id=u10.id).delete()
+            db.session.delete(u10)
+            db.session.commit()
+        u10 = User(name="Vesting Test", email="international_vesting_test@example.com", password="unused")
+        db.session.add(u10)
+        db.session.commit()
+        vest_user_id = u10.id
+
+        rsu_holding, err = services.create_holding(vest_user_id, {
+            "asset_type": InternationalAssetType.RSU_ESPP,
+            "name": "Acme Corp RSU", "ticker": "ACME", "country": "United States",
+            "native_currency": "USD", "quantity": "0", "avg_cost_native": "0",
+        })
+        assert err is None, err
+        assert rsu_holding.is_rsu_espp is True
+
+        # RSU tranche -- free grant, no purchase price.
+        rsu_tranche = services.add_vesting_tranche(rsu_holding, {
+            "plan_type": "RSU", "vest_date": "2025-06-01", "quantity": "100", "fmv_native": "50",
+        })
+        assert rsu_tranche.perquisite_value_native == 5000.0, rsu_tranche.perquisite_value_native  # 50*100, no purchase price
+        assert rsu_tranche.cost_basis_native == 5000.0, rsu_tranche.cost_basis_native
+        print("PASS: an RSU tranche's perquisite value is its full FMV (no purchase price to net out)")
+
+        # ESPP tranche -- discounted purchase.
+        espp_tranche = services.add_vesting_tranche(rsu_holding, {
+            "plan_type": "ESPP", "vest_date": "2025-07-01", "quantity": "50",
+            "fmv_native": "60", "purchase_price_native": "51",
+        })
+        assert espp_tranche.perquisite_value_native == 450.0, espp_tranche.perquisite_value_native  # (60-51)*50
+        assert espp_tranche.cost_basis_native == 3000.0, espp_tranche.cost_basis_native  # FMV*qty, not price paid*qty
+        print("PASS: an ESPP tranche's perquisite value is just the discount, but its capital-gains cost basis is still full FMV")
+
+        # Validator: purchase price can't exceed FMV.
+        bad_vest_errors = validate_vesting_tranche({
+            "plan_type": "ESPP", "vest_date": "2025-07-01", "quantity": "50",
+            "fmv_native": "60", "purchase_price_native": "70",
+        })
+        assert any("cannot exceed" in e for e in bad_vest_errors), bad_vest_errors
+        print("PASS: validate_vesting_tranche() rejects a purchase price above the FMV")
+
+        # get_vesting_perquisite_summary() aggregates both tranches for the FY.
+        perq_summary = services.get_vesting_perquisite_summary(vest_user_id, fy_start_year=2025)
+        assert perq_summary["fy_label"] == "FY 2025-26", perq_summary["fy_label"]
+        assert len(perq_summary["rows"]) == 2, perq_summary["rows"]
+        assert perq_summary["total_perquisite_inr"] == round((5000.0 + 450.0) * 83.0, 2), perq_summary
+        print(f"PASS: get_vesting_perquisite_summary() totals both tranches' perquisite value for the FY (₹{perq_summary['total_perquisite_inr']:,.0f})")
+
+        # update_vesting_tranche() / delete_vesting_tranche()
+        services.update_vesting_tranche(espp_tranche, {
+            "plan_type": "ESPP", "vest_date": "2025-07-01", "quantity": "50",
+            "fmv_native": "60", "purchase_price_native": "55",
+        })
+        assert espp_tranche.perquisite_value_native == 250.0, espp_tranche.perquisite_value_native  # (60-55)*50
+        print("PASS: update_vesting_tranche() recomputes perquisite_value_native from the edited fields")
+
+        # FIFO integration with classify_capital_gains() (Batch 9.6): a
+        # SELL must draw from vesting tranches exactly like a BUY lot,
+        # cost-based at FMV -- oldest lot (the RSU tranche) first.
+        services.add_transaction(rsu_holding, {
+            "date": "2026-08-01", "txn_type": "SELL", "quantity": "120", "price_native": "70", "amount_native": "8400",
+        })
+        db.session.commit()
+
+        gains = services.classify_capital_gains(rsu_holding)
+        assert len(gains) == 2, gains
+        rsu_gain = next(g for g in gains if g["acquisition_date"] == date(2025, 6, 1))
+        espp_gain = next(g for g in gains if g["acquisition_date"] == date(2025, 7, 1))
+        assert rsu_gain["quantity"] == 100.0, rsu_gain  # fully consumes the older (RSU) lot first -- FIFO
+        assert rsu_gain["cost_basis_native"] == 5000.0, rsu_gain  # 100 * FMV 50, not a price "paid"
+        assert rsu_gain["classification"] == "STCG", rsu_gain  # 2025-06-01 -> 2026-08-01 is under 24 months
+        assert espp_gain["quantity"] == 20.0, espp_gain  # remaining 20 units drawn from the ESPP lot
+        assert espp_gain["cost_basis_native"] == 1200.0, espp_gain  # 20 * FMV 60 -- FMV, not the 55/unit actually paid
+        print("PASS: classify_capital_gains() FIFO-matches a SELL against vesting tranches (cost-based at FMV) exactly like a BUY lot, oldest first")
+
+        for h in InternationalHolding.query.filter_by(user_id=vest_user_id).all():
+            db.session.delete(h)
+        db.session.delete(u10)
+        db.session.commit()
+
+    # ── 18. HTTP: vesting tranche CRUD, perquisite report, dashboard/LRS-history charts ──
+    vest_add_page = client.get('/international/holdings/add')
+    vest_csrf0 = get_csrf(vest_add_page.data)
+    r = client.post('/international/holdings/add', data={
+        'csrf_token': vest_csrf0, 'asset_type': InternationalAssetType.RSU_ESPP,
+        'name': 'Globex Corp RSU', 'ticker': 'GLBX', 'country': 'United States',
+        'native_currency': 'USD', 'quantity': '1', 'avg_cost_native': '1',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        vest_h = InternationalHolding.query.filter_by(user_id=u2.id, name='Globex Corp RSU').first()
+        assert vest_h is not None
+        vest_h_id = vest_h.id
+
+    vest_detail = client.get(f'/international/holdings/{vest_h_id}')
+    assert 'Vesting Tranches' in vest_detail.get_data(as_text=True)
+    vest_add_csrf = get_csrf(vest_detail.data)
+    r = client.post(f'/international/holdings/{vest_h_id}/vesting/add', data={
+        'csrf_token': vest_add_csrf, 'plan_type': 'RSU', 'vest_date': '2026-05-01',
+        'quantity': '25', 'fmv_native': '80',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        added_tranche = VestingTranche.query.filter_by(holding_id=vest_h_id).first()
+        assert added_tranche is not None
+        assert added_tranche.fmv_native == 80.0
+        tranche_id = added_tranche.id
+    print("PASS: vesting tranche add via real HTTP form works")
+
+    vest_detail2 = client.get(f'/international/holdings/{vest_h_id}')
+    vest_edit_csrf = get_csrf(vest_detail2.data)
+    r = client.post(f'/international/vesting/{tranche_id}/edit', data={
+        'csrf_token': vest_edit_csrf, 'plan_type': 'RSU', 'vest_date': '2026-05-02',
+        'quantity': '25', 'fmv_native': '85',
+    }, follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        edited_tranche = db.session.get(VestingTranche, tranche_id)
+        assert edited_tranche.fmv_native == 85.0, edited_tranche.fmv_native
+    print("PASS: vesting tranche edit via real HTTP form works")
+
+    perq_page = client.get('/international/vesting-perquisite')
+    assert perq_page.status_code == 200
+    assert 'Perquisite' in perq_page.get_data(as_text=True)
+    print("PASS: RSU/ESPP Perquisite report page renders")
+
+    vest_detail3 = client.get(f'/international/holdings/{vest_h_id}')
+    vest_del_csrf = get_csrf(vest_detail3.data)
+    r = client.post(f'/international/vesting/{tranche_id}/delete', data={'csrf_token': vest_del_csrf}, follow_redirects=True)
+    assert r.status_code == 200
+    with app.app_context():
+        assert db.session.get(VestingTranche, tranche_id) is None
+    print("PASS: vesting tranche delete via real HTTP form works")
+
+    # Dashboard now carries Asset Allocation / Currency Exposure charts
+    # (Batch 9.8), and remittances carries the multi-year LRS history.
+    dash_page = client.get('/international/')
+    dash_body = dash_page.get_data(as_text=True)
+    assert 'assetAllocationChart' in dash_body and 'currencyExposureChart' in dash_body
+    print("PASS: International dashboard renders the Asset Allocation and Currency Exposure charts")
+
+    lrs_hist_body = client.get('/international/remittances').get_data(as_text=True)
+    assert 'LRS History' in lrs_hist_body and 'lrsHistoryChart' in lrs_hist_body
+    print("PASS: Remittances page renders the multi-year LRS History section")
+
+    with app.app_context():
+        history = services.get_lrs_history(u2.id, years=5)
+        assert len(history) == 5, history
+        # Every year is present even with zero remittances -- a quiet
+        # year must show as $0, not be skipped -- and years are oldest
+        # first, ending with the current FY.
+        assert all("total_usd" in yr and "fy_label" in yr for yr in history)
+        assert history[-1]["fy_start"] > history[0]["fy_start"], history
+    print("PASS: get_lrs_history() returns all requested years oldest-first, including years with zero remittances")
 
     # ── Cleanup ──
     with app.app_context():
