@@ -5,10 +5,12 @@ Pure functions, no DB/network access — return a list of error strings
 (empty list = valid), matching the convention used across every other
 module's validators.py.
 """
+import os
 from datetime import datetime
 
 from international_centre.models import (
     InternationalAssetType, InternationalTxnType, RemittancePurpose,
+    DocumentType,
 )
 from fx_rates import SUPPORTED_CURRENCIES
 from wealth.timezone_utils import today_ist
@@ -144,5 +146,35 @@ def validate_remittance(data):
     purpose = (data.get("purpose") or "").strip()
     if purpose not in RemittancePurpose.ALL:
         errors.append("Please select a valid purpose.")
+
+    return errors
+
+
+def validate_document(file, doc_type):
+    """Validate an uploaded document. file: werkzeug FileStorage.
+    Same allowed-extensions/size-limit rules as every other module's
+    Document Vault (own copy, per convention)."""
+    errors = []
+
+    if not file or not file.filename:
+        errors.append("No file selected.")
+        return errors
+
+    if doc_type not in DocumentType.ALL:
+        errors.append(f"Invalid document type: {doc_type}.")
+
+    allowed = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx"}
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in allowed:
+        errors.append(
+            f"File type '{ext}' not allowed. "
+            f"Allowed: PDF, JPG, JPEG, PNG, DOC, DOCX, XLS, XLSX."
+        )
+
+    file.seek(0, 2)
+    size = file.tell()
+    file.seek(0)
+    if size > 25 * 1024 * 1024:
+        errors.append("File size exceeds 25MB limit.")
 
     return errors

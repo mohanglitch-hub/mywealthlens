@@ -7,7 +7,11 @@ cross-importing another module's copies. currency_display.py IS a
 genuinely shared root-level module (used the same way by every module
 here — see its own docstring) so it's imported directly, not copied.
 """
+import os
+import uuid
+import mimetypes
 from datetime import datetime as _dt, date as _date
+from flask import current_app
 
 
 def format_date(d, fmt="%d %b %Y"):
@@ -54,6 +58,73 @@ COUNTRIES = [
     "Australia", "Canada", "Germany", "France", "Netherlands", "Ireland",
     "Switzerland", "Japan", "Hong Kong", "Other",
 ]
+
+
+# ── Document Storage (Batch 9.3, Sep 2026) ───────────────────────────
+# Mirrors insurance_centre/retirement_centre's utils.py exactly —
+# own copy per this project's established per-module convention.
+
+PREVIEWABLE_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+
+
+def get_document_upload_path(holding_id):
+    """Local directory for a holding's documents. Creates it if needed.
+    Path: instance/documents/international/<holding_id>/"""
+    base = os.path.join(
+        current_app.instance_path,
+        "documents", "international", str(holding_id)
+    )
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+def generate_stored_filename(original_filename):
+    """UUID-based stored filename (prevents collisions), extension preserved."""
+    ext = os.path.splitext(original_filename)[1].lower()
+    return f"{uuid.uuid4()}{ext}"
+
+
+def save_document_file(file, holding_id):
+    """Save an uploaded file to local storage.
+    Returns (stored_name, file_path, file_size) on success.
+    Raises OSError on failure."""
+    upload_dir  = get_document_upload_path(holding_id)
+    stored_name = generate_stored_filename(file.filename)
+    file_path   = os.path.join(upload_dir, stored_name)
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+    return stored_name, file_path, file_size
+
+
+def delete_document_file(file_path):
+    """Delete a document file from local storage. Silent if missing."""
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def is_previewable(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in PREVIEWABLE_EXTENSIONS
+
+
+def get_preview_mimetype(filename):
+    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+
+def secure_file_path(file_path, holding_id):
+    """Validate file_path is within the expected holding documents
+    directory. Prevents directory traversal attacks."""
+    expected_base = os.path.join(
+        current_app.instance_path, "documents", "international", str(holding_id)
+    )
+    real_path = os.path.realpath(file_path)
+    real_base = os.path.realpath(expected_base)
+    return real_path.startswith(real_base)
 
 
 def fetch_ticker_price(ticker):

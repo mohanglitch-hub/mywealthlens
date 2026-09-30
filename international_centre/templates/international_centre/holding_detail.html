@@ -90,6 +90,86 @@
 </div>
 {% endif %}
 
+<div class="ic-card" id="documentsSection">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+    <div class="section-label" style="margin-bottom:0;">Documents
+      {% if documents %}
+      <span style="font-size:0.75rem; color:var(--muted); font-weight:400; margin-left:8px; text-transform:none; letter-spacing:normal;">
+        {{ documents|length }} file{{ 's' if documents|length != 1 else '' }}
+      </span>
+      {% endif %}
+    </div>
+    <button type="button" class="ic-btn-secondary" onclick="icToggleUploadForm()">+ Upload Document</button>
+  </div>
+
+  <div id="icUploadForm" style="display:none; margin-bottom:20px;">
+    <form method="POST" action="{{ url_for('international_centre.upload_document', holding_id=holding.id) }}"
+          enctype="multipart/form-data" data-mwl-encrypt="true">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="ic-txn-form" style="align-items:end;">
+        <div class="form-group">
+          <label>Document Type</label>
+          <select name="doc_type" required>
+            <option value="">— Select Type —</option>
+            {% for dt in doc_types %}<option value="{{ dt }}">{{ dt }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Choose File</label>
+          <input type="file" name="document" required
+                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" />
+        </div>
+        <div class="form-group">
+          <label>Name / Title (optional)</label>
+          <input type="text" name="doc_title" placeholder="e.g. Brokerage Statement Q3 2026" />
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:10px;">
+        <label>Description (optional)</label>
+        <input type="text" name="doc_notes" style="width:100%;" placeholder="e.g. Year-end statement from Interactive Brokers" />
+      </div>
+      <p style="font-size:0.75rem; color:var(--muted2); margin-top:8px;">Allowed: PDF, JPG, PNG, DOC, DOCX, XLS, XLSX · Max size: 25 MB</p>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px;">Upload</button>
+        <button type="button" class="ic-btn-secondary" onclick="icToggleUploadForm()">Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  {% if documents %}
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead><tr><th>Type</th><th>File Name</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+      <tbody>
+        {% for doc in documents %}
+        {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+        <tr>
+          <td>{{ doc.doc_type }}</td>
+          <td>{{ doc.display_name }}{% if doc.notes %}<div style="font-size:0.75rem; color:var(--muted); margin-top:2px;">{{ doc.notes }}</div>{% endif %}</td>
+          <td>{{ doc.file_size_display }}</td>
+          <td>{{ format_date(doc.uploaded_at) }}</td>
+          <td style="display:flex; gap:10px;">
+            {% if ext in ['pdf','jpg','jpeg','png'] %}
+            <a href="{{ url_for('international_centre.preview_document', doc_id=doc.id) }}" target="_blank" class="ic-link-btn" style="color:var(--accent);">Preview</a>
+            {% endif %}
+            <a href="{{ url_for('international_centre.download_document', doc_id=doc.id) }}" class="ic-link-btn" style="color:var(--accent);">Download</a>
+            <form method="POST" action="{{ url_for('international_centre.delete_document', doc_id=doc.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="next" value="holding_detail" />
+              <button type="button" class="ic-link-btn"
+                      onclick="icConfirmAction(this.form, 'Delete Document?', 'This document will be permanently removed from local storage.', 'Delete Document')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem;">No documents uploaded yet — statements, purchase confirmations, tax forms, etc.</p>
+  {% endif %}
+</div>
+
 <div class="ic-card">
   <div class="section-label">Add Transaction</div>
   <form method="POST" action="{{ url_for('international_centre.add_transaction', holding_id=holding.id) }}" class="ic-txn-form">
@@ -224,6 +304,13 @@
     const editRow = document.getElementById('txnEditRow' + txnId);
     if (!editRow) return;
     editRow.style.display = editRow.style.display === 'none' ? 'table-row' : 'none';
+  }
+
+  // Batch 9.3 (Sep 2026) — Document Vault upload form toggle.
+  function icToggleUploadForm() {
+    const form = document.getElementById('icUploadForm');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
   }
 </script>
 {% endblock %}

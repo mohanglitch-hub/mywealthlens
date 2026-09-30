@@ -81,6 +81,21 @@ class InternationalAssetType:
     TICKER_BASED = {US_STOCK, US_ETF, RSU_ESPP}
 
 
+class DocumentType:
+    """Batch 9.3 (Sep 2026) — Document Vault for international holdings.
+    Own list per this module's document-taxonomy convention (mirrors
+    insurance_centre.DocumentType / retirement_centre's equivalent —
+    each module keeps its own, deliberately not shared)."""
+    PURCHASE_CONFIRMATION = "Purchase Confirmation / Statement"
+    ACCOUNT_STATEMENT     = "Account Statement"
+    TAX_DOCUMENT          = "Tax Document (1099 / W-8BEN / Foreign Tax)"
+    OWNERSHIP_DOCUMENT    = "Property / Ownership Document"
+    OTHER_DOCUMENTS       = "Other Documents"
+
+    ALL = [PURCHASE_CONFIRMATION, ACCOUNT_STATEMENT, TAX_DOCUMENT,
+           OWNERSHIP_DOCUMENT, OTHER_DOCUMENTS]
+
+
 class InternationalTxnType:
     BUY = "BUY"
     SELL = "SELL"
@@ -169,6 +184,10 @@ class InternationalHolding(db.Model):
     )
     nominees = db.relationship(
         "InternationalHoldingNominee", backref="holding", lazy="dynamic",
+        cascade="all, delete-orphan",
+    )
+    documents = db.relationship(
+        "InternationalHoldingDocument", backref="holding", lazy=True,
         cascade="all, delete-orphan",
     )
 
@@ -302,3 +321,80 @@ class InternationalValueSnapshot(db.Model):
 
     def __repr__(self):
         return f"<InternationalSnapshot holding={self.holding_id} {self.date} ${self.usd_value}>"
+
+
+class InternationalHoldingDocument(db.Model):
+    """Batch 9.3 (Sep 2026) — Document Vault for international holdings,
+    closing the last parity gap flagged when this module first shipped
+    (Insurance, Retirement and Wealth all had one; this module had
+    none). Local document metadata only — file bytes never touch the
+    database, same as every other module's Document Vault. Files live
+    at instance/documents/international/<holding_id>/<stored_name>.
+
+    Unlike InsuranceDocument's ondelete="SET NULL" (which keeps a
+    document row around for audit after its policy is hard-deleted),
+    this table CASCADEs on holding delete via the ORM relationship
+    above (cascade="all, delete-orphan") — the same choice
+    RetirementDocument made, for the same reason: like Retirement
+    Centre, this module's own delete_holding_permanently() already
+    requires the holding to be archived first (Archive -> Delete
+    Permanently lifecycle), so there is no risk of silently losing
+    live audit trail data, and simplicity wins.
+
+    iv / is_encrypted: schema-level parity with RetirementDocument's
+    Document Vault client-side encryption columns (Sep 2026 production-
+    readiness work — see static/js/mwl-crypto.js), added here so this
+    module doesn't need a follow-up migration once that feature is
+    switched on for it too. IMPORTANT — confirmed during this batch's
+    audit: the actual browser-side code that would populate these
+    fields on upload/download (referenced in Wealth/Retirement's own
+    route comments as static/js/mwl-doc-encrypt-upload.js) does not
+    exist anywhere in the repo. mwl-crypto.js only exposes the
+    encrypt/decrypt primitives; nothing calls them yet. So today, here
+    exactly as in Wealth/Retirement, is_encrypted is always False and
+    documents are stored as plain bytes — this is a real, pre-existing
+    gap across the whole app, not something introduced or fixed by
+    this batch. Flagged to Mohan; out of scope for Batch 9.3 to fix."""
+    __tablename__ = "international_holding_document"
+    __table_args__ = (
+        db.Index("ix_intl_doc_holding", "holding_id"),
+        db.Index("ix_intl_doc_user",    "user_id"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    holding_id = db.Column(db.Integer,
+                            db.ForeignKey("international_holding.id"),
+                            nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    doc_type      = db.Column(db.String(50), nullable=False)  # DocumentType.ALL
+    title         = db.Column(db.String(255), nullable=True)
+    # ^ user-facing display name, distinct from the uploaded file's own
+    #   filename — falls back to original_name when not provided
+    original_name = db.Column(db.String(255), nullable=False)
+    stored_name   = db.Column(db.String(255), nullable=False)
+    file_path     = db.Column(db.String(500), nullable=False)
+    file_size     = db.Column(db.Integer, nullable=True)
+    notes         = db.Column(db.String(500), nullable=True)
+
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    iv           = db.Column(db.String(64), nullable=True)
+    is_encrypted = db.Column(db.Boolean, default=False, nullable=False)
+
+    @property
+    def display_name(self):
+        return self.title or self.original_name
+
+    @property
+    def file_size_display(self):
+        if not self.file_size:
+            return "Unknown"
+        if self.file_size < 1024:
+            return f"{self.file_size} B"
+        if self.file_size < 1024 * 1024:
+            return f"{self.file_size / 1024:.1f} KB"
+        return f"{self.file_size / (1024*1024):.1f} MB"
+
+    def __repr__(self):
+        return f"<InternationalHoldingDocument {self.original_name}>"

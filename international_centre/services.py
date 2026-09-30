@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
     InternationalValueSnapshot, InternationalHoldingNominee,
+    InternationalHoldingDocument,
     InternationalAssetType, InternationalTxnType, LRS_ANNUAL_LIMIT_USD,
 )
 from international_centre.utils import fy_bounds, fy_label, calendar_year_bounds, fetch_ticker_price
@@ -503,3 +504,80 @@ def take_daily_snapshot(user_id=None):
         count += 1
     db.session.commit()
     return count
+
+
+# ── Document Vault (Batch 9.3, Sep 2026) ─────────────────────────────
+# Closes the last parity gap flagged when this module first shipped —
+# see models.py's InternationalHoldingDocument docstring for the
+# iv/is_encrypted schema-parity note and the confirmed encryption-JS
+# gap (pre-existing across the whole app, not introduced here).
+
+def save_document_metadata(db, holding, user_id, doc_type, original_name,
+                            stored_name, file_path, file_size=None,
+                            notes=None, title=None, iv=None, is_encrypted=False):
+    """Persist a document's metadata after the file itself has already
+    been saved to local disk by utils.save_document_file()."""
+    doc = InternationalHoldingDocument(
+        holding_id=holding.id, user_id=user_id, doc_type=doc_type,
+        title=title, original_name=original_name,
+        stored_name=stored_name, file_path=file_path,
+        file_size=file_size, notes=notes,
+        iv=iv or None, is_encrypted=bool(is_encrypted),
+    )
+    db.session.add(doc)
+    db.session.commit()
+    return doc
+
+
+def delete_document(db, doc, user_id):
+    """Remove document metadata. Caller must delete the actual file
+    first (see utils.delete_document_file) — matches every other
+    module's Document Vault delete_document()."""
+    if doc.user_id != user_id:
+        return False, "You do not have permission to delete this document."
+    db.session.delete(doc)
+    db.session.commit()
+    return True, None
+
+
+def get_vault_documents(user_id, q=None, asset_type=None, doc_type=None):
+    """All documents across every one of the user's international
+    holdings, joined with holding info for display and filtering.
+    Always scoped by user_id (IDOR check)."""
+    query = (InternationalHoldingDocument.query
+             .join(InternationalHolding,
+                   InternationalHoldingDocument.holding_id == InternationalHolding.id)
+             .filter(InternationalHoldingDocument.user_id == user_id))
+
+    if doc_type:
+        query = query.filter(InternationalHoldingDocument.doc_type == doc_type)
+
+    docs = query.order_by(InternationalHoldingDocument.uploaded_at.desc()).all()
+
+    if asset_type:
+        docs = [d for d in docs if d.holding.asset_type == asset_type]
+
+    if q:
+        ql = q.lower()
+        docs = [d for d in docs
+                if ql in (d.display_name or "").lower()
+                or ql in (d.holding.name or "").lower()
+                or ql in (d.doc_type or "").lower()]
+
+    return docs
+
+
+def vault_summary(user_id):
+    """Total document count + per-asset-type counts for the Vault's
+    summary cards. Never fabricated — counts real rows only."""
+    all_docs = get_vault_documents(user_id)
+    by_asset_type = []
+    for at in InternationalAssetType.ALL:
+        count = sum(1 for d in all_docs if d.holding.asset_type == at)
+        if count:
+            by_asset_type.append({"asset_type": at, "count": count})
+
+    return {
+        "total": len(all_docs),
+        "by_asset_type": by_asset_type,
+    }
