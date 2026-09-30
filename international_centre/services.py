@@ -25,13 +25,19 @@ sensitive.
 """
 from datetime import datetime, timedelta
 
+from collections import deque
+from datetime import date as _date
+
 from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
     InternationalValueSnapshot, InternationalHoldingNominee,
     InternationalHoldingDocument,
     InternationalAssetType, InternationalTxnType, LRS_ANNUAL_LIMIT_USD,
+    TCS_THRESHOLD_INR, TCS_RATE,
 )
-from international_centre.utils import fy_bounds, fy_label, calendar_year_bounds, fetch_ticker_price
+from international_centre.utils import (
+    fy_bounds, fy_label, calendar_year_bounds, fetch_ticker_price, is_long_term,
+)
 from international_xirr import holding_xirr, portfolio_xirr as _portfolio_xirr_calc
 from fx_rates import fetch_fx_rate, FxRateError
 from wealth.timezone_utils import today_ist
@@ -304,16 +310,42 @@ def portfolio_usd_xirr(user_id):
 
 # ── Transactions ────────────────────────────────────────────────────
 
+def _resolve_dividend_amount(data):
+    """Batch 9.5 (Sep 2026) — DIVIDEND only. If Gross Amount / Tax
+    Withheld were given, the real cash flow (amount_native, what XIRR
+    uses) is DERIVED as gross - withheld rather than taken from the
+    form's amount_native field directly, so the two can never
+    disagree. Falls back to amount_native exactly as entered when
+    gross/withheld are blank (every dividend logged before this batch,
+    and any BUY/SELL, take this path unchanged). Returns
+    (amount_native, gross_amount_native_or_None, tax_withheld_or_None)."""
+    gross_raw = (data.get("gross_amount_native") or "").strip()
+    if not gross_raw:
+        return float(data["amount_native"]), None, None
+    gross = float(gross_raw)
+    withheld_raw = (data.get("tax_withheld_native") or "").strip()
+    withheld = float(withheld_raw) if withheld_raw else 0.0
+    return round(gross - withheld, 2), gross, withheld
+
+
 def add_transaction(holding, data):
     db = _db()
+    txn_type = data["txn_type"].strip().upper()
+    if txn_type == InternationalTxnType.DIVIDEND:
+        amount_native, gross, withheld = _resolve_dividend_amount(data)
+    else:
+        amount_native, gross, withheld = float(data["amount_native"]), None, None
+
     txn = InternationalTransaction(
         user_id=holding.user_id,
         holding_id=holding.id,
         date=datetime.strptime(data["date"], "%Y-%m-%d").date(),
-        txn_type=data["txn_type"].strip().upper(),
+        txn_type=txn_type,
         quantity=float(data["quantity"]) if (data.get("quantity") or "").strip() else None,
         price_native=float(data["price_native"]) if (data.get("price_native") or "").strip() else None,
-        amount_native=float(data["amount_native"]),
+        amount_native=amount_native,
+        gross_amount_native=gross,
+        tax_withheld_native=withheld,
     )
     db.session.add(txn)
     db.session.flush()
@@ -324,11 +356,19 @@ def add_transaction(holding, data):
 
 def update_transaction(txn, data):
     db = _db()
+    txn_type = data["txn_type"].strip().upper()
+    if txn_type == InternationalTxnType.DIVIDEND:
+        amount_native, gross, withheld = _resolve_dividend_amount(data)
+    else:
+        amount_native, gross, withheld = float(data["amount_native"]), None, None
+
     txn.date = datetime.strptime(data["date"], "%Y-%m-%d").date()
-    txn.txn_type = data["txn_type"].strip().upper()
+    txn.txn_type = txn_type
     txn.quantity = float(data["quantity"]) if (data.get("quantity") or "").strip() else None
     txn.price_native = float(data["price_native"]) if (data.get("price_native") or "").strip() else None
-    txn.amount_native = float(data["amount_native"])
+    txn.amount_native = amount_native
+    txn.gross_amount_native = gross
+    txn.tax_withheld_native = withheld
     recompute_holding_financials(txn.holding)
     db.session.commit()
     return txn
@@ -345,6 +385,33 @@ def delete_transaction(txn):
 
 # ── Remittances (LRS) ───────────────────────────────────────────────
 
+def _compute_tcs(user_id, remit_date, amount_inr):
+    """Batch 9.4 (Sep 2026). Marginal TCS on the portion of THIS
+    remittance that pushes the financial year's running total past
+    TCS_THRESHOLD_INR — not a flat 20% of the whole remittance just
+    because the FY total is over the threshold. Only the amount ABOVE
+    the threshold is taxed at TCS_RATE, matching how TCS actually
+    works. `prior_total_inr` sums every OTHER remittance already
+    logged for this user in the same FY, regardless of its own date
+    relative to this one — same "what's logged so far" semantics as
+    get_lrs_status(), and simplest for a user entering remittances out
+    of strict chronological order."""
+    fy_start, fy_end = fy_bounds(remit_date)
+    prior_total_inr = (
+        RemittanceRecord.query
+        .filter_by(user_id=user_id)
+        .filter(RemittanceRecord.date >= fy_start, RemittanceRecord.date <= fy_end)
+        .with_entities(RemittanceRecord.amount_inr)
+        .all()
+    )
+    prior_total_inr = sum(r[0] for r in prior_total_inr)
+    new_cumulative = prior_total_inr + amount_inr
+    if new_cumulative <= TCS_THRESHOLD_INR:
+        return 0.0
+    taxable_portion = min(amount_inr, new_cumulative - TCS_THRESHOLD_INR)
+    return round(taxable_portion * TCS_RATE, 2)
+
+
 def add_remittance(user_id, data):
     db = _db()
     remit_date = datetime.strptime(data["date"], "%Y-%m-%d").date()
@@ -357,6 +424,8 @@ def add_remittance(user_id, data):
     except FxRateError:
         pass  # amount_usd stays 0.0 -- route flashes a warning that LRS tracking is incomplete for this entry until it's refreshed
 
+    tcs_amount_inr = _compute_tcs(user_id, remit_date, amount_inr)
+
     remittance = RemittanceRecord(
         user_id=user_id,
         holding_id=int(data["holding_id"]) if (data.get("holding_id") or "").strip() else None,
@@ -367,6 +436,7 @@ def add_remittance(user_id, data):
         purpose=data["purpose"].strip(),
         remitting_bank=(data.get("remitting_bank") or "").strip() or None,
         notes=(data.get("notes") or "").strip() or None,
+        tcs_amount_inr=tcs_amount_inr,
     )
     db.session.add(remittance)
     db.session.commit()
@@ -392,6 +462,7 @@ def get_lrs_status(user_id, anchor_date=None):
     total_usd = sum(r.amount_usd for r in remittances)
     remaining_usd = max(0.0, LRS_ANNUAL_LIMIT_USD - total_usd)
     pct_used = min(100.0, round((total_usd / LRS_ANNUAL_LIMIT_USD) * 100, 1)) if LRS_ANNUAL_LIMIT_USD else 0.0
+    total_tcs_inr = round(sum(r.tcs_amount_inr or 0.0 for r in remittances), 2)  # Batch 9.4
 
     if total_usd >= LRS_ANNUAL_LIMIT_USD:
         status = "exceeded"
@@ -404,7 +475,7 @@ def get_lrs_status(user_id, anchor_date=None):
         "fy_label": fy_label(anchor_date), "fy_start": fy_start, "fy_end": fy_end,
         "total_usd": round(total_usd, 2), "remaining_usd": round(remaining_usd, 2),
         "limit_usd": LRS_ANNUAL_LIMIT_USD, "pct_used": pct_used, "status": status,
-        "remittances": remittances,
+        "remittances": remittances, "total_tcs_inr": total_tcs_inr,
     }
 
 
@@ -580,4 +651,175 @@ def vault_summary(user_id):
     return {
         "total": len(all_docs),
         "by_asset_type": by_asset_type,
+    }
+
+
+# ── DTAA / Form 67 support (Batch 9.5, Sep 2026) ─────────────────────
+# Foreign dividend withholding tax, summarized by INDIAN financial year
+# (1 Apr - 31 Mar) — dividend income is offered to tax in the FY it's
+# received, unlike Schedule FA's calendar-year reporting period (see
+# models.py's module docstring for why those two "years" are kept
+# deliberately separate throughout this module).
+#
+# IMPORTANT scope note: this deliberately stops at "here is your gross
+# foreign dividend and tax withheld for the year" — the actual DTAA
+# foreign tax credit is capped at the LOWER of (a) tax actually paid
+# abroad and (b) the Indian tax payable on that same income, which
+# depends on Mohan's full tax computation (slab, other income,
+# deductions) that this module has no visibility into. Computing a
+# specific "creditable amount" here would be a confident-looking wrong
+# number for anyone in the higher slab bracket or with brought-forward
+# losses. The report gives the two INPUT figures Form 67 actually asks
+# for and stops there — same honesty as Schedule FA's own disclaimer.
+
+def get_dtaa_summary(user_id, fy_start_year):
+    """Per-holding gross dividend / tax withheld / net received for the
+    Indian FY starting 1 Apr `fy_start_year`, in both native currency
+    and an approximate INR equivalent (bridged native -> USD -> INR via
+    the holding's own cached fx_rate_used and currency_display's
+    usd_to_inr(), same approximation path as portfolio_inr_value() —
+    NOT the CBDT-prescribed SBI TT buying rate on each dividend's own
+    date, which is what an actual Form 67 filing requires)."""
+    import currency_display
+    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
+
+    rows = []
+    any_missing_rate = False
+    for h in holdings:
+        divs = [t for t in h.transactions
+                if t.txn_type == InternationalTxnType.DIVIDEND and fy_start <= t.date <= fy_end]
+        if not divs:
+            continue
+
+        gross_native = sum((d.gross_amount_native if d.gross_amount_native is not None else d.amount_native) for d in divs)
+        withheld_native = sum((d.tax_withheld_native or 0.0) for d in divs)
+        net_native = sum(d.amount_native for d in divs)
+
+        rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else None)
+        if rate is None:
+            any_missing_rate = True
+            gross_inr = withheld_inr = net_inr = None
+        else:
+            gross_inr = currency_display.usd_to_inr(round(gross_native * rate, 2))
+            withheld_inr = currency_display.usd_to_inr(round(withheld_native * rate, 2))
+            net_inr = currency_display.usd_to_inr(round(net_native * rate, 2))
+
+        rows.append({
+            "holding": h, "country": h.country or "—", "currency": h.native_currency,
+            "gross_native": round(gross_native, 2), "withheld_native": round(withheld_native, 2),
+            "net_native": round(net_native, 2),
+            "gross_inr": gross_inr, "withheld_inr": withheld_inr, "net_inr": net_inr,
+        })
+
+    total_gross_inr = sum(r["gross_inr"] for r in rows if r["gross_inr"] is not None)
+    total_withheld_inr = sum(r["withheld_inr"] for r in rows if r["withheld_inr"] is not None)
+
+    return {
+        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
+        "rows": rows,
+        "total_gross_inr": round(total_gross_inr, 2), "total_withheld_inr": round(total_withheld_inr, 2),
+        "any_missing_rate": any_missing_rate,
+    }
+
+
+# ── Capital Gains Classification: LTCG / STCG (Batch 9.6, Sep 2026) ──
+# Indian tax rule for foreign (unlisted) equity/funds: LONG-term if
+# held for MORE than 24 months, else SHORT-term — a materially
+# different tax rule from listed Indian equity's 12-month LTCG
+# threshold, so this is genuinely its own classification, not a copy
+# of anything domestic stocks already have. FIFO lot matching (first
+# lot bought is the first lot sold) — the same convention Indian tax
+# law itself uses by default when specific-lot identification isn't
+# elected.
+
+def classify_capital_gains(holding):
+    """Returns a list of realized-gain records for one holding, oldest
+    SELL first, by matching each SELL against the earliest still-open
+    BUY lot(s) (FIFO) — a single SELL that spans more than one lot
+    produces one record per lot it draws from, since each lot can have
+    its own acquisition date and therefore its own LTCG/STCG
+    classification. Ticker-based holdings only (quantity is the whole
+    basis for lot-matching, and only ticker-based holdings' BUY/SELL
+    transactions carry a quantity — see holding_detail.html)."""
+    if not holding.is_ticker_based:
+        return []
+
+    txns = sorted(holding.transactions, key=lambda t: (t.date, t.id))
+    lots = deque()
+    gains = []
+
+    for t in txns:
+        if t.txn_type == InternationalTxnType.BUY:
+            if t.quantity and t.quantity > 0:
+                lots.append({"date": t.date, "qty": t.quantity, "unit_cost": t.amount_native / t.quantity})
+        elif t.txn_type == InternationalTxnType.SELL:
+            if not t.quantity or t.quantity <= 0:
+                continue
+            qty_to_sell = t.quantity
+            unit_proceeds = t.amount_native / t.quantity
+            while qty_to_sell > 1e-9 and lots:
+                lot = lots[0]
+                matched_qty = min(qty_to_sell, lot["qty"])
+                long_term = is_long_term(lot["date"], t.date)
+                gains.append({
+                    "sell_date": t.date, "acquisition_date": lot["date"],
+                    "quantity": round(matched_qty, 6),
+                    "classification": "LTCG" if long_term else "STCG",
+                    "cost_basis_native": round(matched_qty * lot["unit_cost"], 2),
+                    "proceeds_native": round(matched_qty * unit_proceeds, 2),
+                    "gain_native": round(matched_qty * (unit_proceeds - lot["unit_cost"]), 2),
+                })
+                lot["qty"] -= matched_qty
+                qty_to_sell -= matched_qty
+                if lot["qty"] <= 1e-9:
+                    lots.popleft()
+            # qty_to_sell > 0 here means a SELL for more than was ever
+            # bought through recorded transactions (e.g. the holding's
+            # opening quantity was seeded directly rather than via a
+            # BUY transaction) — that unmatched portion has no known
+            # cost basis, so it's silently left unclassified rather
+            # than guessing a cost basis of zero (which would overstate
+            # the gain). Same "never guess" philosophy as the rest of
+            # this module.
+
+    return gains
+
+
+def get_capital_gains_summary(user_id, fy_start_year):
+    """LTCG/STCG-classified realized gains across every ticker-based
+    holding, for SELLs falling in the Indian FY starting 1 Apr
+    `fy_start_year` (capital gains tax follows the year the asset was
+    SOLD, not a calendar year). gain_usd on each row is an
+    approximation via the holding's own cached fx_rate_used, same
+    caveat as portfolio_usd_xirr()."""
+    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
+
+    rows = []
+    any_missing_rate = False
+    for h in holdings:
+        gains = [g for g in classify_capital_gains(h) if fy_start <= g["sell_date"] <= fy_end]
+        if not gains:
+            continue
+        rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else None)
+        for g in gains:
+            g["holding"] = h
+            g["currency"] = h.native_currency
+            if rate is None:
+                any_missing_rate = True
+                g["gain_usd"] = None
+            else:
+                g["gain_usd"] = round(g["gain_native"] * rate, 2)
+        rows.extend(gains)
+
+    rows.sort(key=lambda g: g["sell_date"], reverse=True)
+    ltcg_total_usd = sum(g["gain_usd"] for g in rows if g["classification"] == "LTCG" and g["gain_usd"] is not None)
+    stcg_total_usd = sum(g["gain_usd"] for g in rows if g["classification"] == "STCG" and g["gain_usd"] is not None)
+
+    return {
+        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
+        "rows": rows,
+        "ltcg_total_usd": round(ltcg_total_usd, 2), "stcg_total_usd": round(stcg_total_usd, 2),
+        "any_missing_rate": any_missing_rate,
     }

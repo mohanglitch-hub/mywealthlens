@@ -28,7 +28,13 @@
   {% elif lrs_status.status == 'warning' %}
   <div class="ic-alert ic-alert-warning">You've used {{ lrs_status.pct_used }}% of this year's LRS limit.</div>
   {% endif %}
-  <div class="ic-disclaimer">This is a tracking aid built from what you've logged here — not a substitute for checking your actual remittance history with your bank/AD. The $250,000 figure is RBI's current published LRS cap and could change by future notification.</div>
+  {% if lrs_status.total_tcs_inr %}
+  <div class="ic-tcs-tile">
+    <span class="ic-tcs-label">TCS Collected This {{ lrs_status.fy_label }}</span>
+    <span class="ic-tcs-value">₹{{ '{:,.0f}'.format(lrs_status.total_tcs_inr) }}</span>
+  </div>
+  {% endif %}
+  <div class="ic-disclaimer">This is a tracking aid built from what you've logged here — not a substitute for checking your actual remittance history with your bank/AD. The $250,000 figure is RBI's current published LRS cap and could change by future notification. TCS is estimated at 20% on the portion of aggregate LRS remittances above ₹7,00,000 in the financial year (general-purpose remittances only — the lower 0.5%/5% rates for education-loan-funded or medical/education-non-loan remittances aren't modeled, since MyWealthLens can't tell those apart from the data recorded here). TCS collected is creditable against your final tax liability — confirm with a CA.</div>
 </div>
 
 <div class="ic-card">
@@ -69,13 +75,14 @@
   {% if lrs_status.remittances %}
   <div class="ic-table-wrap">
     <table class="ic-table">
-      <thead><tr><th>Date</th><th>Amount (INR)</th><th>Amount (USD)</th><th>Purpose</th><th>Bank</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Amount (INR)</th><th>Amount (USD)</th><th>TCS</th><th>Purpose</th><th>Bank</th><th></th></tr></thead>
       <tbody>
         {% for r in lrs_status.remittances %}
         <tr>
           <td>{{ format_date(r.date) }}</td>
           <td>₹{{ '{:,.0f}'.format(r.amount_inr) }}</td>
           <td>${{ '{:,.2f}'.format(r.amount_usd) }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(r.tcs_amount_inr) if r.tcs_amount_inr else '—' }}</td>
           <td>{{ r.purpose }}</td>
           <td>{{ r.remitting_bank or '—' }}</td>
           <td>
@@ -114,6 +121,9 @@
   .ic-alert-warning { background:var(--warning-bg); color:var(--warning); border:1px solid var(--warning); }
   .ic-alert-down { background:var(--down-bg); color:var(--down); border:1px solid var(--down); }
   .ic-disclaimer { font-size:0.75rem; color:var(--muted2); margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+  .ic-tcs-tile { display:flex; justify-content:space-between; align-items:center; background:var(--surface2); border-radius:8px; padding:10px 14px; margin-top:14px; }
+  .ic-tcs-label { font-size:0.8rem; color:var(--muted); font-weight:600; }
+  .ic-tcs-value { font-size:0.95rem; color:var(--text); font-weight:700; }
 
   .ic-txn-form { display:flex; gap:14px; flex-wrap:wrap; align-items:end; }
   .ic-txn-form .form-group { margin-bottom:0; min-width:150px; }

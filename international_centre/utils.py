@@ -53,6 +53,30 @@ def calendar_year_bounds(year):
     return _date(year, 1, 1), _date(year, 12, 31)
 
 
+def is_long_term(acquisition_date, sale_date):
+    """True if `sale_date` is MORE THAN 24 calendar months after
+    `acquisition_date` — the Indian tax-law threshold for foreign
+    (unlisted) equity/funds to qualify as long-term capital gains
+    (Sec 2(29A)/2(42A)) rather than short-term. Batch 9.6 (Sep 2026).
+
+    Deliberately calendar-month arithmetic, not a 730/731-day
+    approximation — a day-count check gets leap years and month-length
+    differences wrong right at the boundary, which is exactly where a
+    misclassification between LTCG and STCG (taxed very differently)
+    would actually matter. No new dependency: this is the same
+    add-N-months-then-compare logic python-dateutil's relativedelta
+    would do, written out directly rather than adding a dependency for
+    one function."""
+    month = acquisition_date.month - 1 + 24
+    year = acquisition_date.year + month // 12
+    month = month % 12 + 1
+    import calendar
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(acquisition_date.day, last_day)
+    threshold_date = _date(year, month, day)
+    return sale_date > threshold_date
+
+
 COUNTRIES = [
     "United States", "United Kingdom", "Singapore", "United Arab Emirates",
     "Australia", "Canada", "Germany", "France", "Netherlands", "Ireland",

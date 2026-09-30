@@ -24,7 +24,7 @@ from international_centre.models import (
 )
 from international_centre import services
 from international_centre.utils import (
-    format_date, COUNTRIES,
+    format_date, COUNTRIES, fy_bounds,
     save_document_file, delete_document_file, secure_file_path,
     is_previewable, get_preview_mimetype,
 )
@@ -367,6 +367,44 @@ def schedule_fa():
     return render_template(
         "international_centre/schedule_fa.html", summary=summary,
         format_date=format_date, current_year=today_ist().year,
+    )
+
+
+# ── DTAA / Form 67 Summary (Batch 9.5, Sep 2026) ─────────────────────
+
+@international_bp.route("/dtaa-summary")
+@login_required
+def dtaa_summary():
+    fy_raw = request.args.get("fy")
+    default_fy_start_year = fy_bounds(today_ist())[0].year
+    try:
+        fy_start_year = int(fy_raw) if fy_raw else default_fy_start_year
+    except ValueError:
+        fy_start_year = default_fy_start_year
+
+    summary = services.get_dtaa_summary(current_user.id, fy_start_year)
+    return render_template(
+        "international_centre/dtaa_summary.html", summary=summary,
+        format_date=format_date, current_fy_start_year=default_fy_start_year,
+    )
+
+
+# ── Capital Gains (LTCG/STCG) Report (Batch 9.6, Sep 2026) ───────────
+
+@international_bp.route("/capital-gains")
+@login_required
+def capital_gains():
+    fy_raw = request.args.get("fy")
+    default_fy_start_year = fy_bounds(today_ist())[0].year
+    try:
+        fy_start_year = int(fy_raw) if fy_raw else default_fy_start_year
+    except ValueError:
+        fy_start_year = default_fy_start_year
+
+    summary = services.get_capital_gains_summary(current_user.id, fy_start_year)
+    return render_template(
+        "international_centre/capital_gains.html", summary=summary,
+        format_date=format_date, current_fy_start_year=default_fy_start_year,
     )
 
 
