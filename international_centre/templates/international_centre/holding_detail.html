@@ -38,6 +38,20 @@
     <div class="ic-summary-label">Invested ({{ holding.native_currency }})</div>
     <div class="ic-summary-value">{{ '{:,.2f}'.format(holding.invested_native) if holding.invested_native is not none else '—' }}</div>
   </div>
+  {% if pnl.show %}
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Gain / Loss ({{ holding.native_currency }})</div>
+    {% if pnl.gain_native is not none %}
+    <div class="ic-summary-value {{ 'ic-up' if pnl.gain_native >= 0 else 'ic-down' }}">{{ '{:+,.2f}'.format(pnl.gain_native) }}</div>
+    <div class="ic-summary-sub {{ 'ic-up' if pnl.gain_pct is not none and pnl.gain_pct >= 0 else ('ic-down' if pnl.gain_pct is not none else '') }}">
+      {% if pnl.gain_pct is not none %}{{ '{:+.2f}'.format(pnl.gain_pct) }}% on net invested{% else %}no net invested amount{% endif %}
+    </div>
+    {% else %}
+    <div class="ic-summary-value ic-muted">—</div>
+    {% endif %}
+    {% if pnl.dividends_native %}<div class="ic-summary-sub">+ {{ '{:,.2f}'.format(pnl.dividends_native) }} dividends received (net)</div>{% endif %}
+  </div>
+  {% endif %}
   <div class="ic-summary-card">
     <div class="ic-summary-label">XIRR</div>
     {% if holding.xirr is not none %}
@@ -49,12 +63,39 @@
   </div>
 </div>
 
-{% if holding.is_ticker_based %}
-<div class="ic-card" style="font-size:0.85rem; color:var(--muted);">
-  {{ holding.quantity }} units @ {{ '{:,.2f}'.format(holding.live_price_native) if holding.live_price_native else '—' }} {{ holding.native_currency }}/unit
-  {% if holding.price_updated_at %} · price last refreshed {{ format_date(holding.price_updated_at) }}{% endif %}
+<div class="ic-card ic-fresh-card">
+  <div>
+    {% if holding.is_ticker_based %}
+    <div class="ic-fresh-main">{{ holding.quantity }} units @ {{ '{:,.2f}'.format(holding.live_price_native) if holding.live_price_native else '—' }} {{ holding.native_currency }}/unit</div>
+    {% else %}
+    <div class="ic-fresh-main">Manually valued — {{ holding.native_currency }} {{ '{:,.2f}'.format(holding.current_value_native) }}</div>
+    {% endif %}
+    <div class="ic-fresh-sub">{{ staleness.label }}{% if holding.fx_rate_date %} · FX rate as of {{ format_date(holding.fx_rate_date) }}{% endif %}</div>
+  </div>
+  {% if staleness.status != 'fresh' %}
+  <span class="ic-stale-pill">
+    {% if staleness.kind == 'price' %}Price is out of date — use Refresh{% else %}Value hasn't been updated in a while — use Edit{% endif %}
+  </span>
+  {% endif %}
 </div>
-{% endif %}
+
+<div class="ic-card">
+  <div class="section-label">Value History (USD)
+    {% if value_history.change_pct is not none %}
+    <span class="ic-hist-change {{ 'ic-up' if value_history.change_usd >= 0 else 'ic-down' }}">
+      {{ '{:+,.2f}'.format(value_history.change_usd) }} ({{ '{:+.2f}'.format(value_history.change_pct) }}%) since {{ format_date(value_history.points[0].date) }}
+    </span>
+    {% endif %}
+  </div>
+  {% if value_history.points|length >= 2 %}
+  <div class="ic-chart-wrap"><canvas id="valueHistoryChart"></canvas></div>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem;">
+    A value chart appears once at least two daily snapshots exist. Snapshots are recorded by the scheduled daily job
+    (<code>flask international snapshot</code>) — {{ value_history.points|length }} recorded so far.
+  </p>
+  {% endif %}
+</div>
 
 {% if nominees %}
 <div class="ic-card">
@@ -400,6 +441,25 @@
   {% endif %}
 </div>
 
+<div class="ic-card">
+  <div class="section-label">Timeline ({{ timeline|length }}{{ '+' if timeline|length >= 25 else '' }})</div>
+  {% if timeline %}
+  <ul class="ic-timeline">
+    {% for e in timeline %}
+    <li>
+      <span class="ic-tl-dot"></span>
+      <div class="ic-tl-body">
+        <div class="ic-tl-head"><span class="ic-tl-type">{{ e.event_type }}</span><span class="ic-tl-date">{{ format_date(e.created_at) }}</span></div>
+        <div class="ic-tl-desc">{{ e.description }}</div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem;">No activity recorded yet. Changes made from now on will appear here.</p>
+  {% endif %}
+</div>
+
 <style>
   .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
@@ -426,7 +486,57 @@
   .ic-table tr:last-child td { border-bottom:none; }
   .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
   .ic-link-btn:hover { text-decoration:underline; }
+
+  .ic-fresh-card { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:16px 24px; }
+  .ic-fresh-main { font-size:0.88rem; color:var(--text); font-weight:500; }
+  .ic-fresh-sub { font-size:0.78rem; color:var(--muted); margin-top:3px; }
+  .ic-stale-pill { font-size:0.75rem; font-weight:600; color:var(--warning); background:var(--warning-bg); border:1px solid var(--warning); border-radius:999px; padding:4px 12px; }
+  .ic-chart-wrap { position:relative; height:240px; }
+  .ic-hist-change { font-size:0.75rem; font-weight:600; margin-left:10px; text-transform:none; letter-spacing:normal; font-family:var(--font-data); }
+
+  .ic-timeline { list-style:none; margin:0; padding:0 0 0 6px; border-left:2px solid var(--border); }
+  .ic-timeline li { position:relative; padding:0 0 16px 20px; }
+  .ic-timeline li:last-child { padding-bottom:0; }
+  .ic-tl-dot { position:absolute; left:-9px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--accent); border:2px solid var(--surface); }
+  .ic-tl-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .ic-tl-type { font-size:0.82rem; font-weight:600; color:var(--text); }
+  .ic-tl-date { font-size:0.74rem; color:var(--muted2); }
+  .ic-tl-desc { font-size:0.82rem; color:var(--muted); margin-top:2px; }
 </style>
+
+{% if value_history.points|length >= 2 %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  // Batch 10.3 (Oct 2026) — value-over-time line from the daily snapshots.
+  (function () {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const grid = dark ? '#1e2130' : '#E2E8F0';
+    const label = dark ? '#64748b' : '#64748B';
+    Chart.defaults.color = label;
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 11;
+    const pts = {{ value_history.points|tojson }};
+    new Chart(document.getElementById('valueHistoryChart'), {
+      type: 'line',
+      data: {
+        labels: pts.map(p => p.date),
+        datasets: [{ label: 'Value (USD)', data: pts.map(p => p.usd_value),
+          borderColor: '#6366f1', backgroundColor: '#6366f122', fill: true, tension: 0.25,
+          pointRadius: pts.length > 60 ? 0 : 3 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => ' $' + c.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 2 }) } } },
+        scales: {
+          x: { grid: { color: grid }, ticks: { color: label, maxTicksLimit: 8 } },
+          y: { grid: { color: grid }, ticks: { color: label, callback: v => '$' + v.toLocaleString('en-US') } },
+        },
+      },
+    });
+  })();
+</script>
+{% endif %}
 
 <script>
   // Batch 9.2 (Sep 2026) — transaction edit was previously add/delete

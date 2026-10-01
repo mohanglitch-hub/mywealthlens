@@ -105,6 +105,26 @@ class DocumentType:
            OWNERSHIP_DOCUMENT, OTHER_DOCUMENTS]
 
 
+class TimelineEvent:
+    """Batch 10.3 (Oct 2026) — event types for a holding's audit trail.
+    Own list per this module's convention (mirrors insurance_centre's
+    TimelineEvent, deliberately not shared)."""
+    CREATED             = "Holding Created"
+    UPDATED             = "Holding Updated"
+    NOMINEE_UPDATED     = "Nominees Updated"
+    VALUE_REFRESHED     = "Value Refreshed"
+    TRANSACTION_ADDED   = "Transaction Added"
+    TRANSACTION_EDITED  = "Transaction Edited"
+    TRANSACTION_DELETED = "Transaction Deleted"
+    VESTING_ADDED       = "Vesting Tranche Added"
+    VESTING_EDITED      = "Vesting Tranche Edited"
+    VESTING_DELETED     = "Vesting Tranche Deleted"
+    DOCUMENT_UPLOADED   = "Document Uploaded"
+    DOCUMENT_DELETED    = "Document Deleted"
+    ARCHIVED            = "Archived"
+    RESTORED            = "Restored"
+
+
 class InternationalTxnType:
     BUY = "BUY"
     SELL = "SELL"
@@ -130,10 +150,11 @@ class RemittancePurpose:
     INVESTMENT_PROPERTY = "Investment in immovable property"
     MAINTENANCE_OF_RELATIVE = "Maintenance of close relatives abroad"
     EDUCATION = "Education abroad"
+    MEDICAL = "Medical treatment abroad"   # Batch 10.1 (Oct 2026) — has its own TCS rate
     EMPLOYMENT = "Emigration / employment abroad"
     OTHER = "Other"
     ALL = [INVESTMENT_SECURITIES, INVESTMENT_PROPERTY, MAINTENANCE_OF_RELATIVE,
-           EDUCATION, EMPLOYMENT, OTHER]
+           EDUCATION, MEDICAL, EMPLOYMENT, OTHER]
 
 
 # RBI's Liberalised Remittance Scheme annual cap, in USD, per resident
@@ -144,22 +165,12 @@ class RemittancePurpose:
 # constant, easy to find and update if it ever does.
 LRS_ANNUAL_LIMIT_USD = 250_000
 
-# TCS (Tax Collected at Source) on LRS remittances (Batch 9.4, Sep 2026).
-# Finance Act 2023 / CBDT notification: 20% TCS on the AGGREGATE amount
-# remitted under LRS in a financial year that exceeds ₹7,00,000 — this
-# is the GENERAL-PURPOSE rate (investment, gift, maintenance of
-# relatives abroad, etc.), which is what this module already restricts
-# RemittancePurpose to. NOT applied here: the lower rates that apply
-# specifically to education funded by an education loan (0.5% above
-# 7L) or to medical treatment/education NOT funded by a loan (5% above
-# 7L) — those are real, different rates under the same law, but this
-# module has no way to know "was this education remittance loan-
-# funded?" from the data it collects, and guessing wrong would silently
-# misstate a tax figure. Kept as named constants, easy to find and
-# update if the threshold/rate changes by a future notification —
-# same pattern as LRS_ANNUAL_LIMIT_USD above.
-TCS_THRESHOLD_INR = 700_000
-TCS_RATE = 0.20
+# TCS (Tax Collected at Source) on LRS remittances: Batch 9.4 hardcoded
+# one threshold + one rate here. Batch 10.1 (Oct 2026) moved the rules
+# into international_centre/tcs_rules.py — a dated table, because both
+# the threshold (₹7L -> ₹10L from 1 Apr 2025) and the rate (now depends
+# on purpose; education/medical dropped to 2% from 1 Apr 2026) have
+# changed by law and will change again.
 
 
 class InternationalHolding(db.Model):
@@ -203,6 +214,12 @@ class InternationalHolding(db.Model):
     fx_rate_used = db.Column(db.Float, nullable=True)   # native_currency -> USD rate used for usd_value
     fx_rate_date = db.Column(db.Date, nullable=True)
     price_updated_at = db.Column(db.DateTime, nullable=True)
+    value_updated_at = db.Column(db.DateTime, nullable=True)
+    # Batch 10.3 (Oct 2026) — when the holding's VALUE was last set by the
+    # user (creation, or an edit that changed current_value_native). Drives
+    # the "this manually-valued asset hasn't been updated in a while"
+    # nudge. updated_at can't be used for that: it moves on every FX
+    # refresh, even when the user has not touched the value.
 
     invested_native = db.Column(db.Float, nullable=True)  # net cost basis in native currency, from transactions
     xirr            = db.Column(db.Float, nullable=True)  # cached, refreshed alongside price/value
@@ -232,6 +249,11 @@ class InternationalHolding(db.Model):
     vesting_tranches = db.relationship(
         "VestingTranche", backref="holding", lazy=True,
         cascade="all, delete-orphan",
+    )
+    timeline = db.relationship(
+        "InternationalTimeline", backref="holding", lazy="dynamic",
+        cascade="all, delete-orphan",
+        order_by="InternationalTimeline.created_at.desc()",
     )
 
     def __repr__(self):
@@ -356,18 +378,22 @@ class RemittanceRecord(db.Model):
     remitting_bank = db.Column(db.String(100), nullable=True)
     notes          = db.Column(db.Text, nullable=True)
 
+    education_loan_funded = db.Column(db.Boolean, nullable=False, default=False)
+    # Batch 10.1 (Oct 2026) — only meaningful when purpose is Education:
+    # an education loan from a financial institution has its own (lower
+    # or nil) TCS rate. Ignored for every other purpose.
+
     tcs_amount_inr = db.Column(db.Float, nullable=False, default=0.0)
-    # Batch 9.4 (Sep 2026) — computed once, at save time, from the
-    # portion of THIS remittance that falls above the running
-    # TCS_THRESHOLD_INR total for its financial year (see
-    # services.add_remittance()). Like amount_usd's fx_rate_used, this
-    # is locked in at creation and does NOT recompute if an earlier
-    # remittance in the same FY is later deleted — same "tracking aid,
-    # not a live-recomputed ledger" honesty as the rest of this module.
-    # An authorized dealer (bank) actually collects TCS at the time of
-    # remittance based on the cumulative total IT reports for that
-    # FY, which this module has no way to see — this is Mohan's own
-    # estimate from what he's logged here, not his bank's figure.
+    # Batch 9.4 (Sep 2026), reworked Batch 10.1 (Oct 2026) — an ESTIMATE
+    # of the TCS on THIS remittance: the portion above the running,
+    # date-ordered aggregate threshold for its financial year, at the
+    # rate for its purpose (see tcs_rules.py). From 10.1 the whole
+    # financial year is recomputed (services.recompute_fy_tcs) after
+    # every add/edit/delete, so the figure is always consistent with
+    # what's currently logged, regardless of entry order. An authorised
+    # dealer (bank) collects the real TCS from the totals IT sees for
+    # your PAN across ALL banks, which this module cannot — treat this
+    # as your own estimate, not your bank's figure.
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -547,3 +573,25 @@ class InternationalHoldingDocument(db.Model):
 
     def __repr__(self):
         return f"<InternationalHoldingDocument {self.original_name}>"
+
+
+class InternationalTimeline(db.Model):
+    """Batch 10.3 (Oct 2026) — audit history for every international
+    holding, shown on the holding detail page. Append-only: services
+    only ever add rows. Mirrors insurance_centre's InsuranceTimeline.
+    Deleted together with its holding (ORM cascade) — an audit trail for
+    something permanently deleted has nothing left to describe."""
+    __tablename__ = "international_timeline"
+    __table_args__ = (
+        db.Index("ix_intl_timeline_holding", "holding_id"),
+    )
+
+    id          = db.Column(db.Integer, primary_key=True)
+    holding_id  = db.Column(db.Integer, db.ForeignKey("international_holding.id"), nullable=False)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    event_type  = db.Column(db.String(50), nullable=False)    # TimelineEvent constants
+    description = db.Column(db.String(500), nullable=False)   # human-readable
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<InternationalTimeline {self.event_type} holding={self.holding_id}>"

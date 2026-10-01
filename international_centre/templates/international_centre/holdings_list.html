@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Holdings — International Investing — MyWealthLens{% endblock %}
+
+{% block content %}
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">All Holdings</h1>
+    <p class="ic-subtitle">Search, filter and sort every foreign holding in one place.</p>
+  </div>
+  <div class="ic-actions">
+    <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary ic-add-btn">+ Add Holding</a>
+    <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+  </div>
+</div>
+
+<form method="GET" action="{{ url_for('international_centre.holdings_list') }}" id="icFilterForm" class="ic-filter-card">
+  <div class="ic-search">
+    <span class="ic-search-icon">🔍</span>
+    <input type="text" name="q" value="{{ q }}" placeholder="Search name, ticker, country, broker…" autocomplete="off" />
+    {% if q %}<a href="{{ url_for('international_centre.holdings_list', asset_type=asset_type or None, country=country or None, currency=currency or None, flag=flag or None, sort=sort) }}" class="ic-search-clear" title="Clear search">✕</a>{% endif %}
+  </div>
+
+  <select name="asset_type" onchange="this.form.submit()">
+    <option value="">All types</option>
+    {% for t in facets.asset_types %}<option value="{{ t }}" {{ 'selected' if t == asset_type }}>{{ t }}</option>{% endfor %}
+  </select>
+  <select name="country" onchange="this.form.submit()">
+    <option value="">All countries</option>
+    {% for c in facets.countries %}<option value="{{ c }}" {{ 'selected' if c == country }}>{{ c }}</option>{% endfor %}
+  </select>
+  <select name="currency" onchange="this.form.submit()">
+    <option value="">All currencies</option>
+    {% for c in facets.currencies %}<option value="{{ c }}" {{ 'selected' if c == currency }}>{{ c }}</option>{% endfor %}
+  </select>
+  <select name="flag" onchange="this.form.submit()">
+    <option value="">Any status</option>
+    {% for key, label in flag_options %}<option value="{{ key }}" {{ 'selected' if key == flag }}>{{ label }}</option>{% endfor %}
+  </select>
+  <select name="sort" onchange="this.form.submit()">
+    {% for key, label in sort_options %}<option value="{{ key }}" {{ 'selected' if key == sort }}>{{ label }}</option>{% endfor %}
+  </select>
+  <button type="submit" class="ic-btn-search">Search</button>
+</form>
+
+{% if filtered %}
+<div class="ic-chips">
+  <span class="ic-chips-label">Active filters:</span>
+  {% if q %}<a class="ic-chip" href="{{ url_for('international_centre.holdings_list', asset_type=asset_type or None, country=country or None, currency=currency or None, flag=flag or None, sort=sort) }}">Search: “{{ q }}” ✕</a>{% endif %}
+  {% if asset_type %}<a class="ic-chip" href="{{ url_for('international_centre.holdings_list', q=q or None, country=country or None, currency=currency or None, flag=flag or None, sort=sort) }}">{{ asset_type }} ✕</a>{% endif %}
+  {% if country %}<a class="ic-chip" href="{{ url_for('international_centre.holdings_list', q=q or None, asset_type=asset_type or None, currency=currency or None, flag=flag or None, sort=sort) }}">{{ country }} ✕</a>{% endif %}
+  {% if currency %}<a class="ic-chip" href="{{ url_for('international_centre.holdings_list', q=q or None, asset_type=asset_type or None, country=country or None, flag=flag or None, sort=sort) }}">{{ currency }} ✕</a>{% endif %}
+  {% if flag %}<a class="ic-chip" href="{{ url_for('international_centre.holdings_list', q=q or None, asset_type=asset_type or None, country=country or None, currency=currency or None, sort=sort) }}">{{ flag_label }} ✕</a>{% endif %}
+  <a href="{{ url_for('international_centre.holdings_list') }}" class="ic-link" style="font-size:0.8rem;">Clear all</a>
+</div>
+{% endif %}
+
+<div class="ic-result-bar">
+  <span>{{ rows|length }} holding{{ 's' if rows|length != 1 else '' }}{% if filtered %} <span style="color:var(--accent);">(filtered)</span>{% endif %}</span>
+  <span>Total value: <strong>{{ format_money_usd(total_usd) }}</strong></span>
+</div>
+
+{% if rows %}
+<div class="ic-card" style="padding:0;">
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead>
+        <tr>
+          <th>Name</th><th>Type</th><th>Country</th>
+          <th class="ic-num">Value (native)</th><th class="ic-num">Value (USD)</th>
+          <th class="ic-num">Gain / Loss</th><th class="ic-num">XIRR</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% set h = r.holding %}
+        <tr class="ic-row" onclick="window.location='{{ url_for('international_centre.holding_detail', holding_id=h.id) }}'">
+          <td>
+            <a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="ic-link" onclick="event.stopPropagation()">{{ h.name }}</a>
+            {% if h.ticker %}<span class="ic-ticker">{{ h.ticker }}</span>{% endif %}
+          </td>
+          <td>{{ h.asset_type }}</td>
+          <td>{{ h.country or '—' }}</td>
+          <td class="ic-num">{{ h.native_currency }} {{ '{:,.2f}'.format(h.current_value_native) }}</td>
+          <td class="ic-num">{{ format_money_usd(h.usd_value) }}</td>
+          <td class="ic-num {{ 'ic-up' if r.pnl.gain_pct is not none and r.pnl.gain_pct >= 0 else ('ic-down' if r.pnl.gain_pct is not none else '') }}">
+            {% if r.pnl.show and r.pnl.gain_pct is not none %}{{ '%+.2f'|format(r.pnl.gain_pct) }}%{% else %}—{% endif %}
+          </td>
+          <td class="ic-num {{ 'ic-up' if h.xirr is not none and h.xirr >= 0 else ('ic-down' if h.xirr is not none else '') }}">
+            {{ '%.2f'|format(h.xirr) + '%' if h.xirr is not none else '—' }}
+          </td>
+          <td>
+            {% if r.stale.status != 'fresh' %}<span class="ic-pill ic-pill-warn" title="{{ r.stale.label }}">{{ 'Refresh' if r.stale.kind == 'price' else 'Update value' }}</span>{% endif %}
+            {% if r.unconverted %}<span class="ic-pill ic-pill-down" title="No exchange rate to USD yet">No USD rate</span>{% endif %}
+            {% if r.nominee_gap %}<span class="ic-pill ic-pill-info" title="{{ r.nominee_gap }}">Nominee</span>{% endif %}
+            {% if r.stale.status == 'fresh' and not r.unconverted and not r.nominee_gap %}<span class="ic-ok">✓</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<p class="ic-footnote">Gain / Loss is current value minus net money put in (buys − sells), so it includes both realised and unrealised results and excludes dividends. Not shown for foreign bank accounts.</p>
+{% else %}
+<div class="ic-card ic-empty">
+  {% if filtered %}
+    <p>No holdings match your search.</p>
+    <a href="{{ url_for('international_centre.holdings_list') }}" class="ic-link">Clear all filters</a>
+  {% else %}
+    <p>No international holdings yet.</p>
+    <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary ic-add-btn" style="margin-top:10px;">+ Add your first holding</a>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="ic-footer-links">
+  <a href="{{ url_for('international_centre.archived_holdings') }}" class="ic-link">View archived holdings</a>
+</div>
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+  .ic-actions { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  .ic-add-btn { text-decoration:none; display:inline-block; width:auto; padding:10px 18px; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .ic-link:hover { text-decoration:underline; }
+
+  .ic-filter-card { display:flex; gap:10px; flex-wrap:wrap; align-items:center; background:var(--surface);
+    border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:14px; box-shadow:var(--shadow-sm); }
+  .ic-filter-card select { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:9px 10px;
+    color:var(--text); font-size:0.82rem; font-family:'Inter',sans-serif; max-width:190px; }
+  .ic-search { position:relative; flex:1 1 240px; min-width:200px; }
+  .ic-search input { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px;
+    padding:9px 32px 9px 34px; color:var(--text); font-size:0.85rem; font-family:'Inter',sans-serif; }
+  .ic-search input:focus { outline:none; border-color:var(--accent); }
+  .ic-search-icon { position:absolute; left:11px; top:50%; transform:translateY(-50%); font-size:0.8rem; }
+  .ic-search-clear { position:absolute; right:10px; top:50%; transform:translateY(-50%); color:var(--muted); text-decoration:none; font-size:0.8rem; }
+  .ic-btn-search { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:0.82rem;
+    cursor:pointer; font-family:'Inter',sans-serif; font-weight:600; }
+
+  .ic-chips { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .ic-chips-label { font-size:0.78rem; color:var(--muted); }
+  .ic-chip { background:var(--surface2); border:1px solid var(--border); border-radius:999px; padding:4px 12px;
+    font-size:0.76rem; color:var(--text); text-decoration:none; }
+  .ic-chip:hover { border-color:var(--down); color:var(--down); }
+
+  .ic-result-bar { display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; font-size:0.82rem; color:var(--muted); margin-bottom:10px; }
+  .ic-result-bar strong { color:var(--text); font-family:var(--font-data); }
+
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:12px; }
+  .ic-empty { text-align:center; color:var(--muted); padding:40px 20px; }
+  .ic-table-wrap { overflow-x:auto; }
+  .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .ic-table th { text-align:left; padding:12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .ic-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); }
+  .ic-table tr:last-child td { border-bottom:none; }
+  .ic-num { text-align:right !important; font-family:var(--font-data); white-space:nowrap; }
+  .ic-row { cursor:pointer; transition:background 0.15s; }
+  .ic-row:hover { background:var(--surface2); }
+  .ic-ticker { display:inline-block; margin-left:8px; font-size:0.7rem; color:var(--muted); background:var(--surface2); border-radius:4px; padding:1px 6px; }
+  .ic-up { color:var(--up); }
+  .ic-down { color:var(--down); }
+  .ic-ok { color:var(--up); font-weight:700; }
+  .ic-pill { display:inline-block; font-size:0.68rem; font-weight:600; border-radius:999px; padding:2px 9px; margin-right:4px; border:1px solid; white-space:nowrap; }
+  .ic-pill-warn { color:var(--warning); border-color:var(--warning); background:var(--warning-bg); }
+  .ic-pill-down { color:var(--down); border-color:var(--down); background:var(--down-bg); }
+  .ic-pill-info { color:var(--muted); border-color:var(--border); background:var(--surface2); }
+  .ic-footnote { font-size:0.74rem; color:var(--muted2); margin:4px 4px 16px; }
+  .ic-footer-links { text-align:center; margin-top:12px; font-size:0.85rem; }
+
+  @media (max-width: 768px) {
+    .ic-header { flex-direction:column; }
+    .ic-filter-card select { flex:1 1 140px; max-width:none; }
+  }
+</style>
+{% endblock %}

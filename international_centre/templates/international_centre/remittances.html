@@ -30,11 +30,21 @@
   {% endif %}
   {% if lrs_status.total_tcs_inr %}
   <div class="ic-tcs-tile">
-    <span class="ic-tcs-label">TCS Collected This {{ lrs_status.fy_label }}</span>
+    <span class="ic-tcs-label">Estimated TCS This {{ lrs_status.fy_label }}</span>
     <span class="ic-tcs-value">₹{{ '{:,.0f}'.format(lrs_status.total_tcs_inr) }}</span>
   </div>
   {% endif %}
-  <div class="ic-disclaimer">This is a tracking aid built from what you've logged here — not a substitute for checking your actual remittance history with your bank/AD. The $250,000 figure is RBI's current published LRS cap and could change by future notification. TCS is estimated at 20% on the portion of aggregate LRS remittances above ₹7,00,000 in the financial year (general-purpose remittances only — the lower 0.5%/5% rates for education-loan-funded or medical/education-non-loan remittances aren't modeled, since MyWealthLens can't tell those apart from the data recorded here). TCS collected is creditable against your final tax liability — confirm with a CA.</div>
+  {% if lrs_status.tcs_free_remaining_inr is not none %}
+  <div class="ic-tcs-tile">
+    <span class="ic-tcs-label">Remaining before TCS applies (₹{{ '{:,.0f}'.format(lrs_status.tcs_threshold_inr) }} / FY)</span>
+    <span class="ic-tcs-value">₹{{ '{:,.0f}'.format(lrs_status.tcs_free_remaining_inr) }}</span>
+  </div>
+  {% endif %}
+  <div class="ic-disclaimer">This is a tracking aid built from what you've logged here — not a substitute for checking your actual remittance history with your bank/AD. The $250,000 figure is RBI's current published LRS cap and could change by future notification.
+    {% if lrs_status.tcs_rule %}
+    TCS is estimated using the rules in force today: the first ₹{{ '{:,.0f}'.format(lrs_status.tcs_rule.threshold_inr) }} of aggregate LRS remittances in a financial year carries no TCS; above that, {{ lrs_status.tcs_rule.general_pct|round|int }}% on investment, property, maintenance and other purposes, {{ lrs_status.tcs_rule.edu_medical_pct|round(1) }}% on self-funded education and medical, and {{ lrs_status.tcs_rule.edu_loan_pct|round(1) }}% on education funded by a loan from a financial institution. Rates and thresholds for each remittance follow the rules that applied on its own date.
+    {% endif %}
+    Overseas tour packages are not modelled. Your bank collects the real TCS from your total across all banks, which this page can't see, so treat these figures as an estimate. TCS collected is creditable against your final tax liability — confirm the rates and your figures with a CA.</div>
 </div>
 
 <div class="ic-card">
@@ -51,9 +61,16 @@
     </div>
     <div class="form-group">
       <label>Purpose</label>
-      <select name="purpose" required>
+      <select name="purpose" required id="icPurposeSelect">
         {% for p in purposes %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
       </select>
+    </div>
+    <div class="form-group" id="icLoanField" style="display:none;">
+      <label>Education loan?</label>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:400; font-size:0.82rem;">
+        <input type="checkbox" name="education_loan_funded" value="on" style="width:auto;" />
+        Funded by a loan from a financial institution
+      </label>
     </div>
     <div class="form-group">
       <label>Linked Holding (optional)</label>
@@ -83,7 +100,7 @@
           <td>₹{{ '{:,.0f}'.format(r.amount_inr) }}</td>
           <td>${{ '{:,.2f}'.format(r.amount_usd) }}</td>
           <td>{{ '₹' + '{:,.0f}'.format(r.tcs_amount_inr) if r.tcs_amount_inr else '—' }}</td>
-          <td>{{ r.purpose }}</td>
+          <td>{{ r.purpose }}{% if r.education_loan_funded %} <span style="color:var(--muted); font-size:0.75rem;">(loan-funded)</span>{% endif %}</td>
           <td>{{ r.remitting_bank or '—' }}</td>
           <td>
             <form method="POST" action="{{ url_for('international_centre.delete_remittance', remit_id=r.id) }}" style="display:inline;">
@@ -123,6 +140,24 @@
     </table>
   </div>
 </div>
+
+<script>
+  // Batch 10.1 (Oct 2026) — the education-loan tick only matters for an
+  // Education remittance (it has its own TCS rate); hide it otherwise.
+  (function () {
+    const sel = document.getElementById('icPurposeSelect');
+    const field = document.getElementById('icLoanField');
+    if (!sel || !field) return;
+    const eduPurpose = {{ education_purpose|tojson }};
+    function sync() {
+      const show = sel.value === eduPurpose;
+      field.style.display = show ? 'flex' : 'none';
+      if (!show) field.querySelector('input[type=checkbox]').checked = false;
+    }
+    sel.addEventListener('change', sync);
+    sync();
+  })();
+</script>
 
 {% if lrs_history %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>

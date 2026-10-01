@@ -31,10 +31,11 @@ from datetime import date as _date
 from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
     InternationalValueSnapshot, InternationalHoldingNominee,
-    InternationalHoldingDocument, VestingTranche,
-    InternationalAssetType, InternationalTxnType, LRS_ANNUAL_LIMIT_USD,
-    TCS_THRESHOLD_INR, TCS_RATE,
+    InternationalHoldingDocument, VestingTranche, InternationalTimeline,
+    InternationalAssetType, InternationalTxnType, RemittancePurpose,
+    TimelineEvent, LRS_ANNUAL_LIMIT_USD,
 )
+from international_centre import tcs_rules
 from international_centre.utils import (
     fy_bounds, fy_label, calendar_year_bounds, fetch_ticker_price, is_long_term,
 )
@@ -46,6 +47,36 @@ from wealth.timezone_utils import today_ist
 def _db():
     from models import db
     return db
+
+
+# ── Timeline (Batch 10.3, Oct 2026) ─────────────────────────────────
+
+def log_timeline(holding, event_type, description):
+    """Append an audit entry for `holding`. Does NOT commit — it rides
+    along with the caller's own commit, so an action and its audit
+    entry are saved together or not at all. Append-only."""
+    _db().session.add(InternationalTimeline(
+        holding_id=holding.id, user_id=holding.user_id,
+        event_type=event_type, description=description[:500],
+    ))
+
+
+def get_timeline(holding, limit=20):
+    """Newest-first audit entries for a holding."""
+    return holding.timeline.limit(limit).all()
+
+
+def _money(currency, amount):
+    return f"{currency} {amount:,.2f}"
+
+
+def _nominee_signature(holding):
+    """Comparable snapshot of a holding's nominee set, for detecting
+    whether an edit actually changed it."""
+    return sorted(
+        (n.name, (n.relationship or ""), float(n.percentage or 0))
+        for n in holding.nominees
+    )
 
 
 # ── Holdings ────────────────────────────────────────────────────────
@@ -162,6 +193,7 @@ def create_holding(user_id, data, multi_data=None):
         holding.current_value_native = float(data["current_value_native"])
         holding.invested_native = holding.current_value_native
 
+    holding.value_updated_at = datetime.utcnow()
     db.session.add(holding)
     db.session.flush()  # assigns holding.id, needed for nominees below
 
@@ -171,12 +203,34 @@ def create_holding(user_id, data, multi_data=None):
         return None, nominee_error
 
     _convert_to_usd(holding)
+    log_timeline(holding, TimelineEvent.CREATED,
+                 f"Added {holding.name} ({holding.asset_type}), "
+                 f"value {_money(holding.native_currency, holding.current_value_native)}")
     db.session.commit()
     return holding, None
 
 
+_TRACKED_FIELDS = [
+    ("name", "name"), ("ticker", "ticker"), ("country", "country"),
+    ("broker_or_institution", "broker/institution"),
+    ("native_currency", "currency"), ("quantity", "quantity"),
+    ("avg_cost_native", "avg cost"), ("current_value_native", "value"),
+    ("notes", "notes"),
+]
+
+
+def _fmt_field(value):
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    return str(value)
+
+
 def update_holding(holding, data, multi_data=None):
     db = _db()
+    before = {attr: getattr(holding, attr) for attr, _ in _TRACKED_FIELDS}
+    nominees_before = _nominee_signature(holding)
     holding.name = data["name"].strip()
     holding.ticker = (data.get("ticker") or "").strip().upper() or None
     holding.country = (data.get("country") or "").strip() or None
@@ -200,17 +254,39 @@ def update_holding(holding, data, multi_data=None):
 
     _convert_to_usd(holding)
     recompute_holding_financials(holding)
+
+    # ── Audit trail (Batch 10.3) + manual-value freshness ──
+    changes = []
+    for attr, label in _TRACKED_FIELDS:
+        old_v, new_v = before[attr], getattr(holding, attr)
+        if attr == "notes":
+            if (old_v or "") != (new_v or ""):
+                changes.append("notes edited")
+        elif old_v != new_v:
+            changes.append(f"{label}: {_fmt_field(old_v)} → {_fmt_field(new_v)}")
+    if before["current_value_native"] != holding.current_value_native:
+        holding.value_updated_at = datetime.utcnow()
+    if changes:
+        log_timeline(holding, TimelineEvent.UPDATED, "Updated — " + "; ".join(changes))
+    db.session.flush()
+    if _nominee_signature(holding) != nominees_before:
+        total = holding.total_nominees_percentage
+        count = holding.nominees.count()
+        log_timeline(holding, TimelineEvent.NOMINEE_UPDATED,
+                     f"Nominees updated — {count} nominee(s), shares total {total:.0f}%")
     db.session.commit()
     return holding, None
 
 
 def archive_holding(holding):
     holding.archived = True
+    log_timeline(holding, TimelineEvent.ARCHIVED, "Archived")
     _db().session.commit()
 
 
 def restore_holding(holding):
     holding.archived = False
+    log_timeline(holding, TimelineEvent.RESTORED, "Restored from archive")
     _db().session.commit()
 
 
@@ -227,12 +303,19 @@ def delete_holding_permanently(holding):
     db.session.commit()
 
 
-def refresh_holding(holding):
+def refresh_holding(holding, log_event=False):
     """Refreshes a single holding's live price (ticker-based only) and
     USD conversion, then recomputes invested_native/xirr. Does NOT
     commit — callers batch a commit after one or more holdings (see
     refresh_all_holdings()). Never zeroes out a previously-known value
-    on a failed network call."""
+    on a failed network call.
+
+    `log_event=True` (Batch 10.3) records a Value Refreshed entry on the
+    holding's timeline when the value actually moved. Only the manual
+    single-holding Refresh button passes it — the daily snapshot job and
+    Refresh All would otherwise bury the timeline in routine entries."""
+    old_native = holding.current_value_native
+    old_usd = holding.usd_value
     if holding.is_ticker_based and holding.ticker:
         price = fetch_ticker_price(holding.ticker)
         if price:
@@ -244,6 +327,11 @@ def refresh_holding(holding):
 
     _convert_to_usd(holding)
     recompute_holding_financials(holding)
+    if log_event and (holding.current_value_native != old_native or holding.usd_value != old_usd):
+        log_timeline(holding, TimelineEvent.VALUE_REFRESHED,
+                     f"Value refreshed — {_money(holding.native_currency, old_native)} → "
+                     f"{_money(holding.native_currency, holding.current_value_native)} "
+                     f"(${holding.usd_value:,.2f} USD)")
 
 
 def refresh_all_holdings(user_id=None):
@@ -310,6 +398,235 @@ def portfolio_usd_xirr(user_id):
 
 # ── Transactions ────────────────────────────────────────────────────
 
+# ── Staleness, P&L, listing, alerts (Batch 10.2 / 10.3, Oct 2026) ─────
+
+# A ticker price older than this is "stale". 5 days comfortably spans a
+# weekend plus a market holiday, so a normal long weekend doesn't nag.
+STALE_PRICE_DAYS = 5
+# A manually-valued asset (bank balance, property, bond) has no live feed;
+# its value is only as fresh as the last time you typed it in.
+STALE_MANUAL_VALUE_DAYS = 90
+
+
+def get_staleness(holding, now=None):
+    """How fresh is this holding's value?
+
+    Returns {kind: 'price'|'value', status: 'fresh'|'stale'|'never',
+    age_days, label}. Ticker-based holdings are judged on their last live
+    price refresh; everything else on when the user last set the value."""
+    now = now or datetime.utcnow()
+    if holding.is_ticker_based and holding.ticker:
+        ts, limit, kind = holding.price_updated_at, STALE_PRICE_DAYS, "price"
+    else:
+        ts = holding.value_updated_at or holding.updated_at or holding.created_at
+        limit, kind = STALE_MANUAL_VALUE_DAYS, "value"
+
+    if ts is None:
+        return {"kind": kind, "status": "never", "age_days": None,
+                "label": "Price never refreshed — value is based on your cost"}
+    age = (now - ts).days
+    status = "stale" if age > limit else "fresh"
+    when = "today" if age <= 0 else ("1 day ago" if age == 1 else f"{age} days ago")
+    noun = "Price refreshed" if kind == "price" else "Value last updated"
+    return {"kind": kind, "status": status, "age_days": age, "label": f"{noun} {when}"}
+
+
+def holding_pnl(holding):
+    """Gain/loss on the net cash put in, in the holding's own currency.
+
+    gain = current value - (buys - sells). Because sale proceeds are
+    netted off the cost, this is the combined realised + unrealised result
+    — it is NOT split into the two, and it excludes dividends, which are
+    returned separately. Not shown for a foreign bank account, where a
+    "gain" on a balance isn't meaningful."""
+    dividends = sum(t.amount_native for t in holding.transactions
+                    if t.txn_type == InternationalTxnType.DIVIDEND)
+    show = holding.asset_type != InternationalAssetType.FOREIGN_BANK_ACCOUNT
+    invested = holding.invested_native
+    if not show or invested is None:
+        return {"show": False, "invested_native": invested, "gain_native": None,
+                "gain_pct": None, "dividends_native": round(dividends, 2)}
+    gain = round((holding.current_value_native or 0.0) - invested, 2)
+    pct = round(gain / invested * 100, 2) if invested > 0 else None
+    return {"show": True, "invested_native": invested, "gain_native": gain,
+            "gain_pct": pct, "dividends_native": round(dividends, 2)}
+
+
+def get_value_history(holding):
+    """Dated USD values for the holding from the daily snapshot job,
+    oldest first. Only ever contains days the scheduled job actually ran,
+    so a holding that is new (or a PC that was off) has few points."""
+    snaps = (InternationalValueSnapshot.query
+             .filter_by(holding_id=holding.id)
+             .order_by(InternationalValueSnapshot.date)
+             .all())
+    points = [{"date": sn.date.isoformat(), "usd_value": round(sn.usd_value or 0.0, 2)} for sn in snaps]
+    change_usd = change_pct = None
+    if len(points) >= 2 and points[0]["usd_value"]:
+        change_usd = round(points[-1]["usd_value"] - points[0]["usd_value"], 2)
+        change_pct = round(change_usd / points[0]["usd_value"] * 100, 2)
+    return {"points": points, "change_usd": change_usd, "change_pct": change_pct}
+
+
+def _nominee_gap(holding):
+    """None if nominees are complete, else a short reason. Same rule as
+    Family Centre's Coverage Gaps check, so the two never disagree."""
+    if holding.nominees.count() == 0:
+        return "No nominee added"
+    total = holding.total_nominees_percentage
+    if total < 100:
+        return f"Nominees total {total:.0f}%, not 100%"
+    return None
+
+
+SORT_OPTIONS = [
+    ("value_high", "Value: High → Low"),
+    ("value_low", "Value: Low → High"),
+    ("name_az", "Name: A → Z"),
+    ("name_za", "Name: Z → A"),
+    ("gain_high", "Gain %: High → Low"),
+    ("gain_low", "Gain %: Low → High"),
+    ("xirr_high", "XIRR: High → Low"),
+    ("xirr_low", "XIRR: Low → High"),
+    ("recently_added", "Recently Added"),
+    ("recently_updated", "Recently Updated"),
+]
+FLAG_OPTIONS = [
+    ("stale", "Needs a refresh"),
+    ("no_nominee", "Nominee gaps"),
+    ("unconverted", "Not converted to USD"),
+]
+
+
+def search_holdings(user_id, q=None, asset_type=None, country=None, currency=None,
+                    flag=None, sort="value_high", archived=False):
+    """Filtered, sorted holdings for the list page. Always scoped to
+    user_id. Returns (rows, facets): rows are dicts with the holding plus
+    its P&L / staleness / nominee-gap, and facets are the distinct
+    asset types, countries and currencies the user actually has (so the
+    filter dropdowns only offer choices that can match something)."""
+    base = InternationalHolding.query.filter_by(user_id=user_id, archived=archived).all()
+    facets = {
+        "asset_types": sorted({h.asset_type for h in base}),
+        "countries": sorted({h.country for h in base if h.country}),
+        "currencies": sorted({h.native_currency for h in base}),
+    }
+
+    needle = (q or "").strip().lower()
+    rows = []
+    for h in base:
+        if asset_type and h.asset_type != asset_type:
+            continue
+        if country and h.country != country:
+            continue
+        if currency and h.native_currency != currency:
+            continue
+        if needle:
+            haystack = " ".join(filter(None, [
+                h.name, h.ticker, h.country, h.broker_or_institution,
+                h.asset_type, h.native_currency, h.account_number_masked,
+            ])).lower()
+            if needle not in haystack:
+                continue
+        stale = get_staleness(h)
+        gap = _nominee_gap(h)
+        unconverted = h.fx_rate_used is None and h.native_currency != "USD"
+        if flag == "stale" and stale["status"] == "fresh":
+            continue
+        if flag == "no_nominee" and gap is None:
+            continue
+        if flag == "unconverted" and not unconverted:
+            continue
+        rows.append({"holding": h, "pnl": holding_pnl(h), "stale": stale,
+                     "nominee_gap": gap, "unconverted": unconverted})
+
+    def gain_key(r):
+        return r["pnl"]["gain_pct"]
+
+    def none_last(keyfn, reverse):
+        present = [r for r in rows if keyfn(r) is not None]
+        absent = [r for r in rows if keyfn(r) is None]
+        present.sort(key=keyfn, reverse=reverse)
+        return present + absent
+
+    if sort == "value_low":
+        rows.sort(key=lambda r: r["holding"].usd_value or 0.0)
+    elif sort == "name_az":
+        rows.sort(key=lambda r: r["holding"].name.lower())
+    elif sort == "name_za":
+        rows.sort(key=lambda r: r["holding"].name.lower(), reverse=True)
+    elif sort == "gain_high":
+        rows = none_last(gain_key, True)
+    elif sort == "gain_low":
+        rows = none_last(gain_key, False)
+    elif sort == "xirr_high":
+        rows = none_last(lambda r: r["holding"].xirr, True)
+    elif sort == "xirr_low":
+        rows = none_last(lambda r: r["holding"].xirr, False)
+    elif sort == "recently_added":
+        rows.sort(key=lambda r: r["holding"].created_at or datetime.min, reverse=True)
+    elif sort == "recently_updated":
+        rows.sort(key=lambda r: r["holding"].updated_at or datetime.min, reverse=True)
+    else:  # value_high (default)
+        rows.sort(key=lambda r: r["holding"].usd_value or 0.0, reverse=True)
+    return rows, facets
+
+
+def get_alerts(user_id):
+    """Things worth the user's attention, for the dashboard banner area,
+    most urgent first. Each: {level: danger|warning|info, message, link:
+    (endpoint, params)} — services don't build URLs, the route does."""
+    alerts = []
+
+    lrs = get_lrs_status(user_id)
+    if lrs["status"] == "exceeded":
+        alerts.append({"level": "danger",
+                       "message": f"LRS limit reached for {lrs['fy_label']} — "
+                                  f"${lrs['total_usd']:,.0f} logged against the ${lrs['limit_usd']:,.0f} cap.",
+                       "link": ("international_centre.remittances", {})})
+    elif lrs["status"] == "warning":
+        alerts.append({"level": "warning",
+                       "message": f"{lrs['pct_used']}% of your {lrs['fy_label']} LRS limit used — "
+                                  f"${lrs['remaining_usd']:,.0f} remaining.",
+                       "link": ("international_centre.remittances", {})})
+
+    holdings = get_holdings(user_id, archived=False)
+
+    unconverted = [h for h in holdings if h.fx_rate_used is None and h.native_currency != "USD"]
+    if unconverted:
+        n = len(unconverted)
+        alerts.append({"level": "danger",
+                       "message": f"{n} holding{'s' if n != 1 else ''} couldn't be converted to USD "
+                                  f"(no exchange rate yet) — your totals are understated until a refresh succeeds.",
+                       "link": ("international_centre.holdings_list", {"flag": "unconverted"})})
+
+    stale_prices = [h for h in holdings if h.is_ticker_based and h.ticker
+                    and get_staleness(h)["status"] != "fresh"]
+    if stale_prices:
+        n = len(stale_prices)
+        alerts.append({"level": "warning",
+                       "message": f"{n} holding{'s have' if n != 1 else ' has'} a price older than "
+                                  f"{STALE_PRICE_DAYS} days (or never refreshed). Use Refresh Prices.",
+                       "link": ("international_centre.holdings_list", {"flag": "stale"})})
+
+    stale_manual = [h for h in holdings if not (h.is_ticker_based and h.ticker)
+                    and get_staleness(h)["status"] != "fresh"]
+    if stale_manual:
+        n = len(stale_manual)
+        alerts.append({"level": "info",
+                       "message": f"{n} manually-valued holding{'s haven' if n != 1 else ' hasn'}'t had its value "
+                                  f"updated in over {STALE_MANUAL_VALUE_DAYS} days.",
+                       "link": ("international_centre.holdings_list", {"flag": "stale"})})
+
+    gaps = [h for h in holdings if _nominee_gap(h)]
+    if gaps:
+        n = len(gaps)
+        alerts.append({"level": "info",
+                       "message": f"{n} holding{'s have' if n != 1 else ' has'} no nominee or incomplete nominee shares.",
+                       "link": ("international_centre.holdings_list", {"flag": "no_nominee"})})
+    return alerts
+
+
 def _resolve_dividend_amount(data):
     """Batch 9.5 (Sep 2026) — DIVIDEND only. If Gross Amount / Tax
     Withheld were given, the real cash flow (amount_native, what XIRR
@@ -350,6 +667,8 @@ def add_transaction(holding, data):
     db.session.add(txn)
     db.session.flush()
     recompute_holding_financials(holding)
+    log_timeline(holding, TimelineEvent.TRANSACTION_ADDED,
+                 f"{txn_type} on {txn.date:%d %b %Y} — {_money(holding.native_currency, amount_native)}")
     db.session.commit()
     return txn
 
@@ -370,6 +689,8 @@ def update_transaction(txn, data):
     txn.gross_amount_native = gross
     txn.tax_withheld_native = withheld
     recompute_holding_financials(txn.holding)
+    log_timeline(txn.holding, TimelineEvent.TRANSACTION_EDITED,
+                 f"{txn_type} on {txn.date:%d %b %Y} edited — now {_money(txn.holding.native_currency, amount_native)}")
     db.session.commit()
     return txn
 
@@ -377,9 +698,12 @@ def update_transaction(txn, data):
 def delete_transaction(txn):
     db = _db()
     holding = txn.holding
+    summary = (f"{txn.txn_type} on {txn.date:%d %b %Y} — "
+               f"{_money(holding.native_currency, txn.amount_native)} deleted")
     db.session.delete(txn)
     db.session.flush()
     recompute_holding_financials(holding)
+    log_timeline(holding, TimelineEvent.TRANSACTION_DELETED, summary)
     db.session.commit()
 
 
@@ -407,6 +731,9 @@ def add_vesting_tranche(holding, data):
         notes=(data.get("notes") or "").strip() or None,
     )
     db.session.add(tranche)
+    log_timeline(holding, TimelineEvent.VESTING_ADDED,
+                 f"{tranche.plan_type} tranche added — {tranche.quantity:g} units vesting "
+                 f"{tranche.vest_date:%d %b %Y} at FMV {_money(holding.native_currency, tranche.fmv_native)}")
     db.session.commit()
     return tranche
 
@@ -422,12 +749,16 @@ def update_vesting_tranche(tranche, data):
     tranche.purchase_price_native = (float(data["purchase_price_native"])
                                       if (data.get("purchase_price_native") or "").strip() else None)
     tranche.notes = (data.get("notes") or "").strip() or None
+    log_timeline(tranche.holding, TimelineEvent.VESTING_EDITED,
+                 f"{tranche.plan_type} tranche edited — {tranche.quantity:g} units, vest {tranche.vest_date:%d %b %Y}")
     db.session.commit()
     return tranche
 
 
 def delete_vesting_tranche(tranche):
     db = _db()
+    log_timeline(tranche.holding, TimelineEvent.VESTING_DELETED,
+                 f"{tranche.plan_type} tranche deleted — {tranche.quantity:g} units, vest {tranche.vest_date:%d %b %Y}")
     db.session.delete(tranche)
     db.session.commit()
 
@@ -484,31 +815,58 @@ def get_vesting_perquisite_summary(user_id, fy_start_year):
 
 # ── Remittances (LRS) ───────────────────────────────────────────────
 
-def _compute_tcs(user_id, remit_date, amount_inr):
-    """Batch 9.4 (Sep 2026). Marginal TCS on the portion of THIS
-    remittance that pushes the financial year's running total past
-    TCS_THRESHOLD_INR — not a flat 20% of the whole remittance just
-    because the FY total is over the threshold. Only the amount ABOVE
-    the threshold is taxed at TCS_RATE, matching how TCS actually
-    works. `prior_total_inr` sums every OTHER remittance already
-    logged for this user in the same FY, regardless of its own date
-    relative to this one — same "what's logged so far" semantics as
-    get_lrs_status(), and simplest for a user entering remittances out
-    of strict chronological order."""
-    fy_start, fy_end = fy_bounds(remit_date)
-    prior_total_inr = (
-        RemittanceRecord.query
-        .filter_by(user_id=user_id)
-        .filter(RemittanceRecord.date >= fy_start, RemittanceRecord.date <= fy_end)
-        .with_entities(RemittanceRecord.amount_inr)
-        .all()
+def _remit_category(remittance):
+    """Which TCS rule category a remittance falls into."""
+    return tcs_rules.category_for(
+        purpose_is_education=(remittance.purpose == RemittancePurpose.EDUCATION),
+        purpose_is_medical=(remittance.purpose == RemittancePurpose.MEDICAL),
+        education_loan_funded=bool(remittance.education_loan_funded),
     )
-    prior_total_inr = sum(r[0] for r in prior_total_inr)
-    new_cumulative = prior_total_inr + amount_inr
-    if new_cumulative <= TCS_THRESHOLD_INR:
-        return 0.0
-    taxable_portion = min(amount_inr, new_cumulative - TCS_THRESHOLD_INR)
-    return round(taxable_portion * TCS_RATE, 2)
+
+
+def recompute_fy_tcs(user_id, any_date_in_fy):
+    """Recompute tcs_amount_inr for EVERY remittance in the Indian
+    financial year containing `any_date_in_fy`. Does NOT commit.
+
+    Batch 10.1 (Oct 2026): replaces Batch 9.4's lock-in-at-save
+    _compute_tcs(). Rates and the threshold now depend on the
+    remittance date and purpose (see tcs_rules.py), and the figure for
+    one remittance depends on what came before it in the year — so after
+    any add or delete the whole year is recomputed in date order. The
+    stored numbers therefore always match what is currently logged,
+    whatever order entries were typed in."""
+    fy_start, fy_end = fy_bounds(any_date_in_fy)
+    rows = (RemittanceRecord.query
+            .filter_by(user_id=user_id)
+            .filter(RemittanceRecord.date >= fy_start, RemittanceRecord.date <= fy_end)
+            .all())
+    entries = [{"key": r.id, "date": r.date, "amount_inr": r.amount_inr,
+                "category": _remit_category(r)} for r in rows]
+    result = tcs_rules.compute_fy_tcs(entries)
+    for r in rows:
+        r.tcs_amount_inr = result[r.id]
+    return len(rows)
+
+
+def recompute_all_tcs(user_id=None):
+    """Recompute TCS for every financial year that has remittances, for
+    one user or everyone. Commits. Used by `flask international
+    recompute-tcs` and safe to re-run any time (idempotent). Returns the
+    number of remittance rows processed."""
+    db = _db()
+    query = RemittanceRecord.query
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    seen = set()
+    total = 0
+    for r in query.all():
+        key = (r.user_id, fy_bounds(r.date)[0])
+        if key in seen:
+            continue
+        seen.add(key)
+        total += recompute_fy_tcs(r.user_id, r.date)
+    db.session.commit()
+    return total
 
 
 def add_remittance(user_id, data):
@@ -523,7 +881,10 @@ def add_remittance(user_id, data):
     except FxRateError:
         pass  # amount_usd stays 0.0 -- route flashes a warning that LRS tracking is incomplete for this entry until it's refreshed
 
-    tcs_amount_inr = _compute_tcs(user_id, remit_date, amount_inr)
+    purpose = data["purpose"].strip()
+    loan_raw = str(data.get("education_loan_funded") or "").strip().lower()
+    education_loan_funded = (purpose == RemittancePurpose.EDUCATION
+                             and loan_raw in ("on", "1", "true", "yes"))
 
     remittance = RemittanceRecord(
         user_id=user_id,
@@ -532,19 +893,25 @@ def add_remittance(user_id, data):
         amount_inr=amount_inr,
         amount_usd=amount_usd,
         fx_rate_used=rate,
-        purpose=data["purpose"].strip(),
+        purpose=purpose,
+        education_loan_funded=education_loan_funded,
         remitting_bank=(data.get("remitting_bank") or "").strip() or None,
         notes=(data.get("notes") or "").strip() or None,
-        tcs_amount_inr=tcs_amount_inr,
+        tcs_amount_inr=0.0,
     )
     db.session.add(remittance)
+    db.session.flush()
+    recompute_fy_tcs(user_id, remit_date)
     db.session.commit()
     return remittance
 
 
 def delete_remittance(remittance):
     db = _db()
+    user_id, remit_date = remittance.user_id, remittance.date
     db.session.delete(remittance)
+    db.session.flush()
+    recompute_fy_tcs(user_id, remit_date)
     db.session.commit()
 
 
@@ -562,6 +929,9 @@ def get_lrs_status(user_id, anchor_date=None):
     remaining_usd = max(0.0, LRS_ANNUAL_LIMIT_USD - total_usd)
     pct_used = min(100.0, round((total_usd / LRS_ANNUAL_LIMIT_USD) * 100, 1)) if LRS_ANNUAL_LIMIT_USD else 0.0
     total_tcs_inr = round(sum(r.tcs_amount_inr or 0.0 for r in remittances), 2)  # Batch 9.4
+    total_inr = round(sum(r.amount_inr for r in remittances), 2)
+    threshold_inr = tcs_rules.threshold_for(anchor_date)  # Batch 10.1 — None before TCS on LRS existed
+    tcs_free_remaining_inr = (max(0.0, threshold_inr - total_inr) if threshold_inr else None)
 
     if total_usd >= LRS_ANNUAL_LIMIT_USD:
         status = "exceeded"
@@ -575,6 +945,9 @@ def get_lrs_status(user_id, anchor_date=None):
         "total_usd": round(total_usd, 2), "remaining_usd": round(remaining_usd, 2),
         "limit_usd": LRS_ANNUAL_LIMIT_USD, "pct_used": pct_used, "status": status,
         "remittances": remittances, "total_tcs_inr": total_tcs_inr,
+        "total_inr": total_inr, "tcs_threshold_inr": threshold_inr,
+        "tcs_free_remaining_inr": tcs_free_remaining_inr,
+        "tcs_rule": tcs_rules.describe_rules(anchor_date),
     }
 
 
@@ -727,6 +1100,8 @@ def save_document_metadata(db, holding, user_id, doc_type, original_name,
         iv=iv or None, is_encrypted=bool(is_encrypted),
     )
     db.session.add(doc)
+    log_timeline(holding, TimelineEvent.DOCUMENT_UPLOADED,
+                 f"Document uploaded — {original_name} ({doc_type})")
     db.session.commit()
     return doc
 
@@ -737,6 +1112,8 @@ def delete_document(db, doc, user_id):
     module's Document Vault delete_document()."""
     if doc.user_id != user_id:
         return False, "You do not have permission to delete this document."
+    holding = doc.holding
+    log_timeline(holding, TimelineEvent.DOCUMENT_DELETED, f"Document deleted — {doc.original_name}")
     db.session.delete(doc)
     db.session.commit()
     return True, None

@@ -662,8 +662,32 @@ def main():
         "permanently deleting a holding must remove its documents' physical files from disk, not just the DB rows"
     print("PASS: permanently deleting a holding removes its documents' physical files from disk (not just DB rows)")
 
-    # ── 13. TCS on LRS remittances (Batch 9.4, Sep 2026) ──
-    from international_centre.models import TCS_THRESHOLD_INR, TCS_RATE
+    # ── 13. TCS on LRS remittances (Batch 9.4, reworked Batch 10.1, Oct 2026) ──
+    # Rules are now a dated table (international_centre/tcs_rules.py): the
+    # aggregate threshold is ₹7L before 1 Apr 2025 and ₹10L from then on, and
+    # the rate depends on purpose (education/medical 5% -> 2% from 1 Apr 2026,
+    # loan-funded education 0.5% -> nil from 1 Apr 2025, everything else 20%).
+    from international_centre import tcs_rules
+
+    # 13.0 — pure rule table, no database involved.
+    assert tcs_rules.threshold_for(date(2020, 9, 30)) is None, "no TCS on LRS before 1 Oct 2020"
+    assert tcs_rules.threshold_for(date(2020, 10, 1)) == 700_000
+    assert tcs_rules.threshold_for(date(2025, 3, 31)) == 700_000
+    assert tcs_rules.threshold_for(date(2025, 4, 1)) == 1_000_000
+    assert tcs_rules.threshold_for(date(2026, 4, 1)) == 1_000_000
+    _t, _r = tcs_rules.rule_for(date(2023, 9, 30))
+    assert _r[tcs_rules.GENERAL] == 0.05, "general rate was 5% until 30 Sep 2023"
+    _t, _r = tcs_rules.rule_for(date(2023, 10, 1))
+    assert _r[tcs_rules.GENERAL] == 0.20, "general rate became 20% on 1 Oct 2023"
+    _t, _r = tcs_rules.rule_for(date(2026, 3, 31))
+    assert _r[tcs_rules.EDU_MEDICAL] == 0.05 and _r[tcs_rules.EDU_LOAN] == 0.0
+    _t, _r = tcs_rules.rule_for(date(2026, 4, 1))
+    assert _r[tcs_rules.EDU_MEDICAL] == 0.02
+    assert tcs_rules.category_for(True, False, True) == tcs_rules.EDU_LOAN
+    assert tcs_rules.category_for(True, False, False) == tcs_rules.EDU_MEDICAL
+    assert tcs_rules.category_for(False, True, False) == tcs_rules.EDU_MEDICAL
+    assert tcs_rules.category_for(False, False, True) == tcs_rules.GENERAL, "loan flag is meaningless outside education"
+    print("PASS: tcs_rules picks the right threshold/rates on both sides of each effective date")
 
     with app.app_context():
         u7 = User.query.filter_by(email="international_tcs_test@example.com").first()
@@ -675,52 +699,88 @@ def main():
         db.session.add(u7)
         db.session.commit()
         tcs_user_id = u7.id
+        GEN = RemittancePurpose.INVESTMENT_SECURITIES
 
-        # First remittance, entirely below the 7L threshold -> no TCS.
-        r_below = services.add_remittance(tcs_user_id, {
-            "date": "2026-05-01", "amount_inr": "500000",
-            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
-        })
-        assert r_below.tcs_amount_inr == 0.0, r_below.tcs_amount_inr
-        print("PASS: a remittance that stays below the ₹7L/FY TCS threshold collects no TCS")
+        # FY 2026-27: threshold ₹10L. 5L + 4L = 9L is still under it.
+        r_below = services.add_remittance(tcs_user_id, {"date": "2026-05-01", "amount_inr": "500000", "purpose": GEN})
+        r_still = services.add_remittance(tcs_user_id, {"date": "2026-06-01", "amount_inr": "400000", "purpose": GEN})
+        assert r_below.tcs_amount_inr == 0.0 and r_still.tcs_amount_inr == 0.0, (r_below.tcs_amount_inr, r_still.tcs_amount_inr)
+        print("PASS: ₹9L aggregate in FY 2026-27 collects no TCS (threshold is ₹10L, not the old ₹7L)")
 
-        # Second remittance in the SAME FY pushes cumulative total past
-        # the threshold -> TCS applies only to the portion above it.
-        r_cross = services.add_remittance(tcs_user_id, {
-            "date": "2026-06-01", "amount_inr": "400000",  # 500k + 400k = 900k, 200k over threshold
-            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
-        })
-        expected_tcs = round((500000 + 400000 - TCS_THRESHOLD_INR) * TCS_RATE, 2)
-        assert r_cross.tcs_amount_inr == expected_tcs, (r_cross.tcs_amount_inr, expected_tcs)
-        print(f"PASS: TCS is charged only on the portion of a remittance crossing the ₹7L threshold (₹{r_cross.tcs_amount_inr:,.0f})")
+        # 3L more -> 12L aggregate, 2L above the threshold, general rate 20%.
+        r_cross = services.add_remittance(tcs_user_id, {"date": "2026-07-01", "amount_inr": "300000", "purpose": GEN})
+        assert r_cross.tcs_amount_inr == 40_000.0, r_cross.tcs_amount_inr
+        print("PASS: only the portion above ₹10L is taxed, at 20% for a general purpose (₹40,000)")
 
-        # Third remittance, entirely above the threshold already -> the
-        # WHOLE amount is taxed at TCS_RATE (no re-taxing of prior years).
-        r_above = services.add_remittance(tcs_user_id, {
-            "date": "2026-07-01", "amount_inr": "100000",
-            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
-        })
-        assert r_above.tcs_amount_inr == round(100000 * TCS_RATE, 2), r_above.tcs_amount_inr
+        r_above = services.add_remittance(tcs_user_id, {"date": "2026-08-01", "amount_inr": "100000", "purpose": GEN})
+        assert r_above.tcs_amount_inr == 20_000.0, r_above.tcs_amount_inr
         print("PASS: a remittance entirely above the threshold is taxed in full at 20%")
 
-        status_tcs = services.get_lrs_status(tcs_user_id, anchor_date=date(2026, 8, 1))
-        expected_total_tcs = round(r_below.tcs_amount_inr + r_cross.tcs_amount_inr + r_above.tcs_amount_inr, 2)
-        assert status_tcs["total_tcs_inr"] == expected_total_tcs, (status_tcs["total_tcs_inr"], expected_total_tcs)
-        print(f"PASS: get_lrs_status() reports the correct cumulative TCS for the FY (₹{status_tcs['total_tcs_inr']:,.0f})")
+        # Purpose-specific rates for the same FY, already over the threshold.
+        r_edu = services.add_remittance(tcs_user_id, {"date": "2026-09-01", "amount_inr": "200000", "purpose": RemittancePurpose.EDUCATION})
+        r_edu_loan = services.add_remittance(tcs_user_id, {"date": "2026-09-02", "amount_inr": "200000", "purpose": RemittancePurpose.EDUCATION, "education_loan_funded": "on"})
+        r_med = services.add_remittance(tcs_user_id, {"date": "2026-09-03", "amount_inr": "200000", "purpose": RemittancePurpose.MEDICAL})
+        assert r_edu.tcs_amount_inr == 4_000.0, r_edu.tcs_amount_inr           # 2%
+        assert r_edu_loan.education_loan_funded is True
+        assert r_edu_loan.tcs_amount_inr == 0.0, r_edu_loan.tcs_amount_inr      # loan-funded: nil
+        assert r_med.tcs_amount_inr == 4_000.0, r_med.tcs_amount_inr            # 2%
+        print("PASS: FY 2026-27 education/medical collect 2% and loan-funded education collects nothing, above the threshold")
 
-        # A remittance in the NEXT financial year starts the ₹7L
-        # threshold fresh (per-FY, not a running lifetime total).
-        r_next_fy = services.add_remittance(tcs_user_id, {
-            "date": "2026-04-15", "amount_inr": "300000",  # FY 2026-27 vs the FY 2026-27 remittances above? see note below
-            "purpose": RemittancePurpose.INVESTMENT_SECURITIES,
-        })
-        # 2026-04-15 and 2026-05-01/06-01/07-01 are ALL within the same
-        # Indian FY (1 Apr 2026 - 31 Mar 2027) -- this remittance simply
-        # adds to that FY's running total, so it's fully taxed too.
-        assert r_next_fy.tcs_amount_inr == round(300000 * TCS_RATE, 2), r_next_fy.tcs_amount_inr
-        print("PASS: TCS threshold tracking is scoped per financial year, accumulating correctly within it")
+        # A loan tick on a NON-education purpose is ignored.
+        r_ignored = services.add_remittance(tcs_user_id, {"date": "2026-09-04", "amount_inr": "100000", "purpose": GEN, "education_loan_funded": "on"})
+        assert r_ignored.education_loan_funded is False and r_ignored.tcs_amount_inr == 20_000.0
+        print("PASS: the education-loan flag is ignored for non-education purposes")
 
-        RemittanceRecord.query.filter_by(user_id=tcs_user_id).delete()
+        status_tcs = services.get_lrs_status(tcs_user_id, anchor_date=date(2026, 10, 1))
+        expected_total = 40_000 + 20_000 + 4_000 + 0 + 4_000 + 20_000
+        assert status_tcs["total_tcs_inr"] == expected_total, (status_tcs["total_tcs_inr"], expected_total)
+        assert status_tcs["tcs_threshold_inr"] == 1_000_000 and status_tcs["tcs_free_remaining_inr"] == 0.0
+        assert status_tcs["tcs_rule"]["edu_medical_pct"] == 2.0
+        print(f"PASS: get_lrs_status() reports total TCS (₹{status_tcs['total_tcs_inr']:,.0f}), threshold and rule summary")
+
+        # Earlier financial years keep the rules that applied THEN.
+        r_fy25 = services.add_remittance(tcs_user_id, {"date": "2025-01-10", "amount_inr": "800000", "purpose": GEN})
+        assert r_fy25.tcs_amount_inr == 20_000.0, r_fy25.tcs_amount_inr  # FY 2024-25: 1L over ₹7L at 20%
+        r_fy26_a = services.add_remittance(tcs_user_id, {"date": "2025-06-01", "amount_inr": "900000", "purpose": GEN})
+        assert r_fy26_a.tcs_amount_inr == 0.0, r_fy26_a.tcs_amount_inr    # FY 2025-26: under ₹10L (would have been taxed at ₹7L)
+        r_fy26_e = services.add_remittance(tcs_user_id, {"date": "2025-07-01", "amount_inr": "300000", "purpose": RemittancePurpose.EDUCATION})
+        assert r_fy26_e.tcs_amount_inr == 10_000.0, r_fy26_e.tcs_amount_inr  # 2L above ₹10L at 5% (rate cut to 2% only from Apr 2026)
+        r_fy26_l = services.add_remittance(tcs_user_id, {"date": "2025-07-02", "amount_inr": "300000", "purpose": RemittancePurpose.EDUCATION, "education_loan_funded": "on"})
+        assert r_fy26_l.tcs_amount_inr == 0.0, r_fy26_l.tcs_amount_inr
+        r_fy22 = services.add_remittance(tcs_user_id, {"date": "2021-12-01", "amount_inr": "900000", "purpose": GEN})
+        assert r_fy22.tcs_amount_inr == 10_000.0, r_fy22.tcs_amount_inr  # FY 2021-22: 2L over ₹7L at the then-5%
+        r_fy19 = services.add_remittance(tcs_user_id, {"date": "2019-12-01", "amount_inr": "900000", "purpose": GEN})
+        assert r_fy19.tcs_amount_inr == 0.0, r_fy19.tcs_amount_inr        # no TCS on LRS yet
+        print("PASS: each financial year is taxed under the rules that applied on its own dates (7L/10L, 5%/20%/2%, pre-2020 none)")
+
+        # Order of entry must not matter: recompute is chronological.
+        for _old in RemittanceRecord.query.filter_by(user_id=tcs_user_id).all():
+            db.session.delete(_old)  # per-object delete (not bulk) so the session's identity map stays in sync
+        db.session.commit()
+        late = services.add_remittance(tcs_user_id, {"date": "2026-12-01", "amount_inr": "600000", "purpose": GEN})
+        early = services.add_remittance(tcs_user_id, {"date": "2026-05-01", "amount_inr": "700000", "purpose": GEN})
+        db.session.refresh(late)
+        # Chronologically: May 7L (under 10L, nil), then Dec 6L -> 13L, 3L above -> ₹60,000.
+        assert early.tcs_amount_inr == 0.0 and late.tcs_amount_inr == 60_000.0, (early.tcs_amount_inr, late.tcs_amount_inr)
+        print("PASS: TCS is assigned in date order even when remittances are entered out of order")
+
+        # Deleting a remittance recomputes the rest of its year.
+        services.delete_remittance(early)
+        db.session.refresh(late)
+        assert late.tcs_amount_inr == 0.0, late.tcs_amount_inr  # 6L alone is under the threshold now
+        print("PASS: deleting a remittance recomputes TCS for the rest of that financial year")
+
+        # recompute_all_tcs repairs tampered/stale values and is idempotent.
+        late.tcs_amount_inr = 12345.0
+        db.session.commit()
+        n = services.recompute_all_tcs(tcs_user_id)
+        db.session.refresh(late)
+        assert n == 1 and late.tcs_amount_inr == 0.0
+        assert services.recompute_all_tcs(tcs_user_id) == 1 and late.tcs_amount_inr == 0.0
+        print("PASS: recompute_all_tcs() corrects stale stored values and is idempotent")
+
+        for _old in RemittanceRecord.query.filter_by(user_id=tcs_user_id).all():
+            db.session.delete(_old)
         db.session.delete(u7)
         db.session.commit()
 
@@ -858,15 +918,15 @@ def main():
     # ── 16. HTTP: TCS column, dividend fields, DTAA/capital-gains report pages ──
     remit_page2 = client.get('/international/remittances')
     remit_csrf2 = get_csrf(remit_page2.data)
-    # A remittance large enough on its own to cross the ₹7L threshold,
+    # A remittance large enough on its own to cross the ₹10L threshold,
     # against the international_http_test user used throughout section 9.
     r = client.post('/international/remittances/add', data={
-        'csrf_token': remit_csrf2, 'date': '2026-05-10', 'amount_inr': '900000',
+        'csrf_token': remit_csrf2, 'date': '2026-05-10', 'amount_inr': '1500000',
         'purpose': RemittancePurpose.INVESTMENT_SECURITIES,
     }, follow_redirects=True)
     assert r.status_code == 200
     remit_body = client.get('/international/remittances').get_data(as_text=True)
-    assert 'TCS Collected This FY' in remit_body, "remittances page must show the TCS summary tile once TCS has been collected"
+    assert 'Estimated TCS This FY' in remit_body, "remittances page must show the TCS summary tile once TCS has been collected"
     print("PASS: TCS column + summary tile render on the remittances page via real HTTP")
 
     # Dividend transaction with gross/withheld via real HTTP form.
@@ -1055,6 +1115,288 @@ def main():
         assert all("total_usd" in yr and "fy_label" in yr for yr in history)
         assert history[-1]["fy_start"] > history[0]["fy_start"], history
     print("PASS: get_lrs_history() returns all requested years oldest-first, including years with zero remittances")
+
+    # ── 19. Holdings list: search / filter / sort / flags (Batch 10.2, Oct 2026) ──
+    from international_centre.models import InternationalTimeline, TimelineEvent
+    from datetime import datetime as _dt
+
+    with app.app_context():
+        u9 = User.query.filter_by(email="international_list_test@example.com").first()
+        if u9:
+            for _h in InternationalHolding.query.filter_by(user_id=u9.id).all():
+                db.session.delete(_h)
+            db.session.delete(u9)
+            db.session.commit()
+        u9 = User(name="List Test", email="international_list_test@example.com", password="unused")
+        other = User(name="Other", email="international_list_other@example.com", password="unused")
+        db.session.add_all([u9, other])
+        db.session.commit()
+        list_uid, other_uid = u9.id, other.id
+
+        def mk(uid, **kw):
+            data = {"native_currency": "USD", **kw}
+            h, err = services.create_holding(uid, data)
+            assert err is None, err
+            return h
+
+        h_aapl = mk(list_uid, asset_type=InternationalAssetType.US_STOCK, name="Apple Inc.", ticker="AAPL",
+                    country="United States", broker_or_institution="Interactive Brokers", quantity="10", avg_cost_native="100")
+        h_vod = mk(list_uid, asset_type=InternationalAssetType.US_STOCK, name="Vodafone Group", ticker="VOD",
+                   country="United Kingdom", native_currency="GBP", quantity="100", avg_cost_native="10")
+        h_bank = mk(list_uid, asset_type=InternationalAssetType.FOREIGN_BANK_ACCOUNT, name="Chase Checking",
+                    country="United States", current_value_native="5000")
+        h_other_user = mk(other_uid, asset_type=InternationalAssetType.US_STOCK, name="Apple Secret", ticker="AAPL",
+                          country="United States", quantity="1", avg_cost_native="1")
+        services.update_holding  # (exists)
+
+        # Make Apple clearly the biggest, with a 50% gain.
+        h_aapl.live_price_native = 150.0
+        h_aapl.current_value_native = 1500.0
+        h_aapl.usd_value = 1500.0
+        h_aapl.price_updated_at = _dt.utcnow()          # fresh price
+        h_vod.price_updated_at = _dt.utcnow() - timedelta(days=10)  # stale price
+        h_vod.usd_value = 1300.0
+        h_bank.usd_value = 5000.0
+        db.session.commit()
+
+        rows, facets = services.search_holdings(list_uid)
+        assert [r["holding"].name for r in rows] == ["Chase Checking", "Apple Inc.", "Vodafone Group"], [r["holding"].name for r in rows]
+        assert facets["countries"] == ["United Kingdom", "United States"] and facets["currencies"] == ["GBP", "USD"]
+        print("PASS: search_holdings() defaults to value high->low and builds filter facets from the user's own holdings")
+
+        assert [r["holding"].name for r in services.search_holdings(list_uid, sort="name_az")[0]] == ["Apple Inc.", "Chase Checking", "Vodafone Group"]
+        assert [r["holding"].name for r in services.search_holdings(list_uid, sort="value_low")[0]][0] == "Vodafone Group"
+        print("PASS: sort options reorder the list")
+
+        assert [r["holding"].name for r in services.search_holdings(list_uid, q="interactive")[0]] == ["Apple Inc."], "search must match broker"
+        assert [r["holding"].name for r in services.search_holdings(list_uid, q="vod")[0]] == ["Vodafone Group"], "search must match ticker"
+        assert [r["holding"].name for r in services.search_holdings(list_uid, q="UNITED KINGDOM")[0]] == ["Vodafone Group"], "search is case-insensitive"
+        assert services.search_holdings(list_uid, q="zzz-no-match")[0] == []
+        assert len(services.search_holdings(list_uid, asset_type=InternationalAssetType.US_STOCK)[0]) == 2
+        assert [r["holding"].name for r in services.search_holdings(list_uid, currency="GBP")[0]] == ["Vodafone Group"]
+        assert len(services.search_holdings(list_uid, country="United States")[0]) == 2
+        print("PASS: search matches name/ticker/country/broker case-insensitively and type/country/currency filters work")
+
+        assert "Apple Secret" not in [r["holding"].name for r in services.search_holdings(list_uid, q="apple")[0]]
+        assert [r["holding"].name for r in services.search_holdings(other_uid)[0]] == ["Apple Secret"]
+        print("PASS: search_holdings() never returns another user's holdings")
+
+        stale_names = {r["holding"].name for r in services.search_holdings(list_uid, flag="stale")[0]}
+        assert stale_names == {"Vodafone Group"}, stale_names  # bank value was just set => fresh; Apple fresh price
+        gap_names = {r["holding"].name for r in services.search_holdings(list_uid, flag="no_nominee")[0]}
+        assert gap_names == {"Apple Inc.", "Vodafone Group", "Chase Checking"}
+        print("PASS: 'needs a refresh' and 'nominee gaps' flags select the right holdings")
+
+        # gain sort: only holdings with a gain figure rank; the bank account (no P&L) goes last
+        gain_rows = services.search_holdings(list_uid, sort="gain_high")[0]
+        assert gain_rows[0]["holding"].name == "Apple Inc." and gain_rows[-1]["holding"].name == "Chase Checking", [r["holding"].name for r in gain_rows]
+        print("PASS: gain sort ranks holdings with a gain figure first and leaves bank accounts (no P&L) last")
+
+        # ── Alerts ──
+        alerts = services.get_alerts(list_uid)
+        msgs = " | ".join(a["message"] for a in alerts)
+        assert "older than" in msgs, msgs               # stale price
+        assert "no nominee" in msgs, msgs               # nominee gaps
+        assert all(a["level"] in ("danger", "warning", "info") and a["link"][0].startswith("international_centre.") for a in alerts)
+        # LRS alert appears when the cap is near.
+        services.add_remittance(list_uid, {"date": date.today().isoformat(), "amount_inr": str(int(LRS_ANNUAL_LIMIT_USD * 83 * 0.9)),
+                                           "purpose": RemittancePurpose.INVESTMENT_SECURITIES})
+        lrs_alerts = [a for a in services.get_alerts(list_uid) if "LRS" in a["message"]]
+        assert lrs_alerts and lrs_alerts[0]["level"] == "warning", lrs_alerts
+        # An unconvertible holding raises a danger alert.
+        h_vod.fx_rate_used = None
+        db.session.commit()
+        assert any(a["level"] == "danger" and "couldn't be converted" in a["message"] for a in services.get_alerts(list_uid))
+        assert [r["holding"].name for r in services.search_holdings(list_uid, flag="unconverted")[0]] == ["Vodafone Group"]
+        print("PASS: dashboard alerts cover LRS usage, stale prices, nominee gaps and unconverted holdings")
+
+    # HTTP: list page
+    client_l = app.test_client()
+    pg = client_l.get('/signup')
+    client_l.post('/signup', data={'csrf_token': get_csrf(pg.data), 'name': 'List HTTP', 'email': 'international_list_http@example.com',
+                                   'password': PASSWORD, 'confirm_password': PASSWORD}, follow_redirects=True)
+    add_csrf = get_csrf(client_l.get('/international/holdings/add').data)
+    for nm, tk, ctry in [("Microsoft Corp", "MSFT", "United States"), ("Nestle SA", "NESN", "Switzerland")]:
+        client_l.post('/international/holdings/add', data={'csrf_token': add_csrf, 'asset_type': InternationalAssetType.US_STOCK,
+                      'name': nm, 'ticker': tk, 'country': ctry, 'native_currency': 'USD', 'quantity': '2', 'avg_cost_native': '100'},
+                      follow_redirects=True)
+        add_csrf = get_csrf(client_l.get('/international/holdings/add').data)
+
+    page_all = client_l.get('/international/holdings')
+    assert page_all.status_code == 200
+    body_all = page_all.get_data(as_text=True)
+    assert 'Microsoft Corp' in body_all and 'Nestle SA' in body_all and 'Apple Secret' not in body_all and 'Chase Checking' not in body_all
+    page_f = client_l.get('/international/holdings?q=nestle&sort=name_az')
+    body_f = page_f.get_data(as_text=True)
+    assert 'Nestle SA' in body_f and 'Microsoft Corp' not in body_f and 'Active filters' in body_f and '(filtered)' in body_f
+    page_none = client_l.get('/international/holdings?q=zzzz')
+    assert 'No holdings match your search' in page_none.get_data(as_text=True)
+    # Hostile / garbage parameters fall back safely instead of erroring.
+    assert client_l.get('/international/holdings?sort=__import__&flag=drop&asset_type=%00&currency=%27').status_code == 200
+    print("PASS: Holdings page renders, filters by search, shows filter chips and the empty state, and survives junk parameters via real HTTP")
+
+    dash_l = client_l.get('/international/').get_data(as_text=True)
+    assert 'Tax &amp; Compliance' in dash_l and 'Schedule FA Report' in dash_l and 'Top Holdings' in dash_l
+    assert 'asset_type' in dash_l and 'currency' in dash_l and 'icListUrl' in dash_l
+    assert 'ic-banner' in dash_l, "stale-price / nominee banners should show for freshly added holdings"
+    print("PASS: dashboard shows grouped Tax & Compliance menu, alert banners, Top Holdings, and chart click-through wiring")
+
+    # ── 20. Holding detail: P&L, freshness, value history, timeline (Batch 10.3, Oct 2026) ──
+    with app.app_context():
+        u10 = User.query.filter_by(email="international_detail_test@example.com").first()
+        if u10:
+            for _h in InternationalHolding.query.filter_by(user_id=u10.id).all():
+                db.session.delete(_h)
+            db.session.delete(u10)
+            db.session.commit()
+        u10 = User(name="Detail Test", email="international_detail_test@example.com", password="unused")
+        db.session.add(u10)
+        db.session.commit()
+        det_uid = u10.id
+
+        hd, err = services.create_holding(det_uid, {
+            "asset_type": InternationalAssetType.US_STOCK, "name": "Detail Corp", "ticker": "DTL",
+            "country": "United States", "native_currency": "USD", "quantity": "10", "avg_cost_native": "100",
+        })
+        assert err is None
+        events = [e.event_type for e in services.get_timeline(hd)]
+        assert events == [TimelineEvent.CREATED], events
+        print("PASS: creating a holding writes a 'Holding Created' timeline entry")
+
+        services.add_transaction(hd, {"date": "2026-01-10", "txn_type": "BUY", "quantity": "10", "price_native": "100", "amount_native": "1000"})
+        hd.live_price_native, hd.current_value_native, hd.usd_value = 150.0, 1500.0, 1500.0
+        services.add_transaction(hd, {"date": "2026-03-10", "txn_type": "DIVIDEND", "amount_native": "30"})
+        pnl = services.holding_pnl(hd)
+        # invested = buys - sells = 1000 (dividends are separate); value 1500 -> +500 (+50%)
+        assert pnl["show"] and pnl["gain_native"] == 500.0 and pnl["gain_pct"] == 50.0 and pnl["dividends_native"] == 30.0, pnl
+        print("PASS: holding_pnl() = current value - net invested (+500, +50%), with dividends reported separately")
+
+        services.add_transaction(hd, {"date": "2026-04-10", "txn_type": "SELL", "quantity": "5", "price_native": "150", "amount_native": "750"})
+        hd.live_price_native, hd.current_value_native = 75.0, 750.0  # keep price consistent with quantity (10) so a later no-op edit really is a no-op
+        services.recompute_holding_financials(hd)
+        pnl2 = services.holding_pnl(hd)
+        # invested = 1000 - 750 = 250; value 750 -> +500 (realised + unrealised together)
+        assert pnl2["invested_native"] == 250.0 and pnl2["gain_native"] == 500.0 and pnl2["gain_pct"] == 200.0, pnl2
+        print("PASS: after a partial sale, gain still equals realised + unrealised (sale proceeds net off the cost)")
+
+        bank, _ = services.create_holding(det_uid, {"asset_type": InternationalAssetType.FOREIGN_BANK_ACCOUNT, "name": "Detail Bank",
+                                                    "native_currency": "USD", "current_value_native": "100"})
+        assert services.holding_pnl(bank)["show"] is False
+        print("PASS: no gain/loss is shown for a foreign bank account")
+
+        # Staleness
+        hd.price_updated_at = None
+        assert services.get_staleness(hd)["status"] == "never"
+        hd.price_updated_at = _dt.utcnow() - timedelta(days=2)
+        assert services.get_staleness(hd)["status"] == "fresh"
+        hd.price_updated_at = _dt.utcnow() - timedelta(days=6)
+        assert services.get_staleness(hd)["status"] == "stale" and services.get_staleness(hd)["age_days"] == 6
+        bank.value_updated_at = _dt.utcnow() - timedelta(days=91)
+        assert services.get_staleness(bank)["status"] == "stale" and services.get_staleness(bank)["kind"] == "value"
+        bank.value_updated_at = _dt.utcnow() - timedelta(days=89)
+        assert services.get_staleness(bank)["status"] == "fresh"
+        print("PASS: staleness — ticker prices go stale after 5 days, manual values after 90, never-refreshed is flagged")
+        db.session.commit()
+
+        # Value history needs snapshots from the daily job
+        assert services.get_value_history(hd)["points"] == []
+        for i, v in enumerate([1000.0, 1100.0, 1250.0]):
+            db.session.add(InternationalValueSnapshot(holding_id=hd.id, date=date(2026, 5, 1) + timedelta(days=i), usd_value=v))
+        db.session.commit()
+        vh = services.get_value_history(hd)
+        assert [p["usd_value"] for p in vh["points"]] == [1000.0, 1100.0, 1250.0]
+        assert vh["change_usd"] == 250.0 and vh["change_pct"] == 25.0, vh
+        print("PASS: get_value_history() returns snapshots oldest-first with the change since the first point")
+
+        # Timeline: edits, nominees, transactions, archive/restore, refresh
+        n_before = len(services.get_timeline(hd, limit=100))
+        same = {"name": "Detail Corp", "ticker": "DTL", "country": "United States", "native_currency": "USD",
+                "quantity": "10", "avg_cost_native": "100", "notes": ""}
+        services.update_holding(hd, same)
+        assert len(services.get_timeline(hd, limit=100)) == n_before, "saving without changes must not log anything"
+        services.update_holding(hd, {**same, "country": "Canada", "notes": "hello"})
+        latest = services.get_timeline(hd, limit=1)[0]
+        assert latest.event_type == TimelineEvent.UPDATED and "country: United States → Canada" in latest.description and "notes edited" in latest.description, latest.description
+        print("PASS: edits log exactly what changed, and a no-op save logs nothing")
+
+        from werkzeug.datastructures import MultiDict
+        services.update_holding(hd, {**same, "country": "Canada", "notes": "hello"},
+                                multi_data=MultiDict([("nominee_name[]", "Asha"), ("nominee_relationship[]", "Spouse"), ("nominee_percentage[]", "60")]))
+        assert services.get_timeline(hd, limit=1)[0].event_type == TimelineEvent.NOMINEE_UPDATED
+        assert "60%" in services.get_timeline(hd, limit=1)[0].description
+        print("PASS: changing nominees logs a 'Nominees Updated' entry")
+
+        services.archive_holding(hd)
+        services.restore_holding(hd)
+        top2 = [e.event_type for e in services.get_timeline(hd, limit=2)]
+        assert top2 == [TimelineEvent.RESTORED, TimelineEvent.ARCHIVED], top2
+        types_all = {e.event_type for e in services.get_timeline(hd, limit=100)}
+        assert {TimelineEvent.TRANSACTION_ADDED, TimelineEvent.CREATED} <= types_all
+        print("PASS: transactions, archive and restore all appear on the timeline")
+
+        # Manual refresh logs only when the value actually moved.
+        import international_centre.services as _svc
+        _svc.fetch_ticker_price = lambda t: 200.0
+        services.refresh_holding(hd, log_event=True)
+        db.session.commit()
+        assert services.get_timeline(hd, limit=1)[0].event_type == TimelineEvent.VALUE_REFRESHED
+        n_after = len(services.get_timeline(hd, limit=100))
+        services.refresh_holding(hd, log_event=True)  # same price again -> nothing moved
+        db.session.commit()
+        assert len(services.get_timeline(hd, limit=100)) == n_after
+        services.refresh_holding(hd)                  # bulk/scheduled path never logs
+        assert len(services.get_timeline(hd, limit=100)) == n_after
+        print("PASS: manual refresh logs only when the value moved; scheduled refreshes never flood the timeline")
+
+        # Permanent delete removes its timeline rows (no orphans)
+        hid = hd.id
+        services.archive_holding(hd)
+        services.delete_holding_permanently(hd)
+        assert InternationalTimeline.query.filter_by(holding_id=hid).count() == 0
+        print("PASS: permanently deleting a holding deletes its timeline (no orphaned audit rows)")
+
+        # editing a manual value resets its freshness clock
+        bank.value_updated_at = _dt.utcnow() - timedelta(days=200)
+        db.session.commit()
+        services.update_holding(bank, {"name": "Detail Bank", "native_currency": "USD", "current_value_native": "150"})
+        assert services.get_staleness(bank)["status"] == "fresh"
+        print("PASS: changing a manually-valued holding's value resets its freshness")
+
+    # HTTP: detail page shows everything and the education-loan checkbox round-trips
+    with app.app_context():
+        hh = InternationalHolding.query.filter_by(user_id=db.session.get(User, 1).id if False else u2.id, name='Vanguard S&P 500 ETF').first()
+        det_id = hh.id
+    detail_html = client.get(f'/international/holdings/{det_id}').get_data(as_text=True)
+    assert 'Timeline (' in detail_html and 'Holding Created' in detail_html
+    assert 'Gain / Loss' in detail_html and 'Value History (USD)' in detail_html
+    print("PASS: holding detail page renders the Gain/Loss card, freshness line, Value History and Timeline via real HTTP")
+
+    r = client.post(f'/international/holdings/{det_id}/refresh', data={'csrf_token': get_csrf(client.get(f'/international/holdings/{det_id}').data)}, follow_redirects=True)
+    assert r.status_code == 200
+
+    rem_csrf = get_csrf(client.get('/international/remittances').data)
+    r = client.post('/international/remittances/add', data={'csrf_token': rem_csrf, 'date': '2026-09-01', 'amount_inr': '300000',
+                    'purpose': RemittancePurpose.EDUCATION, 'education_loan_funded': 'on'}, follow_redirects=True)
+    assert r.status_code == 200
+    rem_body = client.get('/international/remittances').get_data(as_text=True)
+    assert '(loan-funded)' in rem_body and 'icLoanField' in rem_body and 'Remaining before TCS applies' in rem_body or 'Estimated TCS This' in rem_body
+    r = client.post('/international/remittances/add', data={'csrf_token': get_csrf(client.get('/international/remittances').data),
+                    'date': '2026-09-02', 'amount_inr': '1000', 'purpose': RemittancePurpose.MEDICAL}, follow_redirects=True)
+    assert 'Please select a valid purpose' not in r.get_data(as_text=True)
+    print("PASS: education-loan checkbox and the Medical purpose work end-to-end via real HTTP")
+
+    # cleanup of the new sections' users
+    with app.app_context():
+        for email in ("international_list_test@example.com", "international_list_other@example.com",
+                      "international_detail_test@example.com", "international_list_http@example.com"):
+            _u = User.query.filter_by(email=email).first()
+            if _u:
+                for _h in InternationalHolding.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_h)
+                for _r in RemittanceRecord.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_r)
+                db.session.delete(_u)
+        db.session.commit()
 
     # ── Cleanup ──
     with app.app_context():

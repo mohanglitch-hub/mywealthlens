@@ -83,6 +83,16 @@ def _get_tranche_or_404(tranche_id):
 
 # ── Dashboard ─────────────────────────────────────────────────────────
 
+def _resolve_alerts(alerts):
+    """Turn each service alert's (endpoint, params) link into a URL."""
+    out = []
+    for a in alerts:
+        endpoint, params = a["link"]
+        out.append({"level": a["level"], "message": a["message"],
+                    "url": url_for(endpoint, **params)})
+    return out
+
+
 @international_bp.route("/")
 @login_required
 def dashboard():
@@ -90,6 +100,7 @@ def dashboard():
     totals = services.portfolio_totals(current_user.id)
     portfolio_xirr = services.portfolio_usd_xirr(current_user.id)
     lrs_status = services.get_lrs_status(current_user.id)
+    alerts = _resolve_alerts(services.get_alerts(current_user.id))
 
     by_type = {}
     by_currency = {}
@@ -102,10 +113,47 @@ def dashboard():
         by_currency[h.native_currency]["count"] += 1
         by_currency[h.native_currency]["usd_value"] += h.usd_value or 0.0
 
+    # Batch 10.2: the dashboard shows the biggest positions only; the
+    # full searchable/sortable table lives on the Holdings page.
+    top_holdings = sorted(holdings, key=lambda h: h.usd_value or 0.0, reverse=True)[:6]
+
     return render_template(
         "international_centre/dashboard.html",
-        holdings=holdings, totals=totals, portfolio_xirr=portfolio_xirr,
-        lrs_status=lrs_status, by_type=by_type, by_currency=by_currency,
+        holdings=holdings, top_holdings=top_holdings, totals=totals,
+        portfolio_xirr=portfolio_xirr, lrs_status=lrs_status, alerts=alerts,
+        by_type=by_type, by_currency=by_currency,
+        format_money_usd=currency_display.format_money_usd, format_date=format_date,
+    )
+
+
+# ── Holdings list (Batch 10.2, Oct 2026) ──────────────────────────────
+
+@international_bp.route("/holdings")
+@login_required
+def holdings_list():
+    q = (request.args.get("q") or "").strip()
+    asset_type = (request.args.get("asset_type") or "").strip()
+    country = (request.args.get("country") or "").strip()
+    currency = (request.args.get("currency") or "").strip().upper()
+    flag = (request.args.get("flag") or "").strip()
+    sort = (request.args.get("sort") or "value_high").strip()
+    if flag not in dict(services.FLAG_OPTIONS):
+        flag = ""
+    if sort not in dict(services.SORT_OPTIONS):
+        sort = "value_high"
+
+    rows, facets = services.search_holdings(
+        current_user.id, q=q, asset_type=asset_type, country=country,
+        currency=currency, flag=flag, sort=sort,
+    )
+    total_usd = sum(r["holding"].usd_value or 0.0 for r in rows)
+    filtered = bool(q or asset_type or country or currency or flag)
+    return render_template(
+        "international_centre/holdings_list.html",
+        rows=rows, facets=facets, total_usd=total_usd, filtered=filtered,
+        q=q, asset_type=asset_type, country=country, currency=currency,
+        flag=flag, flag_label=dict(services.FLAG_OPTIONS).get(flag, ""), sort=sort,
+        sort_options=services.SORT_OPTIONS, flag_options=services.FLAG_OPTIONS,
         format_money_usd=currency_display.format_money_usd, format_date=format_date,
     )
 
@@ -168,6 +216,9 @@ def holding_detail(holding_id):
                         .all())
     return render_template(
         "international_centre/holding_detail.html", holding=holding, transactions=transactions,
+        pnl=services.holding_pnl(holding), staleness=services.get_staleness(holding),
+        value_history=services.get_value_history(holding),
+        timeline=services.get_timeline(holding, limit=25),
         nominees=holding.nominees.all(),
         documents=documents, doc_types=DocumentType.ALL,
         vesting_tranches=vesting_tranches, plan_types=VestingPlanType.ALL,
@@ -220,7 +271,7 @@ def edit_holding(holding_id):
 @login_required
 def refresh_holding(holding_id):
     holding = _get_holding_or_404(holding_id)
-    services.refresh_holding(holding)
+    services.refresh_holding(holding, log_event=True)
     from models import db
     db.session.commit()
     flash(f'Refreshed price/value for "{holding.name}".', "success")
@@ -341,8 +392,8 @@ def remittances():
     return render_template(
         "international_centre/remittances.html", lrs_status=lrs_status, lrs_history=lrs_history,
         holdings=holdings,
-        purposes=RemittancePurpose.ALL, format_date=format_date,
-        today=today_ist().isoformat(),
+        purposes=RemittancePurpose.ALL, education_purpose=RemittancePurpose.EDUCATION,
+        format_date=format_date, today=today_ist().isoformat(),
     )
 
 
