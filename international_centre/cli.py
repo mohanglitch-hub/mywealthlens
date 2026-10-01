@@ -45,3 +45,18 @@ def register_cli(app):
         count = services.take_daily_snapshot()
         click.echo(f"Snapshots recorded/updated: {count}")
         click.echo("Done.")
+
+    @international_group.command("recompute-tcs")
+    @with_appcontext
+    def recompute_tcs_command():
+        """
+        Recompute the estimated TCS on every logged LRS remittance, using
+        the current rules in tcs_rules.py. Batch 10.1 (Oct 2026): run this
+        once after updating if you want to be sure older entries reflect
+        the corrected threshold/rates; the Alembic migration that ships
+        with 10.1 already does it automatically. Safe to re-run any time.
+        """
+        from . import services
+
+        count = services.recompute_all_tcs()
+        click.echo(f"Recomputed TCS across {count} remittance record(s).")

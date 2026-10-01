@@ -7,32 +7,52 @@
     <h1 class="ic-title">International Investing</h1>
     <p class="ic-subtitle">Foreign holdings, tracked in their own currency and anchored to USD.</p>
   </div>
-  <div style="display:flex; gap:10px; flex-wrap:wrap;">
-    <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary" style="text-decoration:none; display:inline-block; width:auto; padding:10px 18px;">+ Add Holding</a>
+  <div class="ic-actions">
+    <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary ic-add-btn">+ Add Holding</a>
     <form method="POST" action="{{ url_for('international_centre.refresh_all') }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <button type="submit" class="ic-btn-secondary">Refresh Prices</button>
     </form>
+    <a href="{{ url_for('international_centre.holdings_list') }}" class="ic-btn-secondary" style="text-decoration:none;">All Holdings</a>
     <a href="{{ url_for('international_centre.remittances') }}" class="ic-btn-secondary" style="text-decoration:none;">Remittances (LRS)</a>
-    <a href="{{ url_for('international_centre.schedule_fa') }}" class="ic-btn-secondary" style="text-decoration:none;">Schedule FA Report</a>
-    <a href="{{ url_for('international_centre.dtaa_summary') }}" class="ic-btn-secondary" style="text-decoration:none;">DTAA / Form 67</a>
-    <a href="{{ url_for('international_centre.capital_gains') }}" class="ic-btn-secondary" style="text-decoration:none;">Capital Gains</a>
-    <a href="{{ url_for('international_centre.vesting_perquisite') }}" class="ic-btn-secondary" style="text-decoration:none;">RSU/ESPP Perquisite</a>
+    <details class="ic-menu" id="icTaxMenu">
+      <summary class="ic-btn-secondary">Tax &amp; Compliance ▾</summary>
+      <div class="ic-menu-panel">
+        <a href="{{ url_for('international_centre.schedule_fa') }}">Schedule FA Report</a>
+        <a href="{{ url_for('international_centre.capital_gains') }}">Capital Gains</a>
+        <a href="{{ url_for('international_centre.dtaa_summary') }}">DTAA / Form 67</a>
+        <a href="{{ url_for('international_centre.vesting_perquisite') }}">RSU/ESPP Perquisite</a>
+      </div>
+    </details>
     <a href="{{ url_for('international_centre.document_vault') }}" class="ic-btn-secondary" style="text-decoration:none;">Document Vault</a>
   </div>
 </div>
 
+{% if alerts %}
+<div class="ic-banners" role="region" aria-label="Alerts">
+  {% for a in alerts %}
+  <a href="{{ a.url }}" class="ic-banner ic-banner-{{ a.level }}" role="alert">
+    <span class="ic-banner-icon">{{ '⚠️' if a.level == 'danger' else ('🔔' if a.level == 'warning' else 'ℹ️') }}</span>
+    <span class="ic-banner-text">{{ a.message }}</span>
+    <span class="ic-banner-go">Review →</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="ic-summary-grid">
-  <div class="ic-summary-card">
+  <a href="{{ url_for('international_centre.holdings_list', sort='value_high') }}" class="ic-summary-card ic-card-link">
     <div class="ic-summary-label">Total Portfolio Value</div>
     <div class="ic-summary-value">{{ format_money_usd(totals.total_usd) }}</div>
-    <div class="ic-summary-sub">${{ '{:,.2f}'.format(totals.total_usd) }} USD</div>
-  </div>
-  <div class="ic-summary-card">
+    <div class="ic-summary-sub">${{ '{:,.2f}'.format(totals.total_usd) }} USD · {{ totals.holdings_count }} holding{{ 's' if totals.holdings_count != 1 else '' }}</div>
+    <div class="ic-card-hint">View holdings →</div>
+  </a>
+  <a href="{{ url_for('international_centre.holdings_list', sort='gain_high') }}" class="ic-summary-card ic-card-link">
     <div class="ic-summary-label">Invested (approx.)</div>
     <div class="ic-summary-value">{{ format_money_usd(totals.total_invested_usd_approx) }}</div>
-  </div>
-  <div class="ic-summary-card">
+    <div class="ic-card-hint">Sort by gain →</div>
+  </a>
+  <a href="{{ url_for('international_centre.holdings_list', sort='xirr_high') }}" class="ic-summary-card ic-card-link">
     <div class="ic-summary-label">Portfolio XIRR</div>
     {% if portfolio_xirr is not none %}
       <div class="ic-summary-value {{ 'ic-up' if portfolio_xirr >= 0 else 'ic-down' }}">{{ '%.2f'|format(portfolio_xirr) }}%</div>
@@ -41,28 +61,33 @@
       <div class="ic-summary-value ic-muted">—</div>
       <div class="ic-summary-sub">needs at least one buy/sell across holdings</div>
     {% endif %}
-  </div>
-  <div class="ic-summary-card">
+    <div class="ic-card-hint">Sort by XIRR →</div>
+  </a>
+  <a href="{{ url_for('international_centre.remittances') }}" class="ic-summary-card ic-card-link {{ 'ic-card-warn' if lrs_status.status != 'ok' else '' }}">
     <div class="ic-summary-label">LRS Used This {{ lrs_status.fy_label }}</div>
     <div class="ic-summary-value {{ 'ic-down' if lrs_status.status != 'ok' else '' }}">{{ lrs_status.pct_used }}%</div>
     <div class="ic-summary-sub">${{ '{:,.0f}'.format(lrs_status.total_usd) }} of ${{ '{:,.0f}'.format(lrs_status.limit_usd) }}</div>
-  </div>
+    <div class="ic-card-hint">View remittances →</div>
+  </a>
 </div>
 
 {% if holdings %}
 <div class="ic-chart-grid">
   <div class="ic-card">
-    <div class="section-label">Asset Allocation</div>
+    <div class="section-label">Asset Allocation <span class="ic-chart-hint">click a slice to filter</span></div>
     <div class="ic-chart-wrap"><canvas id="assetAllocationChart"></canvas></div>
   </div>
   <div class="ic-card">
-    <div class="section-label">Currency Exposure</div>
+    <div class="section-label">Currency Exposure <span class="ic-chart-hint">click a slice to filter</span></div>
     <div class="ic-chart-wrap"><canvas id="currencyExposureChart"></canvas></div>
   </div>
 </div>
 
 <div class="ic-card">
-  <div class="section-label">Holdings ({{ holdings|length }})</div>
+  <div class="ic-card-head">
+    <div class="section-label" style="margin-bottom:0;">Top Holdings</div>
+    <a href="{{ url_for('international_centre.holdings_list') }}" class="ic-link">View all {{ holdings|length }} →</a>
+  </div>
   <div class="ic-table-wrap">
     <table class="ic-table">
       <thead>
@@ -72,7 +97,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for h in holdings %}
+        {% for h in top_holdings %}
         <tr>
           <td><a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="ic-link">{{ h.name }}</a></td>
           <td>{{ h.asset_type }}</td>
@@ -101,6 +126,14 @@
   <a href="{{ url_for('international_centre.archived_holdings') }}" class="ic-link">View archived holdings</a>
 </div>
 
+<script>
+  // Batch 10.2: close the Tax & Compliance menu when clicking elsewhere.
+  document.addEventListener('click', function (e) {
+    const m = document.getElementById('icTaxMenu');
+    if (m && m.open && !m.contains(e.target)) m.open = false;
+  });
+</script>
+
 {% if holdings %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <script>
@@ -116,7 +149,9 @@
 
   const icPalette = ['#6366f1', '#0ea5e9', '#8b5cf6', '#D97706', '#0F766E', '#16A34A', '#F59E0B', '#DC2626', '#64748B', '#7C3AED'];
 
-  function icDoughnut(canvasId, rawData) {
+  const icListUrl = {{ url_for('international_centre.holdings_list')|tojson }};
+
+  function icDoughnut(canvasId, rawData, filterParam) {
     const canvas = document.getElementById(canvasId);
     if (!canvas || !rawData.length) return;
     const labels = rawData.map(d => d.label);
@@ -127,6 +162,11 @@
       data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: icBorderCol, borderWidth: 3, hoverOffset: 6 }] },
       options: {
         responsive: true, maintainAspectRatio: false, cutout: '60%',
+        // Batch 10.2: clicking a slice opens the Holdings page filtered to it.
+        onClick: (evt, els) => {
+          if (els.length) window.location = icListUrl + '?' + filterParam + '=' + encodeURIComponent(labels[els[0].index]);
+        },
+        onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
         plugins: {
           legend: { position: 'bottom', labels: { padding: 12, usePointStyle: true, font: { size: 10 } } },
           tooltip: { callbacks: { label: ctx => {
@@ -142,13 +182,13 @@
     {% for asset_type, info in by_type.items() %}
     { label: {{ asset_type|tojson }}, value: {{ info.usd_value|round(2) }} },
     {% endfor %}
-  ]);
+  ], 'asset_type');
 
   icDoughnut('currencyExposureChart', [
     {% for currency, info in by_currency.items() %}
     { label: {{ currency|tojson }}, value: {{ info.usd_value|round(2) }} },
     {% endfor %}
-  ]);
+  ], 'currency');
 </script>
 {% endif %}
 
@@ -156,6 +196,35 @@
   .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
   .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+
+  .ic-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .ic-add-btn { text-decoration:none; display:inline-block; width:auto; padding:10px 18px; }
+
+  .ic-menu { position:relative; }
+  .ic-menu > summary { list-style:none; display:inline-block; user-select:none; }
+  .ic-menu > summary::-webkit-details-marker { display:none; }
+  .ic-menu-panel { position:absolute; right:0; top:calc(100% + 6px); min-width:210px; z-index:50;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:6px;
+    box-shadow:var(--shadow-sm); display:flex; flex-direction:column; }
+  .ic-menu-panel a { padding:9px 12px; border-radius:6px; color:var(--text); text-decoration:none; font-size:0.85rem; }
+  .ic-menu-panel a:hover { background:var(--surface2); color:var(--accent); }
+
+  .ic-banners { display:flex; flex-direction:column; gap:10px; margin-bottom:20px; }
+  .ic-banner { display:flex; align-items:center; gap:12px; border:1px solid; border-radius:10px; padding:12px 16px;
+    text-decoration:none; font-size:0.85rem; transition:filter 0.15s; }
+  .ic-banner:hover { filter:brightness(0.97); }
+  .ic-banner-danger  { background:var(--down-bg);    border-color:var(--down);    color:var(--down); }
+  .ic-banner-warning { background:var(--warning-bg); border-color:var(--warning); color:var(--warning); }
+  .ic-banner-info    { background:var(--surface);    border-color:var(--border);  color:var(--text); }
+  .ic-banner-text { flex:1; }
+  .ic-banner-go { font-weight:600; white-space:nowrap; font-size:0.78rem; }
+
+  .ic-card-link { display:block; text-decoration:none; transition:border-color 0.2s, transform 0.15s; }
+  .ic-card-link:hover { border-color:var(--accent); transform:translateY(-1px); }
+  .ic-card-warn { border-color:var(--warning); }
+  .ic-card-hint { font-size:0.72rem; color:var(--accent); margin-top:8px; font-weight:500; }
+  .ic-card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .ic-chart-hint { font-size:0.7rem; font-weight:400; color:var(--muted2); text-transform:none; letter-spacing:normal; margin-left:6px; }
 
   .ic-btn-secondary {
     background:var(--surface); border:1px solid var(--border); border-radius:8px;
@@ -191,6 +260,7 @@
 
   @media (max-width: 768px) {
     .ic-header { flex-direction:column; }
+    .ic-menu-panel { right:auto; left:0; }
     .ic-summary-grid { grid-template-columns:1fr 1fr; }
   }
 </style>
