@@ -595,3 +595,22 @@ class InternationalTimeline(db.Model):
 
     def __repr__(self):
         return f"<InternationalTimeline {self.event_type} holding={self.holding_id}>"
+
+
+class InternationalReminderAck(db.Model):
+    """Batch 10.6 (Oct 2026) — remembers which reminders the user has
+    marked done (or dismissed). Reminders themselves are NOT stored: they
+    are computed fresh from holdings, remittances and today's date every
+    time (see services.get_reminders), so they can never go stale. This
+    table only records "the user has dealt with reminder X", keyed by a
+    short period-specific string such as "schedule_fa:2025",
+    "form67:2025" or "estate:over"."""
+    __tablename__ = "international_reminder_ack"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "reminder_key", name="uq_intl_reminder_ack_user_key"),
+    )
+
+    id              = db.Column(db.Integer, primary_key=True)
+    user_id         = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    reminder_key    = db.Column(db.String(60), nullable=False)
+    acknowledged_at = db.Column(db.DateTime, default=datetime.utcnow)

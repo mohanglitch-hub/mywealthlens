@@ -3,22 +3,35 @@
 
 {% block content %}
 {% include "international_centre/_confirm_modal.html" %}
+{% include "international_centre/_ui.html" %}
 <div class="ic-header">
-  <div>
-    <h1 class="ic-title">{{ holding.name }}</h1>
-    <p class="ic-subtitle">{{ holding.asset_type }}{{ ' · ' + holding.ticker if holding.ticker }}{{ ' · ' + holding.country if holding.country }}</p>
+  <div class="hd-head">
+    <div class="hd-icon" aria-hidden="true">{{ asset_icon(holding.asset_type) }}</div>
+    <div>
+      <div class="hd-type">{{ holding.asset_type }}</div>
+      <h1 class="ic-title">{{ holding.name }}</h1>
+      <div class="hd-badges">
+        {% if holding.ticker %}<span class="iu-badge iu-badge-muted">{{ holding.ticker }}</span>{% endif %}
+        {% if holding.country %}<span class="iu-badge iu-badge-accent">{{ holding.country }}</span>{% endif %}
+        <span class="iu-badge iu-badge-muted">{{ holding.native_currency }}</span>
+        {% if staleness.status != 'fresh' %}<span class="iu-badge iu-badge-warning">{{ 'Price out of date' if staleness.kind == 'price' else 'Value out of date' }}</span>{% endif %}
+        {% if unconverted %}<span class="iu-badge iu-badge-down">No USD rate</span>{% endif %}
+        {% if nominee_gap %}<span class="iu-badge iu-badge-muted">{{ nominee_gap }}</span>{% endif %}
+      </div>
+    </div>
   </div>
-  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+  <div class="iu-btn-group">
     <form method="POST" action="{{ url_for('international_centre.refresh_holding', holding_id=holding.id) }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <button type="submit" class="ic-btn-secondary">Refresh</button>
+      <button type="submit" class="iu-btn">↻ Refresh</button>
     </form>
-    <a href="{{ url_for('international_centre.edit_holding', holding_id=holding.id) }}" class="ic-btn-secondary" style="text-decoration:none;">Edit</a>
+    <a href="{{ url_for('international_centre.edit_holding', holding_id=holding.id) }}" class="iu-btn iu-btn-primary">✏️ Edit</a>
     <form method="POST" action="{{ url_for('international_centre.archive_holding', holding_id=holding.id) }}" style="display:inline;" id="archiveHoldingForm">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <button type="button" class="ic-btn-secondary"
+      <button type="button" class="iu-btn"
               onclick="icConfirmAction(document.getElementById('archiveHoldingForm'), 'Archive this holding?', 'You can restore it later from Archived Holdings.', 'Archive')">Archive</button>
     </form>
+    <a href="{{ url_for('international_centre.holdings_list') }}" class="iu-btn">← Back</a>
   </div>
 </div>
 
@@ -52,6 +65,11 @@
     {% if pnl.dividends_native %}<div class="ic-summary-sub">+ {{ '{:,.2f}'.format(pnl.dividends_native) }} dividends received (net)</div>{% endif %}
   </div>
   {% endif %}
+  <div class="ic-summary-card" id="icInrCard" data-url="{{ url_for('international_centre.holding_inr_return', holding_id=holding.id) }}" aria-live="polite">
+    <div class="ic-summary-label">Return in INR</div>
+    <div class="ic-summary-value ic-muted" id="icInrValue">…</div>
+    <div class="ic-summary-sub" id="icInrSub">calculating at the exchange rate on each date</div>
+  </div>
   <div class="ic-summary-card">
     <div class="ic-summary-label">XIRR</div>
     {% if holding.xirr is not none %}
@@ -487,6 +505,12 @@
   .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
   .ic-link-btn:hover { text-decoration:underline; }
 
+  .hd-head { display:flex; align-items:flex-start; gap:16px; }
+  .hd-icon { font-size:2rem; width:56px; height:56px; display:flex; align-items:center; justify-content:center; background:var(--accent-bg);
+    border-radius:14px; flex-shrink:0; }
+  .hd-type { font-size:0.74rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .hd-badges { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  @media (max-width:768px) { .hd-head { flex-direction:column; } }
   .ic-fresh-card { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:16px 24px; }
   .ic-fresh-main { font-size:0.88rem; color:var(--text); font-weight:500; }
   .ic-fresh-sub { font-size:0.78rem; color:var(--muted); margin-top:3px; }
@@ -503,6 +527,32 @@
   .ic-tl-date { font-size:0.74rem; color:var(--muted2); }
   .ic-tl-desc { font-size:0.82rem; color:var(--muted); margin-top:2px; }
 </style>
+
+<script>
+  // Batch 10.5 (Oct 2026) — this holding's return from the rupee investor's
+  // point of view, fetched after the page loads so a slow exchange-rate
+  // service can never delay it.
+  (function () {
+    var card = document.getElementById('icInrCard');
+    if (!card) return;
+    var val = document.getElementById('icInrValue'), sub = document.getElementById('icInrSub');
+    var fmt = function (n) { return n.toLocaleString('en-IN', { maximumFractionDigits: 0 }); };
+    fetch(card.dataset.url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.available) { val.textContent = '—'; sub.textContent = d.message || 'Not available.'; return; }
+        var up = d.gain_inr >= 0;
+        val.textContent = (up ? '+' : '-') + '₹' + fmt(Math.abs(d.gain_inr));
+        val.className = 'ic-summary-value ' + (up ? 'ic-up' : 'ic-down');
+        var parts = [];
+        if (d.gain_pct !== null) parts.push((d.gain_pct >= 0 ? '+' : '') + d.gain_pct.toFixed(2) + '% on ₹' + fmt(d.invested_inr) + ' invested');
+        if (d.xirr_inr !== null) parts.push('XIRR ' + d.xirr_inr.toFixed(2) + '% in INR');
+        if (d.currency_effect_pts !== null) parts.push('currency effect ' + (d.currency_effect_pts >= 0 ? '+' : '') + d.currency_effect_pts.toFixed(2) + ' pts vs ' + d.currency);
+        sub.textContent = parts.join(' · ');
+      })
+      .catch(function () { val.textContent = '—'; sub.textContent = 'Couldn\'t load just now.'; });
+  })();
+</script>
 
 {% if value_history.points|length >= 2 %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>

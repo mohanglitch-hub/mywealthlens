@@ -169,3 +169,22 @@ def fetch_ticker_price(ticker):
     except Exception:
         pass
     return None
+
+
+# Batch 10.7 (Oct 2026) — one emoji per asset type, used by the dashboard
+# category cards, holding rows and holding-detail header (same idea as
+# insurance_centre's category_icons). Keyed by the type's display string.
+ASSET_TYPE_ICONS = {
+    "US/International Stock": "\U0001F4C8",
+    "US/International ETF": "\U0001F9FA",
+    "International Mutual Fund": "\U0001F4BC",
+    "Foreign Bank Account": "\U0001F3E6",
+    "Foreign Real Estate": "\U0001F3E0",
+    "Foreign Bond": "\U0001F4DC",
+    "RSU / ESPP (Employer Stock)": "\U0001F3E2",
+    "Other": "\U0001F4CB",
+}
+
+
+def asset_icon(asset_type):
+    return ASSET_TYPE_ICONS.get(asset_type, "\U0001F4CB")

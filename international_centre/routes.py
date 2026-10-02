@@ -13,7 +13,9 @@ Document Vault (Batch 9.3, Sep 2026) — per-holding upload/delete/
 download/preview routes plus a standalone module-wide vault page,
 mirroring insurance_centre/retirement_centre's Document Vault exactly.
 """
-from flask import render_template, request, redirect, url_for, flash, abort, send_file
+import io
+
+from flask import render_template, request, redirect, url_for, flash, abort, send_file, jsonify, Response
 from flask_login import login_required, current_user
 
 from international_centre import international_bp
@@ -24,8 +26,9 @@ from international_centre.models import (
     VestingPlanType,
 )
 from international_centre import services
+from international_centre import export as report_export
 from international_centre.utils import (
-    format_date, COUNTRIES, fy_bounds,
+    format_date, COUNTRIES, fy_bounds, asset_icon,
     save_document_file, delete_document_file, secure_file_path,
     is_previewable, get_preview_mimetype,
 )
@@ -83,6 +86,16 @@ def _get_tranche_or_404(tranche_id):
 
 # ── Dashboard ─────────────────────────────────────────────────────────
 
+def _resolve_reminders(reminders):
+    """Attach a ready-to-use URL to each reminder's (endpoint, params) link."""
+    out = []
+    for r in reminders:
+        r = dict(r)
+        r["url"] = url_for(r["link"][0], **r["link"][1]) if r.get("link") else None
+        out.append(r)
+    return out
+
+
 def _resolve_alerts(alerts):
     """Turn each service alert's (endpoint, params) link into a URL."""
     out = []
@@ -117,11 +130,19 @@ def dashboard():
     # full searchable/sortable table lives on the Holdings page.
     top_holdings = sorted(holdings, key=lambda h: h.usd_value or 0.0, reverse=True)[:6]
 
+    # Batch 10.6/10.7: reminders centre, category cards, activity feed.
+    reminders = [r for r in _resolve_reminders(services.get_reminders(current_user.id)) if not r["done"]]
+
     return render_template(
         "international_centre/dashboard.html",
         holdings=holdings, top_holdings=top_holdings, totals=totals,
         portfolio_xirr=portfolio_xirr, lrs_status=lrs_status, alerts=alerts,
         by_type=by_type, by_currency=by_currency,
+        reminders=reminders[:4], reminder_count=len(reminders),
+        categories=services.get_asset_categories(current_user.id),
+        recent_activity=services.get_recent_activity(current_user.id),
+        doc_count=services.get_document_count(current_user.id),
+        asset_icon=asset_icon,
         format_money_usd=currency_display.format_money_usd, format_date=format_date,
     )
 
@@ -154,11 +175,19 @@ def holdings_list():
         q=q, asset_type=asset_type, country=country, currency=currency,
         flag=flag, flag_label=dict(services.FLAG_OPTIONS).get(flag, ""), sort=sort,
         sort_options=services.SORT_OPTIONS, flag_options=services.FLAG_OPTIONS,
+        asset_icon=asset_icon,
         format_money_usd=currency_display.format_money_usd, format_date=format_date,
     )
 
 
 # ── Holdings ──────────────────────────────────────────────────────────
+
+def _preselect_type():
+    """Dashboard category cards link to the add form with ?asset_type=...;
+    honour it only if it is one of the real types."""
+    t = (request.args.get("asset_type") or "").strip()
+    return {"asset_type": t} if t in InternationalAssetType.ALL else {}
+
 
 @international_bp.route("/holdings/add", methods=["GET", "POST"])
 @login_required
@@ -190,7 +219,7 @@ def add_holding():
         return redirect(url_for("international_centre.holding_detail", holding_id=holding.id))
 
     return render_template(
-        "international_centre/holding_form.html", holding=None, data={},
+        "international_centre/holding_form.html", holding=None, data=_preselect_type(),
         existing_nominees=[],
         asset_types=InternationalAssetType.ALL,
         ticker_based_types=list(InternationalAssetType.TICKER_BASED),
@@ -217,6 +246,8 @@ def holding_detail(holding_id):
     return render_template(
         "international_centre/holding_detail.html", holding=holding, transactions=transactions,
         pnl=services.holding_pnl(holding), staleness=services.get_staleness(holding),
+        nominee_gap=services.get_nominee_gap(holding), asset_icon=asset_icon,
+        unconverted=(holding.fx_rate_used is None and holding.native_currency != "USD"),
         value_history=services.get_value_history(holding),
         timeline=services.get_timeline(holding, limit=25),
         nominees=holding.nominees.all(),
@@ -329,7 +360,7 @@ def delete_holding(holding_id):
 def archived_holdings():
     holdings = services.get_holdings(current_user.id, archived=True)
     return render_template(
-        "international_centre/archived.html", holdings=holdings,
+        "international_centre/archived.html", holdings=holdings, asset_icon=asset_icon,
         format_money_usd=currency_display.format_money_usd,
     )
 
@@ -538,6 +569,107 @@ def vesting_perquisite():
         "international_centre/vesting_perquisite.html", summary=summary,
         format_date=format_date, current_fy_start_year=default_fy_start_year,
     )
+
+
+# ── Report exports (Batch 10.4, Oct 2026) ─────────────────────────────
+
+@international_bp.route("/reports/<report_key>/export/<fmt>")
+@login_required
+def export_report(report_key, fmt):
+    """PDF / CSV download of one report. The period comes from ?year=
+    (Schedule FA, a calendar year) or ?fy= (everything else, the FY's
+    start year); junk or absurd values fall back to the default."""
+    if report_key not in report_export.REPORTS or fmt not in ("pdf", "csv"):
+        abort(404)
+    _builder, kind = report_export.REPORTS[report_key]
+    period = report_export.clamp_period(request.args.get("year" if kind == "year" else "fy"), kind)
+    report = report_export.build_report(report_key, current_user.id, period)
+    filename = report_export.export_filename(report, fmt)
+
+    if fmt == "csv":
+        resp = Response(report_export.to_csv_bytes(report), mimetype="text/csv; charset=utf-8")
+        resp.headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    else:
+        try:
+            pdf = report_export.to_pdf_bytes(report, current_user.name)
+        except ImportError:
+            flash("PDF export needs the reportlab package. Run: py -m pip install reportlab", "error")
+            return redirect(request.referrer or url_for("international_centre.dashboard"))
+        resp = send_file(io.BytesIO(pdf), mimetype="application/pdf", as_attachment=True, download_name=filename)
+    resp.headers["Cache-Control"] = "no-store"  # personal financial data: never cache
+    return resp
+
+
+# ── Dividend income (Batch 10.5, Oct 2026) ────────────────────────────
+
+@international_bp.route("/dividends")
+@login_required
+def dividends():
+    default_fy = fy_bounds(today_ist())[0].year
+    fy_start_year = report_export.clamp_period(request.args.get("fy"), "fy")
+    summary = services.get_dividend_income(current_user.id, fy_start_year)
+    return render_template(
+        "international_centre/dividends.html", summary=summary, format_date=format_date,
+        current_fy_start_year=default_fy, format_money_usd=currency_display.format_money_usd,
+        asset_icon=asset_icon,
+    )
+
+
+# ── INR-perspective returns (Batch 10.5) — loaded lazily by the page ──
+
+def _json_no_store(payload):
+    resp = jsonify(payload)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@international_bp.route("/holdings/<int:holding_id>/inr-return.json")
+@login_required
+def holding_inr_return(holding_id):
+    holding = _get_holding_or_404(holding_id)
+    return _json_no_store(services.get_inr_return(holding))
+
+
+@international_bp.route("/inr-return.json")
+@login_required
+def portfolio_inr_return():
+    return _json_no_store(services.get_portfolio_inr_return(current_user.id))
+
+
+# ── Reminders (Batch 10.6, Oct 2026) ──────────────────────────────────
+
+@international_bp.route("/reminders")
+@login_required
+def reminders():
+    items = _resolve_reminders(services.get_reminders(current_user.id))
+    return render_template(
+        "international_centre/reminders.html",
+        active=[r for r in items if not r["done"]], done=[r for r in items if r["done"]],
+        format_date=format_date,
+    )
+
+
+def _reminder_redirect():
+    return redirect(url_for("international_centre.dashboard") if request.form.get("next") == "dashboard"
+                    else url_for("international_centre.reminders"))
+
+
+@international_bp.route("/reminders/done", methods=["POST"])
+@login_required
+def reminder_done():
+    if not services.acknowledge_reminder(current_user.id, (request.form.get("key") or "").strip()):
+        abort(400)
+    return _reminder_redirect()
+
+
+@international_bp.route("/reminders/undo", methods=["POST"])
+@login_required
+def reminder_undo():
+    key = (request.form.get("key") or "").strip()
+    if not services.valid_ack_key(key):
+        abort(400)
+    services.unacknowledge_reminder(current_user.id, key)
+    return _reminder_redirect()
 
 
 # ── Documents (Batch 9.3, Sep 2026) ──────────────────────────────────

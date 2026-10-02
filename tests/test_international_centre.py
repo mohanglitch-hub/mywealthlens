@@ -1398,6 +1398,549 @@ def main():
                 db.session.delete(_u)
         db.session.commit()
 
+    # ── 21. Report exports: PDF + CSV (Batch 10.4, Oct 2026) ──
+    import io as _io
+    import pdfplumber
+    from international_centre import export as rexp
+    from international_centre.models import VestingTranche
+
+    with app.app_context():
+        for _em in ("international_export_a@example.com", "international_export_b@example.com"):
+            _u = User.query.filter_by(email=_em).first()
+            if _u:
+                for _h in InternationalHolding.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_h)
+                for _r in RemittanceRecord.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_r)
+                db.session.delete(_u)
+        db.session.commit()
+        ua = User(name="Export A", email="international_export_a@example.com", password="unused")
+        ub = User(name="Export B", email="international_export_b@example.com", password="unused")
+        db.session.add_all([ua, ub])
+        db.session.commit()
+        exp_a, exp_b = ua.id, ub.id
+
+        def mkh(uid, **kw):
+            h, err = services.create_holding(uid, {"native_currency": "USD", **kw})
+            assert err is None, err
+            return h
+
+        h_odd = mkh(exp_a, asset_type=InternationalAssetType.US_STOCK, name="AT&T <Inc> \u20b9 \u682a\u5f0f\u4f1a\u793e",
+                    ticker="TXX", country="United States", quantity="10", avg_cost_native="100")
+        h_formula = mkh(exp_a, asset_type=InternationalAssetType.US_STOCK, name="=SUM(1+1)", ticker="FRM",
+                        country="United States", quantity="5", avg_cost_native="10")
+        h_rsu = mkh(exp_a, asset_type=InternationalAssetType.RSU_ESPP, name="Employer Corp", ticker="EMP",
+                    country="United States", quantity="10", avg_cost_native="50")
+        h_secret = mkh(exp_b, asset_type=InternationalAssetType.US_STOCK, name="User B Secret Holding", ticker="SEC",
+                       country="United States", quantity="1", avg_cost_native="1")
+        for h in (h_odd, h_formula, h_rsu, h_secret):
+            h.fx_rate_used = 1.0
+            h.usd_value = h.current_value_native
+        db.session.commit()
+
+        services.add_transaction(h_odd, {"date": "2025-06-01", "txn_type": "BUY", "quantity": "10", "price_native": "100", "amount_native": "1000"})
+        services.add_transaction(h_odd, {"date": "2025-12-01", "txn_type": "SELL", "quantity": "5", "price_native": "150", "amount_native": "750"})
+        services.add_transaction(h_odd, {"date": "2025-09-15", "txn_type": "DIVIDEND", "amount_native": "0", "gross_amount_native": "20", "tax_withheld_native": "5"})
+        services.add_vesting_tranche(h_rsu, {"plan_type": "RSU", "vest_date": "2025-08-10", "quantity": "10", "fmv_native": "60", "purchase_price_native": "0"})
+        services.add_remittance(exp_a, {"date": "2025-05-10", "amount_inr": "400000", "purpose": RemittancePurpose.INVESTMENT_SECURITIES})
+        services.add_remittance(exp_a, {"date": "2025-07-10", "amount_inr": "700000", "purpose": RemittancePurpose.EDUCATION, "education_loan_funded": "on"})
+        services.add_remittance(exp_b, {"date": "2025-05-11", "amount_inr": "987654", "purpose": RemittancePurpose.OTHER})
+
+        # ── pure helpers ──
+        assert rexp.pdf_safe("\u20b9 5 \u2192 6 \u2265 4 \u682a") == "Rs. 5 -> 6 >= 4 ?", rexp.pdf_safe("\u20b9 5 \u2192 6 \u2265 4 \u682a")
+        assert rexp.pdf_safe(None) == "" and rexp.pdf_safe("Caf\u00e9") == "Caf\u00e9"
+        assert rexp.csv_safe("=SUM(1+1)") == "'=SUM(1+1)" and rexp.csv_safe("+1") == "'+1" and rexp.csv_safe("@x") == "'@x"
+        assert rexp.csv_safe("-5 Fund") == "'-5 Fund" and rexp.csv_safe("Normal") == "Normal" and rexp.csv_safe(12.5) == 12.5
+        print("PASS: export text helpers neutralise rupee/arrow/non-Latin glyphs and spreadsheet-formula injection")
+
+        assert rexp.clamp_period("2025", "fy") == 2025
+        for junk in ("abc", "99999999", "-4", "0", "1800", ""):
+            assert rexp.clamp_period(junk, "fy") == rexp.default_period("fy"), junk
+        assert rexp.clamp_period(None, "year") == rexp.default_period("year")
+        print("PASS: clamp_period() falls back to the default for junk and absurd year values")
+
+        # ── every report: PDF + CSV build, agree with the on-screen service, and stay user-scoped ──
+        periods = {"schedule_fa": 2025, "capital_gains": 2025, "dtaa": 2025, "vesting": 2025, "lrs": 2025, "dividends": 2025}
+        for key, period in periods.items():
+            rep = rexp.build_report(key, exp_a, period)
+            assert rep.rows, f"{key} should have rows for the seeded data"
+            assert all(len(r) == len(rep.columns) for r in rep.rows), key
+            for tr in (rep.totals or []):
+                assert len(tr) == len(rep.columns), f"{key} totals row misaligned"
+            csv_bytes = rexp.to_csv_bytes(rep)
+            assert csv_bytes.startswith(b"\xef\xbb\xbf"), "CSV must start with a UTF-8 BOM so Excel reads it right"
+            import re as _re
+            assert not _re.search(r"\d\.\d{7,}", csv_bytes.decode("utf-8-sig")), f"{key}: float noise in CSV"
+            text = csv_bytes.decode("utf-8-sig")
+            assert "User B Secret" not in text and "987654" not in text, f"{key}: another user's data leaked into the export"
+            pdf = rexp.to_pdf_bytes(rep, "Export A")
+            assert pdf[:5] == b"%PDF-", key
+            with pdfplumber.open(_io.BytesIO(pdf)) as doc:
+                pdf_text = "\n".join((pg.extract_text() or "") for pg in doc.pages)
+            assert "\u20b9" not in pdf_text and "\u20b9".encode() not in pdf, f"{key}: raw rupee glyph in PDF"
+            assert "not a filing document" in pdf_text.lower() or "tracking aid" in pdf_text.lower(), key
+            assert rep.title.split()[0] in pdf_text, key
+        print("PASS: all six reports build, produce a valid PDF + BOM'd CSV, align totals, and never include another user's data")
+
+        # numbers in the CSV are the SAME figures the page's service computes
+        fa_page = services.get_schedule_fa_summary(exp_a, 2025)
+        fa_csv = list(__import__("csv").reader(_io.StringIO(rexp.to_csv_bytes(rexp.build_report("schedule_fa", exp_a, 2025)).decode("utf-8-sig"))))
+        assert len(fa_csv) == 1 + len(fa_page["rows"]) + 1, "header + one row per holding + totals"
+        assert fa_csv[0][0] == "Holding" and fa_csv[0][4] == "Opening (USD)"
+        by_name = {r[0]: r for r in fa_csv[1:-1]}
+        for row in fa_page["rows"]:
+            nm = row["holding"].name
+            nm_csv = "'" + nm if nm[:1] in "=+-@" else nm
+            assert float(by_name[nm_csv][6]) == row["closing_usd"], nm
+        lrs_page = services.get_lrs_status(exp_a, anchor_date=date(2025, 4, 1))
+        lrs_csv = list(__import__("csv").reader(_io.StringIO(rexp.to_csv_bytes(rexp.build_report("lrs", exp_a, 2025)).decode("utf-8-sig"))))
+        assert float(lrs_csv[-1][1]) == lrs_page["total_inr"] and float(lrs_csv[-1][3]) == lrs_page["total_tcs_inr"]
+        assert lrs_csv[1][4] == RemittancePurpose.INVESTMENT_SECURITIES and "(loan-funded)" in lrs_csv[2][4]
+        assert lrs_csv[1][0] < lrs_csv[2][0], "LRS export is oldest first"
+        print("PASS: CSV figures equal the page's own service figures (Schedule FA closing values; LRS INR and TCS totals)")
+
+        # ── CSV injection + markup safety in a real file ──
+        fa_text = rexp.to_csv_bytes(rexp.build_report("schedule_fa", exp_a, 2025)).decode("utf-8-sig")
+        assert "'=SUM(1+1)" in fa_text and ",=SUM(1+1)" not in fa_text and not fa_text.startswith("=")
+        pdf_fa = rexp.to_pdf_bytes(rexp.build_report("schedule_fa", exp_a, 2025), "O'Brien & <Co>")
+        with pdfplumber.open(_io.BytesIO(pdf_fa)) as doc:
+            fa_pdf_text = "\n".join((pg.extract_text() or "") for pg in doc.pages)
+        assert "AT&T <Inc>" in fa_pdf_text and "Rs." in fa_pdf_text and "?" in fa_pdf_text, fa_pdf_text[:400]
+        assert "O'Brien & <Co>" in fa_pdf_text
+        print("PASS: a holding or user name with & < > rupee or Japanese characters neither breaks the PDF nor leaks glyph boxes; formula-looking names are defused in CSV")
+
+        # an empty period still produces a valid document
+        empty = rexp.build_report("capital_gains", exp_b, 2019)
+        assert empty.rows == [] and rexp.to_pdf_bytes(empty, "X")[:5] == b"%PDF-" and rexp.to_csv_bytes(empty).decode("utf-8-sig").strip() != ""
+        print("PASS: a report with no records still exports (PDF says so, CSV has headers)")
+
+    # ── HTTP ──
+    cx = app.test_client()
+    pg = cx.get('/login')
+    # log in as user A through the real login form
+    from werkzeug.security import generate_password_hash  # noqa: F401  (kept for parity with other sections if needed)
+    with app.app_context():
+        from models import User as _U
+        ua2 = _U.query.filter_by(email="international_export_a@example.com").first()
+    sess_user_id = exp_a
+
+    def login_as(client_obj, uid):
+        with client_obj.session_transaction() as sess:
+            sess["_user_id"] = str(uid)
+            sess["_fresh"] = True
+
+    anon = app.test_client()
+    r = anon.get('/international/reports/lrs/export/csv')
+    assert r.status_code in (301, 302) and "login" in r.headers.get("Location", "").lower(), "exports must require login"
+    print("PASS: report exports require login")
+
+    login_as(cx, exp_a)
+    r = cx.get('/international/reports/schedule_fa/export/pdf?year=2025')
+    assert r.status_code == 200 and r.mimetype == "application/pdf" and r.data[:5] == b"%PDF-", (r.status_code, r.mimetype)
+    assert "attachment" in r.headers["Content-Disposition"] and "mywealthlens_schedule_fa_2025.pdf" in r.headers["Content-Disposition"]
+    assert "no-store" in r.headers.get("Cache-Control", "")
+    r = cx.get('/international/reports/capital_gains/export/csv?fy=2025')
+    assert r.status_code == 200 and r.mimetype == "text/csv" and r.data.startswith(b"\xef\xbb\xbf")
+    assert "FY2025-26" in r.headers["Content-Disposition"] and "no-store" in r.headers.get("Cache-Control", "")
+    body = r.data.decode("utf-8-sig")
+    assert "LTCG total" in body and "STCG total" in body and "User B" not in body
+    print("PASS: PDF and CSV downloads work over real HTTP with attachment filenames and no-store caching")
+
+    for bad in ('/international/reports/nope/export/pdf', '/international/reports/lrs/export/xls', '/international/reports/lrs/export/'):
+        assert cx.get(bad).status_code == 404, bad
+    for key in ("schedule_fa", "capital_gains", "dtaa", "vesting", "lrs", "dividends"):
+        for junk in ("abc", "99999999", "-1", "%27%3B--"):
+            qs = "year" if key == "schedule_fa" else "fy"
+            rr = cx.get(f'/international/reports/{key}/export/csv?{qs}={junk}')
+            assert rr.status_code == 200, (key, junk, rr.status_code)
+    print("PASS: unknown reports/formats 404, and junk period parameters fall back instead of erroring")
+
+    login_as(cx, exp_b)
+    other = cx.get('/international/reports/lrs/export/csv?fy=2025').data.decode("utf-8-sig")
+    assert "987654" in other and "400000" not in other and "700000" not in other
+    print("PASS: a second user's export contains only that user's own remittances")
+
+    # page buttons
+    login_as(cx, exp_a)
+    for url, key, qs in [('/international/schedule-fa?year=2025', 'schedule_fa', 'year=2025'),
+                         ('/international/capital-gains?fy=2025', 'capital_gains', 'fy=2025'),
+                         ('/international/dtaa-summary?fy=2025', 'dtaa', 'fy=2025'),
+                         ('/international/vesting-perquisite?fy=2025', 'vesting', 'fy=2025'),
+                         ('/international/remittances', 'lrs', 'fy=')]:
+        html = cx.get(url).get_data(as_text=True)
+        assert f'/international/reports/{key}/export/pdf' in html and f'/international/reports/{key}/export/csv' in html, url
+    print("PASS: every report page shows PDF and CSV download buttons (LRS also per past year)")
+
+    # ── 22. Dividend income view (Batch 10.5) ──
+    with app.app_context():
+        div = services.get_dividend_income(exp_a, 2025)
+        assert len(div["rows"]) == 1 and div["rows"][0]["name"].startswith("AT&T")
+        r0 = div["rows"][0]
+        assert r0["gross_native"] == 20.0 and r0["withheld_native"] == 5.0 and r0["net_native"] == 15.0 and r0["payments"] == 1, r0
+        assert r0["net_usd"] == 15.0 and r0["net_inr"] == round(15.0 * 83.0, 2), r0
+        assert div["total_net_usd"] == 15.0 and div["payments"] == 1 and div["withholding_unknown"] == 0
+        sep = [m for m in div["months"] if m["label"] == "Sep 2025"][0]
+        assert sep["net_usd"] == 15.0 and sum(m["net_usd"] for m in div["months"]) == 15.0 and len(div["months"]) == 12
+        assert div["months"][0]["label"] == "Apr 2025" and div["months"][-1]["label"] == "Mar 2026"
+        print("PASS: get_dividend_income() totals, gross/withheld/net, USD/INR bridge and the 12 Apr-Mar month buckets are right")
+
+        # a pre-9.5 style dividend (no gross/withholding) is flagged, not silently assumed tax-free
+        services.add_transaction(h_formula, {"date": "2025-10-01", "txn_type": "DIVIDEND", "amount_native": "8"})
+        div2 = services.get_dividend_income(exp_a, 2025)
+        assert div2["withholding_unknown"] == 1 and div2["total_net_usd"] == 23.0 and len(div2["rows"]) == 2
+        frm = [r for r in div2["rows"] if r["name"] == "=SUM(1+1)"][0]
+        assert frm["gross_native"] == 8.0 and frm["withheld_native"] == 0.0
+        print("PASS: a dividend logged without gross/withholding is counted and flagged as 'withholding unknown'")
+
+        # trailing-12-month yield uses today's date and current value
+        h_yield = mkh(exp_a, asset_type=InternationalAssetType.US_ETF, name="Yield ETF", ticker="YLD", country="United States", quantity="10", avg_cost_native="100")
+        h_yield.fx_rate_used, h_yield.usd_value, h_yield.current_value_native = 1.0, 1000.0, 1000.0
+        recent_day = (today_ist() - timedelta(days=30)).isoformat()
+        old_day = (today_ist() - timedelta(days=500)).isoformat()
+        services.add_transaction(h_yield, {"date": recent_day, "txn_type": "DIVIDEND", "amount_native": "30"})
+        services.add_transaction(h_yield, {"date": old_day, "txn_type": "DIVIDEND", "amount_native": "999"})
+        db.session.commit()
+        fy_now = rexp.default_period("fy")
+        div3 = services.get_dividend_income(exp_a, fy_now)
+        y = [r for r in div3["rows"] if r["name"] == "Yield ETF"]
+        assert y and y[0]["ttm_yield_pct"] == 3.0, y   # 30 over the last year / 1000 value; the 500-day-old 999 is excluded
+        assert div3["portfolio_yield_pct"] is not None
+        print("PASS: dividend yield counts only the last 12 months, over current value")
+
+        assert services.get_dividend_income(exp_b, 2025)["rows"] == [], "no cross-user dividends"
+        h_nofx = mkh(exp_b, asset_type=InternationalAssetType.US_STOCK, name="No Rate Co", ticker="NRC", country="Germany", native_currency="EUR", quantity="1", avg_cost_native="1")
+        h_nofx.fx_rate_used = None
+        db.session.commit()
+        services.add_transaction(h_nofx, {"date": "2025-09-01", "txn_type": "DIVIDEND", "amount_native": "5"})
+        d_nofx = services.get_dividend_income(exp_b, 2025)
+        assert d_nofx["any_missing_rate"] is True and d_nofx["rows"][0]["net_usd"] is None and d_nofx["total_net_usd"] == 0.0
+        print("PASS: a holding with no exchange rate shows blank USD/INR instead of a guessed figure, and is flagged")
+
+    login_as(cx, exp_a)
+    dpage = cx.get('/international/dividends?fy=2025')
+    dbody = dpage.get_data(as_text=True)
+    assert dpage.status_code == 200 and 'Dividend Income' in dbody and 'dividendMonthsChart' in dbody and 'Net Received (USD)' in dbody
+    assert '&lt;Inc&gt;' in dbody and '<Inc>' not in dbody, "holding names must be HTML-escaped on the page"
+    empty_div = cx.get('/international/dividends?fy=2019').get_data(as_text=True)
+    assert 'No dividends recorded for FY 2019-20' in empty_div and 'dividendMonthsChart' not in empty_div
+    assert cx.get('/international/dividends?fy=junk').status_code == 200
+    print("PASS: Dividends page renders with chart, escapes names, shows the empty state, and survives junk input")
+
+    # ── 23. INR-perspective returns (Batch 10.5) ──
+    with app.app_context():
+        real_fetch = services.fetch_fx_rate
+        calls = []
+        dated = {date(2025, 1, 1): 80.0, date(2025, 7, 1): 85.0}
+
+        def dated_fx(frm, to="INR", on_date=None):
+            calls.append((frm, to, on_date))
+            if frm.upper() == to.upper():
+                return 1.0, on_date or date.today()
+            if to == "INR" and frm == "USD":
+                return (dated.get(on_date, 85.0) if on_date else 90.0), (on_date or date.today())
+            raise services.FxRateError("no rate for " + frm)
+
+        services.fetch_fx_rate = dated_fx
+        services.clear_fx_caches()
+        try:
+            h_inr = mkh(exp_a, asset_type=InternationalAssetType.US_STOCK, name="INR View Co", ticker="INRV", country="United States", quantity="10", avg_cost_native="100")
+            services.add_transaction(h_inr, {"date": "2025-01-01", "txn_type": "BUY", "quantity": "10", "price_native": "100", "amount_native": "1000"})
+            services.add_transaction(h_inr, {"date": "2025-07-01", "txn_type": "DIVIDEND", "amount_native": "50"})
+            h_inr.current_value_native = 1500.0
+            services.recompute_holding_financials(h_inr)
+            db.session.commit()
+
+            res = services.get_inr_return(h_inr)
+            assert res["available"], res
+            assert res["invested_inr"] == 80_000.0 and res["current_inr"] == 135_000.0, res           # 1000*80 ; 1500*90 (today's rate)
+            assert res["gain_inr"] == 55_000.0 and res["gain_pct"] == 68.75, res
+            assert res["dividends_inr"] == 4_250.0, res                                                 # 50 * 85 on the dividend's own date
+            assert res["xirr_inr"] is not None and res["xirr_native"] is not None
+            assert res["xirr_inr"] > res["xirr_native"], "rupee weakened 80->90, so the INR return must beat the USD return"
+            assert res["currency_effect_pts"] == round(res["xirr_inr"] - res["xirr_native"], 2) and res["currency_effect_pts"] > 0
+            print("PASS: INR return converts each cash flow at its own date's rate (₹80,000 in, ₹1,35,000 now) and shows a positive currency effect")
+
+            n_calls = len(calls)
+            services.get_inr_return(h_inr)
+            historical_again = [c for c in calls[n_calls:] if c[2] is not None]
+            assert historical_again == [], "historical rates are cached and must not be re-fetched"
+            print("PASS: historical exchange rates are cached (second call makes no historical lookups)")
+
+            # a weakening-then-recovering path: INR strengthened => negative currency effect
+            dated[date(2025, 1, 1)] = 95.0
+            services.clear_fx_caches()
+            res2 = services.get_inr_return(h_inr)
+            assert res2["currency_effect_pts"] < 0 and res2["gain_inr"] == 135_000.0 - 95_000.0, res2
+            dated[date(2025, 1, 1)] = 80.0
+            services.clear_fx_caches()
+            print("PASS: when the rupee strengthens the currency effect turns negative")
+
+            # unusable cases never guess
+            h_nobuy = mkh(exp_a, asset_type=InternationalAssetType.US_STOCK, name="No Buys Co", ticker="NBC", country="United States", quantity="1", avg_cost_native="5")
+            r_nb = services.get_inr_return(h_nobuy)
+            assert r_nb["available"] is False and r_nb["reason"] == "no_buys" and "buy transactions" in r_nb["message"]
+            h_bank2 = mkh(exp_a, asset_type=InternationalAssetType.FOREIGN_BANK_ACCOUNT, name="Bank X", current_value_native="100")
+            assert services.get_inr_return(h_bank2)["reason"] == "not_applicable"
+            h_eur = mkh(exp_a, asset_type=InternationalAssetType.US_STOCK, name="Euro Co", ticker="EUR1", country="Germany", native_currency="EUR", quantity="1", avg_cost_native="10")
+            services.add_transaction(h_eur, {"date": "2025-01-01", "txn_type": "BUY", "quantity": "1", "price_native": "10", "amount_native": "10"})
+            r_fx = services.get_inr_return(h_eur)
+            assert r_fx["available"] is False and r_fx["reason"] == "fx" and "exchange rates" in r_fx["message"]
+            print("PASS: no buys / bank account / unavailable exchange rate each return a clear reason instead of a made-up number")
+
+            port = services.get_portfolio_inr_return(exp_a)
+            assert port["available"] and port["included"] >= 1 and "Euro Co" in port["excluded"] and "No Buys Co" in port["excluded"]
+            assert port["xirr_inr"] is not None
+            none_port = services.get_portfolio_inr_return(exp_b)
+            assert none_port["available"] is False
+            print("PASS: portfolio INR return includes usable holdings and lists the ones it had to leave out")
+
+            # HTTP JSON endpoints. Run on a fresh thread: this block sits inside
+            # `with app.app_context()`, and Flask-Login caches the logged-in user on
+            # that shared context, so a "second user" request here would still be
+            # answered as the first. A new thread gets no inherited app context.
+            def http_json_checks():
+                login_as(cx, exp_a)
+                jr = cx.get(f'/international/holdings/{h_inr.id}/inr-return.json')
+                assert jr.status_code == 200 and jr.mimetype == "application/json" and "no-store" in jr.headers.get("Cache-Control", "")
+                jd = jr.get_json()
+                assert jd["available"] and jd["gain_inr"] == 55_000.0
+                assert cx.get('/international/inr-return.json').get_json()["available"] is True
+                login_as(cx, exp_b)
+                assert cx.get(f'/international/holdings/{h_inr.id}/inr-return.json').status_code == 404, "another user's holding must 404"
+                assert anon.get(f'/international/holdings/{h_inr.id}/inr-return.json').status_code in (301, 302)
+            from concurrent.futures import ThreadPoolExecutor as _TPE
+            with _TPE(max_workers=1) as _pool:
+                _pool.submit(http_json_checks).result()
+            print("PASS: INR-return JSON endpoints work, are no-store, 404 for another user's holding, and require login")
+        finally:
+            services.fetch_fx_rate = real_fetch
+            services.clear_fx_caches()
+
+    # ── 24. Reminders: Schedule FA, Form 67/44, stale values, US estate-tax note (Batch 10.6, Oct 2026) ──
+    from international_centre.models import InternationalReminderAck
+    from datetime import datetime as _dt2
+
+    with app.app_context():
+        for _em in ("international_rem_a@example.com", "international_rem_b@example.com"):
+            _u = User.query.filter_by(email=_em).first()
+            if _u:
+                for _h in InternationalHolding.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_h)
+                InternationalReminderAck.query.filter_by(user_id=_u.id).delete()
+                db.session.delete(_u)
+        db.session.commit()
+        ura = User(name="Rem A", email="international_rem_a@example.com", password="unused")
+        urb = User(name="Rem B", email="international_rem_b@example.com", password="unused")
+        db.session.add_all([ura, urb])
+        db.session.commit()
+        rem_a, rem_b = ura.id, urb.id
+
+        def mkr(uid, **kw):
+            h, err = services.create_holding(uid, {"native_currency": "USD", **kw})
+            assert err is None, err
+            return h
+
+        # No holdings at all -> nothing to remind about.
+        assert services.get_reminders(rem_a, today=date(2026, 6, 15)) == []
+
+        h_us = mkr(rem_a, asset_type=InternationalAssetType.US_STOCK, name="US Holding", ticker="USH", country="United States", quantity="1", avg_cost_native="1")
+        h_us.created_at = _dt2(2024, 1, 1)
+        h_us.fx_rate_used = 1.0
+        h_us.usd_value = 10_000.0
+        h_us.price_updated_at = _dt2.utcnow()
+        db.session.commit()
+
+        def fa(today, year=None):
+            year = year or (today.year - 1)
+            return [r for r in services.get_reminders(rem_a, today=today) if r["key"] == f"schedule_fa:{year}"][0]
+
+        r = fa(date(2026, 3, 1))
+        assert r["key"] == "schedule_fa:2025" and r["level"] == "info" and "31 Jul 2026" in r["message"] and "152 days" in r["message"], r["message"]
+        r = fa(date(2026, 7, 10))
+        assert r["level"] == "warning" and "21 days left" in r["message"], r["message"]
+        r = fa(date(2026, 9, 1))
+        assert r["level"] == "warning" and "belated" in r["message"] and "31 Dec 2026" in r["message"]
+        # After 1 Jan the previous year does NOT vanish: it escalates until marked done.
+        r = fa(date(2027, 1, 15), year=2025)
+        assert r["level"] == "danger" and "have passed" in r["message"], r
+        assert fa(date(2027, 1, 15), year=2026)["level"] == "info", "the new latest year starts as a normal reminder"
+        # a user whose first holding was added AFTER the calendar year (and has no earlier-dated activity) has nothing to disclose for it
+        h_us.created_at = _dt2(2026, 2, 1)
+        db.session.commit()
+        assert [x for x in services.get_reminders(rem_a, today=date(2026, 6, 1)) if x["kind"] == "schedule_fa"] == []
+        # ...but a holding added to the app late whose TRANSACTIONS are dated earlier still counts
+        services.add_transaction(h_us, {"date": "2024-03-01", "txn_type": "BUY", "quantity": "1", "price_native": "1", "amount_native": "1"})
+        late = [x["key"] for x in services.get_reminders(rem_a, today=date(2026, 6, 1)) if x["kind"] == "schedule_fa"]
+        assert late == ["schedule_fa:2025"] or set(late) == {"schedule_fa:2025", "schedule_fa:2024"}, late
+        h_us.created_at = _dt2(2024, 1, 1)
+        db.session.commit()
+        print("PASS: Schedule FA reminder follows the usual ITR dates (info -> warning -> belated -> danger), keeps the previous year until marked done, and counts holdings recorded late by their transaction dates")
+
+        # Form 67 / Form 44 — only when foreign tax was actually withheld
+        assert [x for x in services.get_reminders(rem_a, today=date(2026, 10, 2)) if x["kind"] == "form67"] == []
+        services.add_transaction(h_us, {"date": "2025-09-15", "txn_type": "DIVIDEND", "amount_native": "0", "gross_amount_native": "100", "tax_withheld_native": "25"})
+        f67 = [x for x in services.get_reminders(rem_a, today=date(2026, 10, 2)) if x["kind"] == "form67"]
+        assert len(f67) == 1 and f67[0]["key"] == "form67:2025" and f67[0]["title"].startswith("Form 67")
+        assert "31 Mar 2027" in f67[0]["message"] and "BEFORE your return" in f67[0]["message"] and f67[0]["level"] == "warning"
+        services.add_transaction(h_us, {"date": "2026-09-15", "txn_type": "DIVIDEND", "amount_native": "0", "gross_amount_native": "100", "tax_withheld_native": "25"})
+        f44 = [x for x in services.get_reminders(rem_a, today=date(2027, 8, 1)) if x["kind"] == "form67"]
+        assert any(x["key"] == "form67:2026" and x["title"].startswith("Form 44") for x in f44), [x["title"] for x in f44]
+        old_gone = [x for x in services.get_reminders(rem_a, today=date(2028, 6, 1)) if x["kind"] == "form67"]
+        assert all(x["key"] != "form67:2025" for x in old_gone), "a year whose window is long past stops nagging"
+        print("PASS: Form 67 (Form 44 from FY 2026-27) reminder appears only when tax was withheld, names the right form, and old years stop nagging")
+
+        # Stale manual values
+        bank = mkr(rem_a, asset_type=InternationalAssetType.FOREIGN_BANK_ACCOUNT, name="Old Bank", current_value_native="500")
+        bank.value_updated_at = _dt2.utcnow() - timedelta(days=200)
+        fresh_bank = mkr(rem_a, asset_type=InternationalAssetType.FOREIGN_BANK_ACCOUNT, name="Fresh Bank", current_value_native="500")
+        db.session.commit()
+        stale_items = [x for x in services.get_reminders(rem_a) if x["kind"] == "stale_value"]
+        assert [x["title"] for x in stale_items] == ["Update the value of Old Bank"] and stale_items[0]["level"] == "warning"
+        assert "200 days ago" in stale_items[0]["message"] and stale_items[0]["ack_key"] is None
+        for i in range(6):   # many stale holdings collapse to 5 + a summary line
+            hb = mkr(rem_a, asset_type=InternationalAssetType.FOREIGN_BANK_ACCOUNT, name=f"Bulk Bank {i}", current_value_native="1")
+            hb.value_updated_at = _dt2.utcnow() - timedelta(days=100 + i)
+        db.session.commit()
+        stale_items = [x for x in services.get_reminders(rem_a) if x["kind"] == "stale_value"]
+        assert len(stale_items) == 6 and stale_items[-1]["key"] == "stale:more" and "2 more" in stale_items[-1]["title"], [x["title"] for x in stale_items]
+        assert not any(x["kind"] == "stale_value" for x in services.get_reminders(rem_b))
+        print("PASS: stale manually-valued holdings are listed oldest-first, capped at 5 with a '+N more' line, and never shown to another user")
+
+        # US estate-tax awareness note
+        exp = services.get_us_situs_exposure(rem_a)
+        assert exp["total_usd"] == 10_000.0 and len(exp["holdings"]) == 1 and exp["exemption_usd"] == 60_000
+        assert not [x for x in services.get_reminders(rem_a) if x["kind"] == "estate"], "well under the threshold: no note"
+        h_us.usd_value = 50_000.0
+        db.session.commit()
+        est = [x for x in services.get_reminders(rem_a) if x["kind"] == "estate"][0]
+        assert est["key"] == "estate:near" and est["level"] == "info" and "approaching" in est["message"] and "$60,000" in est["message"]
+        h_us.usd_value = 75_000.0
+        db.session.commit()
+        est = [x for x in services.get_reminders(rem_a) if x["kind"] == "estate"][0]
+        assert est["key"] == "estate:over" and est["level"] == "warning" and "above" in est["message"]
+        assert "not tax advice" in est["detail"] and "no India-US estate-tax treaty" in est["detail"]
+        print("PASS: US estate-tax note appears at 80% of $60,000 (info) and above it (warning), with the not-advice wording")
+
+        # what counts as US-situs
+        h_uk = mkr(rem_a, asset_type=InternationalAssetType.US_ETF, name="UK Fund", ticker="UKF", country="United Kingdom", quantity="1", avg_cost_native="1")
+        h_uk.usd_value = 500_000.0
+        bank_us = mkr(rem_a, asset_type=InternationalAssetType.FOREIGN_BANK_ACCOUNT, name="US Bank", country="United States", current_value_native="900000")
+        bank_us.usd_value = 900_000.0
+        h_nocountry = mkr(rem_a, asset_type=InternationalAssetType.US_STOCK, name="No Country Co", ticker="NCC", quantity="1", avg_cost_native="1")
+        h_nocountry.usd_value = 1_000.0
+        db.session.commit()
+        exp2 = services.get_us_situs_exposure(rem_a)
+        names = {h.name for h in exp2["holdings"]}
+        assert names == {"US Holding", "No Country Co"}, names
+        assert [h.name for h in exp2["assumed"]] == ["No Country Co"] and exp2["total_usd"] == 76_000.0
+        est2 = [x for x in services.get_reminders(rem_a) if x["kind"] == "estate"][0]
+        assert "assumed to be US-listed" in est2["message"]
+        print("PASS: only US-situs holdings count (UK-listed fund and US bank deposits excluded; no-country USD stock assumed US and flagged)")
+
+        # acknowledgements
+        assert services.valid_ack_key("schedule_fa:2025") and services.valid_ack_key("form67:2026") and services.valid_ack_key("estate:over")
+        for bad_key in ("", None, "estate:", "schedule_fa:25", "stale:5", "x; DROP TABLE", "estate:over\n", "form67:2025 "):
+            assert services.valid_ack_key(bad_key) is False, repr(bad_key)
+        assert services.acknowledge_reminder(rem_a, "estate:nonsense") is False
+        assert services.acknowledge_reminder(rem_a, "schedule_fa:2025") is True
+        assert services.acknowledge_reminder(rem_a, "schedule_fa:2025") is True    # idempotent
+        assert InternationalReminderAck.query.filter_by(user_id=rem_a, reminder_key="schedule_fa:2025").count() == 1
+        assert fa(date(2026, 3, 1))["done"] is True
+        assert not any(x["kind"] == "schedule_fa" for x in services.get_reminders(rem_b, today=date(2026, 3, 1)))
+        services.unacknowledge_reminder(rem_a, "schedule_fa:2025")
+        assert fa(date(2026, 3, 1))["done"] is False
+        services.acknowledge_reminder(rem_a, "estate:over")
+        ordered = services.get_reminders(rem_a)
+        assert ordered[-1]["kind"] == "estate" and ordered[-1]["done"] is True, "done items sort to the bottom"
+        print("PASS: reminders can be marked done / undone (idempotently, per user) and only whitelisted keys are accepted")
+
+    # HTTP (outside the shared app context)
+    cr = app.test_client()
+    with app.app_context():
+        rid = User.query.filter_by(email="international_rem_a@example.com").first().id
+    login_as(cr, rid)
+    rpage = cr.get('/international/reminders')
+    rbody = rpage.get_data(as_text=True)
+    assert rpage.status_code == 200 and 'usual statutory' in rbody and 'Update the value of Old Bank' in rbody
+    csrf_r = get_csrf(rpage.data)
+    r = cr.post('/international/reminders/done', data={'csrf_token': csrf_r, 'key': 'estate:near'}, follow_redirects=True)
+    assert r.status_code == 200
+    assert cr.post('/international/reminders/done', data={'csrf_token': csrf_r, 'key': 'garbage'}).status_code == 400
+    assert cr.post('/international/reminders/undo', data={'csrf_token': csrf_r, 'key': 'garbage'}).status_code == 400
+    assert cr.post('/international/reminders/done', data={'key': 'estate:near'}).status_code in (400, 403), "CSRF token must be required"
+    r = cr.post('/international/reminders/undo', data={'csrf_token': csrf_r, 'key': 'estate:over'}, follow_redirects=True)
+    assert r.status_code == 200 and 'US estate tax' in r.get_data(as_text=True)
+    dash_r = cr.get('/international/').get_data(as_text=True)
+    assert 'Reminders Centre' in dash_r and 'Open reminders' in dash_r
+    assert anon.get('/international/reminders').status_code in (301, 302)
+    print("PASS: Reminders page and dashboard widget work over real HTTP; mark-done/undo need CSRF, reject junk keys, and require login")
+
+    # ── 25. Insurance-style UI parity (Batch 10.7) ──
+    cu = app.test_client()
+    login_as(cu, rid)
+    dash = cu.get('/international/').get_data(as_text=True)
+    assert 'iu-stat-grid' in dash and 'Asset Categories' in dash and 'iu-cat' in dash and 'Top Holdings' in dash
+    assert 'asset_type=Foreign%20Bank%20Account' in dash or 'asset_type=Foreign+Bank+Account' in dash, "empty categories offer + Add"
+    assert 'Recent Activity' in dash and 'Documents Stored' in dash and 'Reminders' in dash
+    assert 'prefers-reduced-motion' in dash and 'aria-label="Portfolio summary"' in dash
+    print("PASS: dashboard has icon stat cards, asset-category cards with '+ Add' for empty types, Recent Activity, document count, reduced-motion and aria labels")
+
+    add_pg = cu.get('/international/holdings/add?asset_type=Foreign%20Bank%20Account').get_data(as_text=True)
+    assert '<option value="Foreign Bank Account" selected>' in add_pg and 'fm-step' in add_pg and 'fm-step-badge' in add_pg
+    junk_pg = cu.get('/international/holdings/add?asset_type=%3Cscript%3E').get_data(as_text=True)
+    assert '<script>' not in junk_pg.split('<option value="">Select type')[1][:600] and 'selected>' not in junk_pg.split('id="assetTypeSelect"')[1].split('</select>')[0]
+    print("PASS: category cards pre-select the asset type on the add form (junk values ignored) and the form has numbered step sections")
+
+    lst = cu.get('/international/holdings').get_data(as_text=True)
+    assert 'hlCards' in lst and 'hlBtnCards' in lst and 'localStorage' in lst and 'hl-card' in lst
+    det_id_r = None
+    with app.app_context():
+        det_id_r = InternationalHolding.query.filter_by(user_id=rid, name="US Holding").first().id
+    det = cu.get(f'/international/holdings/{det_id_r}').get_data(as_text=True)
+    assert 'hd-icon' in det and 'hd-badges' in det and 'icInrCard' in det and 'Return in INR' in det
+    arch_id = None
+    with app.app_context():
+        hh_arch = InternationalHolding.query.filter_by(user_id=rid, name="Fresh Bank").first()
+        services.archive_holding(hh_arch)
+    arch = cu.get('/international/archived').get_data(as_text=True)
+    assert 'ar-card' in arch and 'Fresh Bank' in arch and 'Restore' in arch and 'Delete' in arch
+    with app.app_context():
+        services.restore_holding(InternationalHolding.query.filter_by(user_id=rid, name="Fresh Bank").first())
+    print("PASS: Holdings page has a remembered cards/table toggle; detail page has the icon header and INR card; archived page uses dashed cards with Restore/Delete")
+
+    # every page extends the shared stylesheet components without breaking (no unrendered template syntax)
+    for url in ('/international/', '/international/holdings', '/international/archived', '/international/reminders',
+                '/international/dividends', '/international/schedule-fa', '/international/capital-gains',
+                '/international/dtaa-summary', '/international/vesting-perquisite', '/international/remittances',
+                '/international/documents', f'/international/holdings/{det_id_r}', '/international/holdings/add'):
+        rr = cu.get(url)
+        assert rr.status_code == 200, (url, rr.status_code)
+        body_u = rr.get_data(as_text=True)
+        assert '{{' not in body_u and '{%' not in body_u, f"unrendered template syntax on {url}"
+    print("PASS: all 13 International pages render (HTTP 200) with no unrendered template syntax")
+
+    # ── 26. Export PDFs never contain a raw rupee glyph under the default INR currency ──
+    with app.app_context():
+        for _key in ("lrs", "dtaa", "vesting", "dividends"):
+            _rep = rexp.build_report(_key, exp_a, 2025)
+            _pdf = rexp.to_pdf_bytes(_rep, "Glyph Check")
+            assert "\u20b9".encode("utf-8") not in _pdf
+            assert "\u20b9" not in "".join((pg.extract_text() or "") for pg in pdfplumber.open(_io.BytesIO(_pdf)).pages)
+    print("PASS: International report PDFs contain no raw rupee glyph (same rule as the Sep 2026 glyph audit)")
+
+    with app.app_context():
+        for _em in ("international_rem_a@example.com", "international_rem_b@example.com",
+                    "international_export_a@example.com", "international_export_b@example.com"):
+            _u = User.query.filter_by(email=_em).first()
+            if _u:
+                for _h in InternationalHolding.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_h)
+                for _r in RemittanceRecord.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_r)
+                InternationalReminderAck.query.filter_by(user_id=_u.id).delete()
+                db.session.delete(_u)
+        db.session.commit()
+
     # ── Cleanup ──
     with app.app_context():
         from models import db as _db

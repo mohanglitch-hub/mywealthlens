@@ -2,6 +2,7 @@
 {% block title %}Holdings — International Investing — MyWealthLens{% endblock %}
 
 {% block content %}
+{% include "international_centre/_ui.html" %}
 <div class="ic-header">
   <div>
     <h1 class="ic-title">All Holdings</h1>
@@ -56,11 +57,50 @@
 
 <div class="ic-result-bar">
   <span>{{ rows|length }} holding{{ 's' if rows|length != 1 else '' }}{% if filtered %} <span style="color:var(--accent);">(filtered)</span>{% endif %}</span>
-  <span>Total value: <strong>{{ format_money_usd(total_usd) }}</strong></span>
+  <span style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+    <span>Total value: <strong>{{ format_money_usd(total_usd) }}</strong></span>
+    {% if rows %}
+    <span class="hl-toggle" role="group" aria-label="Choose layout">
+      <button type="button" class="hl-toggle-btn" id="hlBtnCards" aria-pressed="false" title="Card view">▦ Cards</button>
+      <button type="button" class="hl-toggle-btn" id="hlBtnTable" aria-pressed="true" title="Table view">☰ Table</button>
+    </span>
+    {% endif %}
+  </span>
 </div>
 
 {% if rows %}
-<div class="ic-card" style="padding:0;">
+<div id="hlCards" class="hl-grid" hidden>
+  {% for r in rows %}
+  {% set h = r.holding %}
+  <div class="hl-card {{ 'hl-card--danger' if r.unconverted else ('hl-card--warning' if r.stale.status != 'fresh' else '') }}"
+       tabindex="0" role="link" data-href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}">
+    <div class="hl-card-top">
+      <span class="hl-card-icon">{{ asset_icon(h.asset_type) }}</span>
+      <div class="hl-card-badges">
+        {% if h.ticker %}<span class="iu-badge iu-badge-muted">{{ h.ticker }}</span>{% endif %}
+        {% if r.stale.status != 'fresh' %}<span class="iu-badge iu-badge-warning" title="{{ r.stale.label }}">{{ 'Refresh' if r.stale.kind == 'price' else 'Update value' }}</span>{% endif %}
+        {% if r.unconverted %}<span class="iu-badge iu-badge-down">No USD rate</span>{% endif %}
+        {% if r.nominee_gap %}<span class="iu-badge iu-badge-muted" title="{{ r.nominee_gap }}">Nominee</span>{% endif %}
+      </div>
+    </div>
+    <div>
+      <div class="hl-card-name">{{ h.name }}</div>
+      <div class="hl-card-meta">{{ h.asset_type }}{{ ' · ' + h.country if h.country }}</div>
+    </div>
+    <div class="hl-card-value">{{ format_money_usd(h.usd_value) }}</div>
+    <div class="hl-card-native">{{ h.native_currency }} {{ '{:,.2f}'.format(h.current_value_native) }}</div>
+    <div class="hl-card-stats">
+      <span>Gain
+        <strong class="{{ 'iu-up' if r.pnl.gain_pct is not none and r.pnl.gain_pct >= 0 else ('iu-down' if r.pnl.gain_pct is not none else '') }}">{% if r.pnl.show and r.pnl.gain_pct is not none %}{{ '%+.2f'|format(r.pnl.gain_pct) }}%{% else %}—{% endif %}</strong></span>
+      <span>XIRR
+        <strong class="{{ 'iu-up' if h.xirr is not none and h.xirr >= 0 else ('iu-down' if h.xirr is not none else '') }}">{{ '%.2f'|format(h.xirr) + '%' if h.xirr is not none else '—' }}</strong></span>
+    </div>
+    <a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="iu-btn iu-btn-sm hl-card-btn">View →</a>
+  </div>
+  {% endfor %}
+</div>
+
+<div id="hlTable" class="ic-card" style="padding:0;">
   <div class="ic-table-wrap">
     <table class="ic-table">
       <thead>
@@ -73,7 +113,7 @@
       <tbody>
         {% for r in rows %}
         {% set h = r.holding %}
-        <tr class="ic-row" onclick="window.location='{{ url_for('international_centre.holding_detail', holding_id=h.id) }}'">
+        <tr class="ic-row" tabindex="0" onkeydown="if(event.key==='Enter'){this.click();}" onclick="window.location='{{ url_for('international_centre.holding_detail', holding_id=h.id) }}'">
           <td>
             <a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="ic-link" onclick="event.stopPropagation()">{{ h.name }}</a>
             {% if h.ticker %}<span class="ic-ticker">{{ h.ticker }}</span>{% endif %}
@@ -117,7 +157,50 @@
   <a href="{{ url_for('international_centre.archived_holdings') }}" class="ic-link">View archived holdings</a>
 </div>
 
+<script>
+  // Batch 10.7: remember the chosen layout (cards/table) on this device.
+  (function () {
+    var cards = document.getElementById('hlCards'), table = document.getElementById('hlTable');
+    var bc = document.getElementById('hlBtnCards'), bt = document.getElementById('hlBtnTable');
+    if (!cards || !table || !bc || !bt) return;
+    function show(mode) {
+      var useCards = mode === 'cards';
+      cards.hidden = !useCards; table.hidden = useCards;
+      bc.setAttribute('aria-pressed', useCards); bt.setAttribute('aria-pressed', !useCards);
+      try { localStorage.setItem('icHoldingsView', mode); } catch (e) {}
+    }
+    var saved = null; try { saved = localStorage.getItem('icHoldingsView'); } catch (e) {}
+    show(saved === 'cards' ? 'cards' : 'table');
+    bc.addEventListener('click', function () { show('cards'); });
+    bt.addEventListener('click', function () { show('table'); });
+  })();
+</script>
+
 <style>
+  .hl-toggle { display:inline-flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .hl-toggle-btn { background:var(--surface); border:none; padding:6px 12px; font-size:0.76rem; font-weight:600; color:var(--muted); cursor:pointer; font-family:'Inter',sans-serif; }
+  .hl-toggle-btn[aria-pressed="true"] { background:var(--accent-bg); color:var(--accent); }
+  .hl-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:18px; margin-bottom:12px; }
+  .hl-grid[hidden], #hlTable[hidden] { display:none; }
+  .hl-card { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:20px; box-shadow:var(--shadow-sm);
+    display:flex; flex-direction:column; gap:10px; cursor:pointer; transition:box-shadow .2s, transform .15s, border-color .2s; }
+  .hl-card:hover, .hl-card:focus-visible { box-shadow:var(--shadow-md); transform:translateY(-2px); border-color:var(--accent); outline:none; }
+  .hl-card--warning { border-color:var(--warning); } .hl-card--danger { border-color:var(--down); }
+  .hl-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .hl-card-icon { font-size:1.5rem; }
+  .hl-card-badges { display:flex; flex-direction:column; gap:4px; align-items:flex-end; }
+  .hl-card-name { font-size:1rem; font-weight:700; color:var(--text); overflow-wrap:anywhere; }
+  .hl-card-meta { font-size:0.76rem; color:var(--muted); margin-top:2px; }
+  .hl-card-value { font-size:1.35rem; font-weight:700; color:var(--accent); font-family:var(--font-data); }
+  .hl-card-native { font-size:0.78rem; color:var(--muted2); font-family:var(--font-data); margin-top:-6px; }
+  .hl-card-stats { display:flex; gap:20px; font-size:0.78rem; color:var(--muted); border-top:1px solid var(--border); padding-top:10px; }
+  .hl-card-stats strong { display:block; font-size:0.9rem; font-family:var(--font-data); color:var(--text); }
+  .hl-card-btn { justify-content:center; background:var(--accent-bg); color:var(--accent); border-color:var(--accent); }
+  .hl-card-btn:hover { background:var(--accent); color:#fff; }
+  @media (max-width:1024px) { .hl-grid { grid-template-columns:repeat(2, 1fr); } }
+  @media (max-width:768px)  { .hl-grid { grid-template-columns:1fr; } }
+  @media (prefers-reduced-motion: reduce) { .hl-card { transition:none; } .hl-card:hover { transform:none; } }
+
   .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
   .ic-subtitle { color:var(--muted); font-size:0.9rem; }

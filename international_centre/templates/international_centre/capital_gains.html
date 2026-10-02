@@ -2,6 +2,7 @@
 {% block title %}Capital Gains (LTCG/STCG) — MyWealthLens{% endblock %}
 
 {% block content %}
+{% include "international_centre/_ui.html" %}
 <div class="ic-header">
   <div>
     <h1 class="ic-title">Capital Gains Report — {{ summary.fy_label }}</h1>
@@ -15,6 +16,7 @@
         {% endfor %}
       </select>
     </form>
+    {% set export_key = 'capital_gains' %}{% set export_params = {'fy': summary.fy_start.year} %}{% include "international_centre/_export_buttons.html" %}
     <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
   </div>
 </div>
