@@ -32,6 +32,7 @@ from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
     InternationalValueSnapshot, InternationalHoldingNominee,
     InternationalHoldingDocument, VestingTranche, InternationalTimeline,
+    InternationalReminderAck,
     InternationalAssetType, InternationalTxnType, RemittancePurpose,
     TimelineEvent, LRS_ANNUAL_LIMIT_USD,
 )
@@ -396,8 +397,6 @@ def portfolio_usd_xirr(user_id):
     return _portfolio_xirr_calc(usd_txns, total_usd_value)
 
 
-# ── Transactions ────────────────────────────────────────────────────
-
 # ── Staleness, P&L, listing, alerts (Batch 10.2 / 10.3, Oct 2026) ─────
 
 # A ticker price older than this is "stale". 5 days comfortably spans a
@@ -477,6 +476,11 @@ def _nominee_gap(holding):
     if total < 100:
         return f"Nominees total {total:.0f}%, not 100%"
     return None
+
+
+def get_nominee_gap(holding):
+    """Public wrapper: None if nominees are complete, else a short reason."""
+    return _nominee_gap(holding)
 
 
 SORT_OPTIONS = [
@@ -572,6 +576,32 @@ def search_holdings(user_id, q=None, asset_type=None, country=None, currency=Non
     return rows, facets
 
 
+def get_asset_categories(user_id):
+    """One entry per asset type (all of them, including empty ones, so the
+    dashboard can offer '+ Add' for a type the user has none of yet):
+    [{asset_type, count, usd_value}], in the module's own type order."""
+    holdings = get_holdings(user_id, archived=False)
+    out = []
+    for t in InternationalAssetType.ALL:
+        mine = [h for h in holdings if h.asset_type == t]
+        out.append({"asset_type": t, "count": len(mine),
+                    "usd_value": round(sum(h.usd_value or 0.0 for h in mine), 2)})
+    return out
+
+
+def get_recent_activity(user_id, limit=6):
+    """Latest timeline entries across ALL of the user's holdings, newest
+    first, each with its holding attached for linking."""
+    rows = (InternationalTimeline.query.filter_by(user_id=user_id)
+            .order_by(InternationalTimeline.created_at.desc(), InternationalTimeline.id.desc())
+            .limit(limit).all())
+    return [{"event": r, "holding": r.holding} for r in rows]
+
+
+def get_document_count(user_id):
+    return InternationalHoldingDocument.query.filter_by(user_id=user_id).count()
+
+
 def get_alerts(user_id):
     """Things worth the user's attention, for the dashboard banner area,
     most urgent first. Each: {level: danger|warning|info, message, link:
@@ -609,15 +639,6 @@ def get_alerts(user_id):
                                   f"{STALE_PRICE_DAYS} days (or never refreshed). Use Refresh Prices.",
                        "link": ("international_centre.holdings_list", {"flag": "stale"})})
 
-    stale_manual = [h for h in holdings if not (h.is_ticker_based and h.ticker)
-                    and get_staleness(h)["status"] != "fresh"]
-    if stale_manual:
-        n = len(stale_manual)
-        alerts.append({"level": "info",
-                       "message": f"{n} manually-valued holding{'s haven' if n != 1 else ' hasn'}'t had its value "
-                                  f"updated in over {STALE_MANUAL_VALUE_DAYS} days.",
-                       "link": ("international_centre.holdings_list", {"flag": "stale"})})
-
     gaps = [h for h in holdings if _nominee_gap(h)]
     if gaps:
         n = len(gaps)
@@ -625,6 +646,457 @@ def get_alerts(user_id):
                        "message": f"{n} holding{'s have' if n != 1 else ' has'} no nominee or incomplete nominee shares.",
                        "link": ("international_centre.holdings_list", {"flag": "no_nominee"})})
     return alerts
+
+
+# ── Dividend income (Batch 10.5, Oct 2026) ───────────────────────────
+
+def _usd_rate(holding):
+    """Cached native->USD rate for approximations, or None if unknown."""
+    return holding.fx_rate_used or (1.0 if holding.native_currency == "USD" else None)
+
+
+def get_dividend_income(user_id, fy_start_year):
+    """Dividend income for the Indian FY starting 1 Apr `fy_start_year`.
+
+    Same approximation path as get_dtaa_summary() (native -> USD via the
+    holding's cached rate -> INR via currency_display.usd_to_inr) so the
+    two pages never disagree. A dividend logged without gross/withholding
+    (anything entered before Batch 9.5) has only its net amount, so its
+    "gross" is shown as that net amount and counted in
+    `withholding_unknown` rather than silently assuming no tax was taken.
+
+    `ttm_yield_pct` = dividends received in the last 12 months, gross, over
+    the holding's CURRENT value in its own currency — a trailing yield on
+    today's value, not a yield on cost."""
+    import currency_display
+    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    today = today_ist()
+    ttm_start = today - timedelta(days=365)
+    holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
+
+    def gross_of(t):
+        return t.gross_amount_native if t.gross_amount_native is not None else t.amount_native
+
+    rows, recent = [], []
+    month_net_usd = {}
+    withholding_unknown = 0
+    ttm_gross_usd = 0.0
+    active_value_usd = 0.0
+
+    for h in holdings:
+        divs = [t for t in h.transactions if t.txn_type == InternationalTxnType.DIVIDEND]
+        rate = _usd_rate(h)
+        if not h.archived:
+            active_value_usd += h.usd_value or 0.0
+            if rate is not None:
+                ttm_gross_usd += sum(gross_of(t) for t in divs if ttm_start < t.date <= today) * rate
+        for t in sorted(divs, key=lambda x: x.date, reverse=True)[:8]:
+            recent.append({"holding": h, "date": t.date, "currency": h.native_currency,
+                           "net_native": round(t.amount_native, 2), "gross_native": round(gross_of(t), 2),
+                           "withheld_native": round(t.tax_withheld_native or 0.0, 2)})
+
+        fy_divs = [t for t in divs if fy_start <= t.date <= fy_end]
+        if not fy_divs:
+            continue
+        withholding_unknown += sum(1 for t in fy_divs if t.gross_amount_native is None)
+        gross_native = sum(gross_of(t) for t in fy_divs)
+        withheld_native = sum((t.tax_withheld_native or 0.0) for t in fy_divs)
+        net_native = sum(t.amount_native for t in fy_divs)
+        if rate is None:
+            net_usd = net_inr = withheld_inr = None
+        else:
+            net_usd = round(net_native * rate, 2)
+            net_inr = currency_display.usd_to_inr(net_usd)
+            withheld_inr = currency_display.usd_to_inr(round(withheld_native * rate, 2))
+            for t in fy_divs:
+                key = (t.date.year, t.date.month)
+                month_net_usd[key] = month_net_usd.get(key, 0.0) + t.amount_native * rate
+
+        ttm_native = sum(gross_of(t) for t in divs if ttm_start < t.date <= today)
+        ttm_yield = (round(ttm_native / h.current_value_native * 100, 2)
+                     if ttm_native and h.current_value_native and h.current_value_native > 0 else None)
+        rows.append({
+            "holding": h, "holding_id": h.id, "name": h.name, "country": h.country or "—",
+            "currency": h.native_currency, "payments": len(fy_divs),
+            "gross_native": round(gross_native, 2), "withheld_native": round(withheld_native, 2),
+            "net_native": round(net_native, 2), "net_usd": net_usd, "net_inr": net_inr,
+            "withheld_inr": withheld_inr, "ttm_yield_pct": ttm_yield,
+        })
+
+    rows.sort(key=lambda r: (r["net_usd"] or 0.0), reverse=True)
+    months = []
+    for i in range(12):  # Apr .. Mar
+        m = 4 + i
+        y = fy_start_year + (1 if m > 12 else 0)
+        m = m - 12 if m > 12 else m
+        months.append({"label": _date(y, m, 1).strftime("%b %Y"), "net_usd": round(month_net_usd.get((y, m), 0.0), 2)})
+
+    recent.sort(key=lambda r: r["date"], reverse=True)
+    portfolio_yield = (round(ttm_gross_usd / active_value_usd * 100, 2)
+                       if ttm_gross_usd and active_value_usd > 0 else None)
+    return {
+        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
+        "rows": rows, "months": months, "recent": recent[:8],
+        "total_net_usd": round(sum(r["net_usd"] for r in rows if r["net_usd"] is not None), 2),
+        "total_net_inr": round(sum(r["net_inr"] for r in rows if r["net_inr"] is not None), 2),
+        "total_withheld_inr": round(sum(r["withheld_inr"] for r in rows if r["withheld_inr"] is not None), 2),
+        "payments": sum(r["payments"] for r in rows),
+        "any_missing_rate": any(r["net_usd"] is None for r in rows),
+        "withholding_unknown": withholding_unknown,
+        "portfolio_yield_pct": portfolio_yield, "ttm_gross_usd": round(ttm_gross_usd, 2),
+    }
+
+
+# ── INR-perspective returns (Batch 10.5, Oct 2026) ───────────────────
+#
+# A holding's XIRR in its own currency hides what rupee investors feel:
+# a US stock up 10% in dollars is up more in rupees if the rupee weakened,
+# and less if it strengthened. This converts EVERY cash flow at the
+# exchange rate on its own date (and today's value at today's rate) and
+# re-runs the same XIRR, so the difference between the two figures is the
+# currency effect. Rates come from Frankfurter (ECB reference rates),
+# which are not the SBI TT buying rate used for tax filing — this is an
+# investment-performance view, not a tax figure.
+
+import threading
+import time as _time
+from concurrent.futures import ThreadPoolExecutor
+
+_HIST_RATE_CACHE = {}      # (from, date) -> native->INR rate. Historical rates never change, so cached for the process lifetime.
+_LATEST_RATE_CACHE = {}    # from -> (rate, monotonic_time). Today's rate moves, so it expires.
+_LATEST_RATE_TTL = 3600
+_FX_CACHE_LOCK = threading.Lock()
+
+
+def clear_fx_caches():
+    """Used by tests (and available if a stale rate is ever suspected)."""
+    with _FX_CACHE_LOCK:
+        _HIST_RATE_CACHE.clear()
+        _LATEST_RATE_CACHE.clear()
+
+
+def _inr_rates_for(currency, dates):
+    """{date: native->INR rate} for each date, fetching only the ones not
+    cached, a few at a time. Raises FxRateError if any can't be had."""
+    if currency == "INR":
+        return {d: 1.0 for d in dates}
+    missing = [d for d in dates if (currency, d) not in _HIST_RATE_CACHE]
+    if missing:
+        def one(d):
+            rate, _actual = fetch_fx_rate(currency, "INR", d)
+            return d, rate
+        with ThreadPoolExecutor(max_workers=min(6, len(missing))) as pool:
+            for d, rate in pool.map(one, missing):   # pool.map re-raises FxRateError here
+                with _FX_CACHE_LOCK:
+                    _HIST_RATE_CACHE[(currency, d)] = rate
+    return {d: _HIST_RATE_CACHE[(currency, d)] for d in dates}
+
+
+def _latest_inr_rate(currency):
+    if currency == "INR":
+        return 1.0
+    with _FX_CACHE_LOCK:
+        hit = _LATEST_RATE_CACHE.get(currency)
+        if hit and _time.monotonic() - hit[1] < _LATEST_RATE_TTL:
+            return hit[0]
+    rate, _actual = fetch_fx_rate(currency, "INR")
+    with _FX_CACHE_LOCK:
+        _LATEST_RATE_CACHE[currency] = (rate, _time.monotonic())
+    return rate
+
+
+_RETURN_TXN_TYPES = (InternationalTxnType.BUY, InternationalTxnType.SELL, InternationalTxnType.DIVIDEND)
+
+
+def _inr_return_inputs(holding):
+    """(txns, reason): the usable transactions, or (None, reason) when an
+    INR return can't honestly be calculated for this holding."""
+    if holding.asset_type == InternationalAssetType.FOREIGN_BANK_ACCOUNT:
+        return None, "not_applicable"
+    txns = [t for t in holding.transactions if t.txn_type in _RETURN_TXN_TYPES and t.date]
+    if not any(t.txn_type == InternationalTxnType.BUY for t in txns):
+        return None, "no_buys"
+    return txns, None
+
+
+def _inr_flows(holding, txns):
+    """Per-transaction INR cash flows + today's INR value. Raises FxRateError."""
+    rates = _inr_rates_for(holding.native_currency, sorted({t.date for t in txns}))
+    flows = [{"date": t.date, "txn_type": t.txn_type, "amount_native": t.amount_native * rates[t.date]} for t in txns]
+    current_inr = (holding.current_value_native or 0.0) * _latest_inr_rate(holding.native_currency)
+    return flows, current_inr
+
+
+def _summarise_inr(flows, current_inr):
+    buys = sum(f["amount_native"] for f in flows if f["txn_type"] == InternationalTxnType.BUY)
+    sells = sum(f["amount_native"] for f in flows if f["txn_type"] == InternationalTxnType.SELL)
+    divs = sum(f["amount_native"] for f in flows if f["txn_type"] == InternationalTxnType.DIVIDEND)
+    invested = buys - sells
+    gain = current_inr - invested
+    return {
+        "invested_inr": round(invested, 2), "current_inr": round(current_inr, 2),
+        "gain_inr": round(gain, 2), "gain_pct": round(gain / invested * 100, 2) if invested > 0 else None,
+        "dividends_inr": round(divs, 2), "xirr_inr": holding_xirr(flows, current_inr),
+    }
+
+
+_REASONS = {
+    "no_buys": "Add this holding's buy transactions (with dates) to see an INR-perspective return - without them there is no purchase-date exchange rate to use.",
+    "not_applicable": "Not shown for a foreign bank account.",
+}
+
+
+def get_inr_return(holding):
+    """INR-perspective return for one holding. Never guesses: if an
+    exchange rate can't be fetched, returns available=False with the
+    reason instead of a partial number."""
+    txns, reason = _inr_return_inputs(holding)
+    if reason:
+        return {"available": False, "reason": reason, "message": _REASONS[reason]}
+    try:
+        flows, current_inr = _inr_flows(holding, txns)
+    except FxRateError as e:
+        return {"available": False, "reason": "fx", "message": f"Couldn't fetch exchange rates just now ({e}). Try again shortly."}
+    out = _summarise_inr(flows, current_inr)
+    out["available"] = True
+    out["xirr_native"] = holding.xirr
+    out["currency_effect_pts"] = (round(out["xirr_inr"] - holding.xirr, 2)
+                                  if out["xirr_inr"] is not None and holding.xirr is not None else None)
+    out["currency"] = holding.native_currency
+    return out
+
+
+def get_portfolio_inr_return(user_id):
+    """Portfolio-wide INR XIRR across every active holding with a usable
+    history. Holdings whose rates can't be fetched, or that have no
+    dated buys, are left out and counted in `excluded` — leaving a
+    holding out is honest, quietly estimating it is not."""
+    all_flows, total_current, included, excluded = [], 0.0, 0, []
+    for h in get_holdings(user_id, archived=False):
+        txns, reason = _inr_return_inputs(h)
+        if reason:
+            if reason == "no_buys":
+                excluded.append(h.name)
+            continue
+        try:
+            flows, current_inr = _inr_flows(h, txns)
+        except FxRateError:
+            excluded.append(h.name)
+            continue
+        all_flows.extend(flows)
+        total_current += current_inr
+        included += 1
+    if not included:
+        return {"available": False, "excluded": excluded,
+                "message": "No holding has enough dated transaction history for an INR-perspective return yet."}
+    out = _summarise_inr(all_flows, total_current)
+    out.update({"available": True, "included": included, "excluded": excluded})
+    return out
+
+
+# ── Reminders (Batch 10.6, Oct 2026) ─────────────────────────────────
+#
+# Reminders are computed from today's date and the user's data every time
+# they're asked for — nothing is stored except "I've dealt with this one"
+# (InternationalReminderAck). Due dates quoted are the NORMAL statutory
+# ones; the government extends them from time to time, so every message
+# says to check the notified date.
+
+US_SITUS_ASSET_TYPES = {InternationalAssetType.US_STOCK, InternationalAssetType.US_ETF,
+                        InternationalAssetType.RSU_ESPP, InternationalAssetType.INTL_MUTUAL_FUND,
+                        InternationalAssetType.FOREIGN_REAL_ESTATE}
+_US_COUNTRY_NAMES = {"united states", "united states of america", "usa", "us", "u.s.", "u.s.a."}
+US_ESTATE_EXEMPTION_USD = 60_000
+US_ESTATE_NEAR_PCT = 0.8
+
+
+def valid_ack_key(key):
+    import re
+    return bool(re.fullmatch(r"(schedule_fa:\d{4}|form67:\d{4}|estate:(near|over))", key or ""))
+
+
+def _acked_keys(user_id):
+    return {a.reminder_key for a in InternationalReminderAck.query.filter_by(user_id=user_id).all()}
+
+
+def acknowledge_reminder(user_id, key):
+    db = _db()
+    if not valid_ack_key(key):
+        return False
+    if not InternationalReminderAck.query.filter_by(user_id=user_id, reminder_key=key).first():
+        db.session.add(InternationalReminderAck(user_id=user_id, reminder_key=key))
+        db.session.commit()
+    return True
+
+
+def unacknowledge_reminder(user_id, key):
+    db = _db()
+    ack = InternationalReminderAck.query.filter_by(user_id=user_id, reminder_key=key).first()
+    if ack:
+        db.session.delete(ack)
+        db.session.commit()
+    return True
+
+
+def get_us_situs_exposure(user_id):
+    """Estimate of US-situs holdings for the estate-tax awareness note.
+
+    Counts active holdings of the asset types that can be US-situs
+    (US/International stock, ETF, employer stock, mutual fund, real estate)
+    whose country is the United States — or, for a USD-quoted listed
+    holding with NO country filled in, assumed US and flagged as
+    `assumed`. Foreign bank accounts and bonds are deliberately NOT
+    counted (US-bank deposits and portfolio-interest debt of non-US
+    persons are generally outside the US estate tax, and bond situs rules
+    are too intricate to guess at). Non-US-listed holdings (a UK or Irish
+    fund) are not counted. This is an awareness figure, not a tax
+    calculation."""
+    counted, assumed = [], []
+    for h in get_holdings(user_id, archived=False):
+        if h.asset_type not in US_SITUS_ASSET_TYPES:
+            continue
+        country = (h.country or "").strip().lower()
+        if country in _US_COUNTRY_NAMES:
+            counted.append(h)
+        elif not country and h.native_currency == "USD" and h.is_ticker_based:
+            counted.append(h)
+            assumed.append(h)
+    total = round(sum(h.usd_value or 0.0 for h in counted), 2)
+    return {"total_usd": total, "holdings": counted, "assumed": assumed,
+            "exemption_usd": US_ESTATE_EXEMPTION_USD}
+
+
+def get_reminders(user_id, today=None):
+    """All reminders for the dashboard / Reminders page, most urgent first.
+
+    Each: {key, ack_key|None, kind, level (danger|warning|info), title,
+    message, link: (endpoint, params)|None, done (bool), detail (longer
+    text for the Reminders page)}."""
+    today = today or today_ist()
+    acked = _acked_keys(user_id)
+    items = []
+
+    holdings_all = InternationalHolding.query.filter_by(user_id=user_id).all()
+
+    # 1. Schedule FA — the last TWO completed calendar years, each disclosed in
+    #    its own year's ITR. The older year is kept (and escalates to "danger"
+    #    once both usual ITR dates have passed) until the user marks it done, so
+    #    a missed filing can't just silently scroll off the list on 1 January.
+    def held_by(year_end):
+        """Was anything held on or before `year_end`? Judged from when the
+        holding was recorded AND from the dates of its transactions/vesting,
+        so a holding bought in 2023 but only added to the app in 2026 still
+        counts for 2025."""
+        for h in holdings_all:
+            if h.created_at and h.created_at.date() <= year_end:
+                return True
+            if any(t.date <= year_end for t in h.transactions):
+                return True
+            if any(v.vest_date <= year_end for v in h.vesting_tranches):
+                return True
+        return False
+
+    for cy in (today.year - 1, today.year - 2):
+        if not held_by(_date(cy, 12, 31)):
+            continue
+        due, belated = _date(cy + 1, 7, 31), _date(cy + 1, 12, 31)
+        if today <= due:
+            days = (due - today).days
+            level = "warning" if days <= 45 else "info"
+            msg = (f"Schedule FA for calendar year {cy} goes in your ITR, normally due {due:%d %b %Y} - "
+                   f"{days} day{'s' if days != 1 else ''} left. Review the report and share it with your CA.")
+        elif today <= belated:
+            days = (belated - today).days
+            level = "warning"
+            msg = (f"The normal ITR due date ({due:%d %b %Y}) has passed. If you haven't filed, a belated return "
+                   f"is generally possible until {belated:%d %b %Y} ({days} days left), and it must include Schedule FA "
+                   f"for calendar year {cy}.")
+        else:
+            level = "danger"
+            msg = (f"Both the normal ({due:%d %b %Y}) and belated ({belated:%d %b %Y}) ITR dates for calendar year {cy} "
+                   f"have passed. If Schedule FA wasn't disclosed, speak to your CA about your options. "
+                   f"If it was, mark this done.")
+        key = f"schedule_fa:{cy}"
+        items.append({"key": key, "ack_key": key, "kind": "schedule_fa", "level": level,
+                      "title": f"Schedule FA - calendar year {cy}", "message": msg,
+                      "detail": "Applies to Indian residents holding foreign assets. Due dates are the usual ones - "
+                                "check the notified date for the year, as extensions happen. Mark it done once you have filed.",
+                      "link": ("international_centre.schedule_fa", {"year": cy}), "done": key in acked})
+
+    # 2. Foreign tax credit (Form 67 / Form 44) — latest completed FYs with tax withheld.
+    last_fy = fy_bounds(today)[0].year - 1
+    for fy in (last_fy, last_fy - 1):
+        summary = get_dtaa_summary(user_id, fy)
+        if not summary["total_withheld_inr"]:
+            continue
+        outer = _date(fy + 2, 3, 31)               # end of the assessment year
+        if fy != last_fy and today > outer:
+            continue                                # an older year whose window is long gone: not a reminder any more
+        form = "Form 67" if fy <= 2025 else "Form 44"
+        itr_due = _date(fy + 1, 7, 31)
+        if today > outer:
+            level, tail = "danger", "The usual outer limit has passed - speak to your CA about whether the credit can still be claimed."
+        elif today > itr_due:
+            level, tail = "warning", f"File it BEFORE your return. The usual outer limit is the end of the assessment year ({outer:%d %b %Y}); some sources quote an earlier date, so confirm with your CA."
+        else:
+            level, tail = "info", f"File it BEFORE your return - the usual outer limit is the end of the assessment year ({outer:%d %b %Y})."
+        key = f"form67:{fy}"
+        items.append({"key": key, "ack_key": key, "kind": "form67", "level": level,
+                      "title": f"{form} - foreign tax credit, {summary['fy_label']}",
+                      "message": f"You had about Rs. {summary['total_withheld_inr']:,.0f} of foreign tax withheld on dividends in {summary['fy_label']}. "
+                                 f"Claim credit with {form}. {tail}",
+                      "detail": ("From tax year 2026-27 the form is renumbered Form 44 under the Income-tax Act, 2025. "
+                                 "INR is approximate - the filing needs the SBI TT buying rate on each date." if fy >= 2025 else
+                                 "INR is approximate - the filing needs the SBI TT buying rate on each date."),
+                      "link": ("international_centre.dtaa_summary", {"fy": fy}), "done": key in acked})
+
+    # 3. Manually-valued holdings whose value is getting old.
+    stale = []
+    for h in holdings_all:
+        if h.archived or (h.is_ticker_based and h.ticker):
+            continue
+        st = get_staleness(h)
+        if st["status"] != "fresh":
+            stale.append((h, st))
+    stale.sort(key=lambda x: (x[1]["age_days"] is None, -(x[1]["age_days"] or 0)))
+    for h, st in stale[:5]:
+        age = st["age_days"]
+        items.append({"key": f"stale:{h.id}", "ack_key": None, "kind": "stale_value",
+                      "level": "warning" if (age or 0) > 180 else "info",
+                      "title": f"Update the value of {h.name}",
+                      "message": f"Manually valued - last updated {age} days ago. A stale value skews your totals and Schedule FA figures." if age is not None
+                                 else "Manually valued and never updated.",
+                      "detail": None, "link": ("international_centre.edit_holding", {"holding_id": h.id}), "done": False})
+    if len(stale) > 5:
+        items.append({"key": "stale:more", "ack_key": None, "kind": "stale_value", "level": "info",
+                      "title": f"{len(stale) - 5} more manually-valued holdings need updating",
+                      "message": "See them all on the Holdings page.", "detail": None,
+                      "link": ("international_centre.holdings_list", {"flag": "stale"}), "done": False})
+
+    # 4. US estate-tax awareness (information, not a calculation).
+    exposure = get_us_situs_exposure(user_id)
+    total = exposure["total_usd"]
+    if total >= US_ESTATE_EXEMPTION_USD * US_ESTATE_NEAR_PCT:
+        over = total >= US_ESTATE_EXEMPTION_USD
+        tier = "over" if over else "near"
+        key = f"estate:{tier}"
+        assumed_note = (f" ({len(exposure['assumed'])} holding(s) with no country set were assumed to be US-listed.)"
+                        if exposure["assumed"] else "")
+        items.append({"key": key, "ack_key": key, "kind": "estate", "level": "warning" if over else "info",
+                      "title": "US estate tax - awareness note",
+                      "message": (f"Your US-listed holdings are worth about ${total:,.0f}, "
+                                  + ("above" if over else "approaching") + f" the ${US_ESTATE_EXEMPTION_USD:,} exemption that "
+                                  "non-US persons get. Above it, US estate tax can apply to what your heirs inherit." + assumed_note),
+                      "detail": ("India has no estate duty, but the US taxes US-situs assets (US-listed shares and ETFs, even "
+                                 "if held through a broker for an Indian resident) of non-US persons above a fixed $60,000 exemption, at rates "
+                                 "that can reach 40%, and there is no India-US estate-tax treaty. The estate may need to file Form 706-NA. "
+                                 "Non-US-domiciled funds are generally treated differently. This is awareness only - not tax advice and not "
+                                 "a calculation of what would be owed: speak to a cross-border tax professional about your situation."),
+                      "link": ("international_centre.holdings_list", {"country": "United States"}), "done": key in acked})
+
+    order = {"danger": 0, "warning": 1, "info": 2}
+    items.sort(key=lambda i: (i["done"], order[i["level"]]))
+    return items
 
 
 def _resolve_dividend_amount(data):

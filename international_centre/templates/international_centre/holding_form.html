@@ -8,6 +8,7 @@
   <form method="POST" class="ic-card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
 
+    <div class="fm-step"><span class="fm-step-badge">1</span> Asset type &amp; name</div>
     <div class="form-group">
       <label>Asset Type</label>
       <select name="asset_type" id="assetTypeSelect" required onchange="icToggleFields()">
@@ -25,6 +26,7 @@
              placeholder="e.g. Apple Inc., Chase Checking, Condo in Austin TX" />
     </div>
 
+    <div class="fm-step"><span class="fm-step-badge">2</span> Position &amp; value</div>
     <div id="icTickerFields">
       <div class="form-group">
         <label>Ticker Symbol</label>
@@ -54,6 +56,7 @@
       </div>
     </div>
 
+    <div class="fm-step"><span class="fm-step-badge">3</span> Currency &amp; country</div>
     <div class="ic-form-row">
       <div class="form-group">
         <label>Native Currency</label>
@@ -75,6 +78,7 @@
       </div>
     </div>
 
+    <div class="fm-step"><span class="fm-step-badge">4</span> Account details</div>
     <div class="ic-form-row">
       <div class="form-group">
         <label>Broker / Institution</label>
@@ -93,6 +97,7 @@
       <textarea name="notes" rows="2">{{ holding.notes if holding else data.get('notes', '') }}</textarea>
     </div>
 
+    <div class="fm-step"><span class="fm-step-badge">5</span> Nominees</div>
     <!-- ── Nominees — who should get this holding. Mirrors Wealth
          Centre's "Intended Heirs" section exactly: wiped and rebuilt
          from whatever's in the form on every save, not an incremental
@@ -143,7 +148,12 @@
 </div>
 
 <style>
-  .ic-form-wrap { max-width:640px; margin:0 auto; }
+  .ic-form-wrap { max-width:720px; margin:0 auto; }
+  .fm-step { display:flex; align-items:center; gap:10px; font-size:0.95rem; font-weight:700; color:var(--text);
+    margin:22px 0 14px; padding-top:18px; border-top:1px solid var(--border); }
+  .fm-step:first-of-type { margin-top:0; padding-top:0; border-top:none; }
+  .fm-step-badge { width:24px; height:24px; border-radius:50%; background:var(--accent); color:#fff; font-size:0.75rem;
+    display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:20px; }
   .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:28px; box-shadow:var(--shadow-sm); }
   .ic-form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; }

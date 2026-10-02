@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block title %}Dividend Income — International Investing — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "international_centre/_ui.html" %}
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">Dividend Income — {{ summary.fy_label }}</h1>
+    <p class="ic-subtitle">Dividends received from foreign holdings for the Indian financial year ({{ format_date(summary.fy_start) }} – {{ format_date(summary.fy_end) }}).</p>
+  </div>
+  <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+    <form method="GET">
+      <select name="fy" onchange="this.form.submit()" aria-label="Financial year">
+        {% for y in range(current_fy_start_year, current_fy_start_year - 6, -1) %}
+        <option value="{{ y }}" {{ 'selected' if y == summary.fy_start.year }}>FY {{ y }}-{{ '%02d' % ((y + 1) % 100) }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    {% set export_key = 'dividends' %}{% set export_params = {'fy': summary.fy_start.year} %}{% include "international_centre/_export_buttons.html" %}
+    <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+  </div>
+</div>
+
+<div class="iu-stat-grid">
+  <div class="iu-stat">
+    <div class="iu-stat-icon">💵</div>
+    <div class="iu-stat-label">Net Received (USD)</div>
+    <div class="iu-stat-value iu-up">${{ '{:,.2f}'.format(summary.total_net_usd) }}</div>
+    <div class="iu-stat-sub">{{ summary.payments }} payment{{ 's' if summary.payments != 1 else '' }}</div>
+  </div>
+  <div class="iu-stat">
+    <div class="iu-stat-icon">🇮🇳</div>
+    <div class="iu-stat-label">Net Received (INR approx.)</div>
+    <div class="iu-stat-value">₹{{ '{:,.0f}'.format(summary.total_net_inr) }}</div>
+    <div class="iu-stat-sub">at each holding's cached rate</div>
+  </div>
+  <div class="iu-stat {{ 'iu-stat--warning' if summary.total_withheld_inr else '' }}">
+    <div class="iu-stat-icon">🧾</div>
+    <div class="iu-stat-label">Foreign Tax Withheld (INR)</div>
+    <div class="iu-stat-value">₹{{ '{:,.0f}'.format(summary.total_withheld_inr) }}</div>
+    <a href="{{ url_for('international_centre.dtaa_summary', fy=summary.fy_start.year) }}" class="iu-link-sm">See Form 67 summary →</a>
+  </div>
+  <div class="iu-stat">
+    <div class="iu-stat-icon">📈</div>
+    <div class="iu-stat-label">Portfolio Yield (12 months)</div>
+    <div class="iu-stat-value">{{ '%.2f'|format(summary.portfolio_yield_pct) + '%' if summary.portfolio_yield_pct is not none else '—' }}</div>
+    <div class="iu-stat-sub">gross dividends / current value</div>
+  </div>
+</div>
+
+{% if summary.withholding_unknown %}
+<div class="ic-notice">{{ summary.withholding_unknown }} dividend{{ 's were' if summary.withholding_unknown != 1 else ' was' }} logged without a gross amount or tax withheld, so
+  {{ 'their' if summary.withholding_unknown != 1 else 'its' }} "gross" is shown as the net amount received and no foreign tax is counted for
+  {{ 'them' if summary.withholding_unknown != 1 else 'it' }}. Edit the transaction to add the gross and withholding for an accurate Form 67 figure.</div>
+{% endif %}
+{% if summary.any_missing_rate %}
+<div class="ic-notice">Some holdings have no exchange rate yet, so their USD/INR figures are blank until a price refresh succeeds.</div>
+{% endif %}
+
+{% if summary.rows %}
+<div class="ic-card">
+  <div class="section-label">Net Dividends by Month (USD)</div>
+  <div class="ic-chart-wrap"><canvas id="dividendMonthsChart" role="img" aria-label="Net dividends received per month in USD"></canvas></div>
+</div>
+
+<div class="ic-card">
+  <div class="section-label">By Holding</div>
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead>
+        <tr><th>Holding</th><th>Country</th><th class="ic-num">Payments</th><th class="ic-num">Gross</th><th class="ic-num">Withheld</th>
+            <th class="ic-num">Net</th><th class="ic-num">Net (USD)</th><th class="ic-num">Net (₹ approx.)</th><th class="ic-num">Yield (12m)</th></tr>
+      </thead>
+      <tbody>
+        {% for r in summary.rows %}
+        <tr>
+          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=r.holding_id) }}" class="ic-link">{{ asset_icon(r.holding.asset_type) }} {{ r.name }}</a></td>
+          <td>{{ r.country }}</td>
+          <td class="ic-num">{{ r.payments }}</td>
+          <td class="ic-num">{{ r.currency }} {{ '{:,.2f}'.format(r.gross_native) }}</td>
+          <td class="ic-num">{{ r.currency }} {{ '{:,.2f}'.format(r.withheld_native) }}</td>
+          <td class="ic-num">{{ r.currency }} {{ '{:,.2f}'.format(r.net_native) }}</td>
+          <td class="ic-num">{{ '$' + '{:,.2f}'.format(r.net_usd) if r.net_usd is not none else '—' }}</td>
+          <td class="ic-num">{{ '₹' + '{:,.0f}'.format(r.net_inr) if r.net_inr is not none else '—' }}</td>
+          <td class="ic-num">{{ '%.2f'|format(r.ttm_yield_pct) + '%' if r.ttm_yield_pct is not none else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="iu-empty">
+  <div class="iu-empty-icon">💵</div>
+  <h2 class="iu-empty-title">No dividends recorded for {{ summary.fy_label }}</h2>
+  <p class="iu-empty-desc">Log a DIVIDEND transaction on a holding (with the gross amount and tax withheld if you have them) and it will show up here and in your Form 67 summary.</p>
+  <a href="{{ url_for('international_centre.holdings_list') }}" class="iu-btn iu-btn-primary">Open holdings</a>
+</div>
+{% endif %}
+
+{% if summary.recent %}
+<div class="iu-section">
+  <div class="iu-section-head"><h2 class="iu-section-title">Latest Payments</h2></div>
+  <div class="iu-rows">
+    {% for p in summary.recent %}
+    <a href="{{ url_for('international_centre.holding_detail', holding_id=p.holding.id) }}" class="iu-row">
+      <span class="iu-row-icon">{{ asset_icon(p.holding.asset_type) }}</span>
+      <div class="iu-row-main">
+        <div class="iu-row-title">{{ p.holding.name }}</div>
+        <div class="iu-row-meta">{{ format_date(p.date) }}{% if p.withheld_native %} · {{ p.currency }} {{ '{:,.2f}'.format(p.withheld_native) }} tax withheld{% endif %}</div>
+      </div>
+      <div class="iu-row-right"><div class="iu-row-value iu-up">{{ p.currency }} {{ '{:,.2f}'.format(p.net_native) }}</div></div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<p class="ic-footnote-dv">Figures are a tracking aid. USD/INR use each holding's cached exchange rate, not the SBI TT buying rate used for tax filing.</p>
+
+{% if summary.rows %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  (function () {
+    var dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var grid = dark ? '#1e2130' : '#E2E8F0', label = '#64748B';
+    Chart.defaults.color = label; Chart.defaults.font.family = "'Inter', sans-serif"; Chart.defaults.font.size = 11;
+    var months = {{ summary.months|tojson }};
+    new Chart(document.getElementById('dividendMonthsChart'), {
+      type: 'bar',
+      data: { labels: months.map(function (m) { return m.label; }),
+              datasets: [{ label: 'Net dividends (USD)', data: months.map(function (m) { return m.net_usd; }),
+                           backgroundColor: '#0F766E', borderRadius: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+                   tooltip: { callbacks: { label: function (c) { return ' $' + c.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 2 }); } } } },
+        scales: { x: { grid: { color: grid } },
+                  y: { grid: { color: grid }, beginAtZero: true, ticks: { callback: function (v) { return '$' + v.toLocaleString('en-US'); } } } } }
+    });
+  })();
+</script>
+{% endif %}
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:20px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .ic-link:hover { text-decoration:underline; }
+  .ic-notice { background:var(--warning-bg); border:1px solid var(--warning); color:var(--text); border-radius:10px; padding:12px 16px; font-size:0.82rem; line-height:1.5; margin-bottom:16px; }
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
+  .ic-chart-wrap { position:relative; height:260px; }
+  .ic-table-wrap { overflow-x:auto; }
+  .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .ic-table th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .ic-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); }
+  .ic-table tr:last-child td { border-bottom:none; }
+  .ic-num { text-align:right !important; font-family:var(--font-data); white-space:nowrap; }
+  .ic-footnote-dv { font-size:0.74rem; color:var(--muted2); margin:4px 4px 16px; }
+  select { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:9px 10px; color:var(--text); font-size:0.82rem; font-family:'Inter',sans-serif; }
+</style>
+{% endblock %}
