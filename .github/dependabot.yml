@@ -1,0 +1,24 @@
+# Automatic dependency update pull requests (Batch 10.9, Oct 2026).
+# Weekly, batched so a week's minor/patch bumps arrive as ONE pull request
+# instead of one per package. Major-version bumps arrive separately on purpose:
+# review those by hand (Flask, SQLAlchemy and psycopg2 majors can change behaviour).
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3

@@ -1,21 +1,26 @@
 # Security Policy
 
-## Supported Versions
+MyWealthLens handles personal financial information, so security reports are
+taken seriously.
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+## Supported versions
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+Only the latest code on the `main` branch is supported. There are no
+separately maintained release versions yet.
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please **do not** open a public issue or pull request for a security problem.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+Report it privately instead: open this repository's **Security** tab, choose
+**Report a vulnerability**, and describe what you found, how to reproduce it,
+and what you think the impact is.
+
+You can expect an acknowledgement within a reasonable time, and a fix or an
+explanation once the report has been assessed. Please give a fix time to
+land before sharing details publicly.
+
+## What not to include
+
+Never put real financial data, passwords, PAN or account numbers in a report.
+Use made-up sample data to show the problem.

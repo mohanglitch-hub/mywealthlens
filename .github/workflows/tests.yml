@@ -18,6 +18,11 @@ on:
     branches: [main]
   workflow_dispatch: {}  # lets you also trigger a run manually from the Actions tab
 
+# Least privilege: this workflow only reads the code to run tests; it never
+# needs to write to the repository.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
