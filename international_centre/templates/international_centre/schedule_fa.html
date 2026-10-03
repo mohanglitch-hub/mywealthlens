@@ -3,6 +3,7 @@
 
 {% block content %}
 {% include "international_centre/_ui.html" %}
+<div class="iu-page">
 <div class="ic-header">
   <div>
     <h1 class="ic-title">Schedule FA Report — {{ summary.calendar_year }}</h1>
@@ -92,4 +93,5 @@
   .ic-badge-ok { background:var(--up-bg); color:var(--up); border-radius:6px; padding:3px 8px; font-size:0.72rem; font-weight:600; }
   .ic-badge-warning { background:var(--warning-bg); color:var(--warning); border-radius:6px; padding:3px 8px; font-size:0.72rem; font-weight:600; }
 </style>
+</div>
 {% endblock %}

@@ -3,6 +3,8 @@
 
 {% block content %}
 {% include "international_centre/_confirm_modal.html" %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page">
 <div class="ic-header">
   <div>
     <h1 class="ic-title">Document Vault</h1>
@@ -195,4 +197,5 @@
     form.style.display = form.style.display === 'none' ? 'block' : 'none';
   }
 </script>
+</div>
 {% endblock %}

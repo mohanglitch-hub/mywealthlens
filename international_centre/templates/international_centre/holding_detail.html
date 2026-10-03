@@ -4,6 +4,7 @@
 {% block content %}
 {% include "international_centre/_confirm_modal.html" %}
 {% include "international_centre/_ui.html" %}
+<div class="iu-page iu-page--narrow">
 <div class="ic-header">
   <div class="hd-head">
     <div class="hd-icon" aria-hidden="true">{{ asset_icon(holding.asset_type) }}</div>
@@ -636,4 +637,5 @@
     });
   }
 </script>
+</div>
 {% endblock %}
