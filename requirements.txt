@@ -9,7 +9,7 @@ psycopg2-binary==2.9.13
 waitress==3.0.2
 pyzipper==0.4.0
 pdfplumber==0.11.10
-yfinance==0.2.66
+yfinance==1.7.0
 reportlab==5.0.1
 openpyxl==3.1.5
 casparser==1.4.1
