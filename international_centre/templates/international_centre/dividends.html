@@ -3,6 +3,7 @@
 
 {% block content %}
 {% include "international_centre/_ui.html" %}
+<div class="iu-page">
 <div class="ic-header">
   <div>
     <h1 class="ic-title">Dividend Income — {{ summary.fy_label }}</h1>
@@ -159,4 +160,5 @@
   .ic-footnote-dv { font-size:0.74rem; color:var(--muted2); margin:4px 4px 16px; }
   select { background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:9px 10px; color:var(--text); font-size:0.82rem; font-family:'Inter',sans-serif; }
 </style>
+</div>
 {% endblock %}

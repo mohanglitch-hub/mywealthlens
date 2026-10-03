@@ -6,6 +6,12 @@
      {% include "international_centre/_ui.html" %}
    Pure CSS + one tiny script (keyboard-activatable clickable rows/cards). #}
 <style>
+  /* ── Page width (Batch 10.8) — same 1100px / 900px centred container the
+     Insurance and Retirement centres use, so International no longer
+     stretches edge to edge on wide screens. ── */
+  .iu-page { max-width:1100px; width:100%; margin:0 auto; }
+  .iu-page--narrow { max-width:900px; }
+
   /* ── Section headers ── */
   .iu-section { margin-bottom:28px; }
   .iu-section-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; gap:12px; }

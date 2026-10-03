@@ -3,6 +3,7 @@
 
 {% block content %}
 {% include "international_centre/_ui.html" %}
+<div class="iu-page">
 <div class="ic-header">
   <div>
     <h1 class="ic-title">RSU/ESPP Perquisite Report — {{ summary.fy_label }}</h1>
@@ -91,4 +92,5 @@
   .ic-table tr:last-child td { border-bottom:none; }
   .ic-table tfoot td { border-top:2px solid var(--border); border-bottom:none; }
 </style>
+</div>
 {% endblock %}

@@ -1917,7 +1917,16 @@ def main():
         assert rr.status_code == 200, (url, rr.status_code)
         body_u = rr.get_data(as_text=True)
         assert '{{' not in body_u and '{%' not in body_u, f"unrendered template syntax on {url}"
-    print("PASS: all 13 International pages render (HTTP 200) with no unrendered template syntax")
+        # Batch 10.8: every page sits in a centred, width-capped container like the other
+        # modules (the add/edit form has its own narrower .ic-form-wrap).
+        if url == '/international/holdings/add':
+            assert 'ic-form-wrap' in body_u, url
+        else:
+            assert 'class="iu-page' in body_u, f"{url} is not inside the width-capped page container"
+            assert (url.endswith(f'/holdings/{det_id_r}')) == ('iu-page iu-page--narrow' in body_u), f"{url}: wrong container width class"
+    ui_css = open('international_centre/templates/international_centre/_ui.html', encoding='utf-8').read()
+    assert '.iu-page { max-width:1100px;' in ui_css and '.iu-page--narrow { max-width:900px; }' in ui_css
+    print("PASS: all 13 International pages render (HTTP 200) with no unrendered template syntax, inside the same 1100px (900px for detail) centred container as Insurance")
 
     # ── 26. Export PDFs never contain a raw rupee glyph under the default INR currency ──
     with app.app_context():
