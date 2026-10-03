@@ -7,7 +7,11 @@ cross-importing another module's copies. currency_display.py IS a
 genuinely shared root-level module (used the same way by every module
 here — see its own docstring) so it's imported directly, not copied.
 """
+import os
+import uuid
+import mimetypes
 from datetime import datetime as _dt, date as _date
+from flask import current_app
 
 
 def format_date(d, fmt="%d %b %Y"):
@@ -49,11 +53,102 @@ def calendar_year_bounds(year):
     return _date(year, 1, 1), _date(year, 12, 31)
 
 
+def is_long_term(acquisition_date, sale_date):
+    """True if `sale_date` is MORE THAN 24 calendar months after
+    `acquisition_date` — the Indian tax-law threshold for foreign
+    (unlisted) equity/funds to qualify as long-term capital gains
+    (Sec 2(29A)/2(42A)) rather than short-term. Batch 9.6 (Sep 2026).
+
+    Deliberately calendar-month arithmetic, not a 730/731-day
+    approximation — a day-count check gets leap years and month-length
+    differences wrong right at the boundary, which is exactly where a
+    misclassification between LTCG and STCG (taxed very differently)
+    would actually matter. No new dependency: this is the same
+    add-N-months-then-compare logic python-dateutil's relativedelta
+    would do, written out directly rather than adding a dependency for
+    one function."""
+    month = acquisition_date.month - 1 + 24
+    year = acquisition_date.year + month // 12
+    month = month % 12 + 1
+    import calendar
+    last_day = calendar.monthrange(year, month)[1]
+    day = min(acquisition_date.day, last_day)
+    threshold_date = _date(year, month, day)
+    return sale_date > threshold_date
+
+
 COUNTRIES = [
     "United States", "United Kingdom", "Singapore", "United Arab Emirates",
     "Australia", "Canada", "Germany", "France", "Netherlands", "Ireland",
     "Switzerland", "Japan", "Hong Kong", "Other",
 ]
+
+
+# ── Document Storage (Batch 9.3, Sep 2026) ───────────────────────────
+# Mirrors insurance_centre/retirement_centre's utils.py exactly —
+# own copy per this project's established per-module convention.
+
+PREVIEWABLE_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
+
+
+def get_document_upload_path(holding_id):
+    """Local directory for a holding's documents. Creates it if needed.
+    Path: instance/documents/international/<holding_id>/"""
+    base = os.path.join(
+        current_app.instance_path,
+        "documents", "international", str(holding_id)
+    )
+    os.makedirs(base, exist_ok=True)
+    return base
+
+
+def generate_stored_filename(original_filename):
+    """UUID-based stored filename (prevents collisions), extension preserved."""
+    ext = os.path.splitext(original_filename)[1].lower()
+    return f"{uuid.uuid4()}{ext}"
+
+
+def save_document_file(file, holding_id):
+    """Save an uploaded file to local storage.
+    Returns (stored_name, file_path, file_size) on success.
+    Raises OSError on failure."""
+    upload_dir  = get_document_upload_path(holding_id)
+    stored_name = generate_stored_filename(file.filename)
+    file_path   = os.path.join(upload_dir, stored_name)
+    file.save(file_path)
+    file_size = os.path.getsize(file_path)
+    return stored_name, file_path, file_size
+
+
+def delete_document_file(file_path):
+    """Delete a document file from local storage. Silent if missing."""
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def is_previewable(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in PREVIEWABLE_EXTENSIONS
+
+
+def get_preview_mimetype(filename):
+    return mimetypes.guess_type(filename)[0] or "application/octet-stream"
+
+
+def secure_file_path(file_path, holding_id):
+    """Validate file_path is within the expected holding documents
+    directory. Prevents directory traversal attacks."""
+    expected_base = os.path.join(
+        current_app.instance_path, "documents", "international", str(holding_id)
+    )
+    real_path = os.path.realpath(file_path)
+    real_base = os.path.realpath(expected_base)
+    return real_path.startswith(real_base)
 
 
 def fetch_ticker_price(ticker):
@@ -74,3 +169,22 @@ def fetch_ticker_price(ticker):
     except Exception:
         pass
     return None
+
+
+# Batch 10.7 (Oct 2026) — one emoji per asset type, used by the dashboard
+# category cards, holding rows and holding-detail header (same idea as
+# insurance_centre's category_icons). Keyed by the type's display string.
+ASSET_TYPE_ICONS = {
+    "US/International Stock": "\U0001F4C8",
+    "US/International ETF": "\U0001F9FA",
+    "International Mutual Fund": "\U0001F4BC",
+    "Foreign Bank Account": "\U0001F3E6",
+    "Foreign Real Estate": "\U0001F3E0",
+    "Foreign Bond": "\U0001F4DC",
+    "RSU / ESPP (Employer Stock)": "\U0001F3E2",
+    "Other": "\U0001F4CB",
+}
+
+
+def asset_icon(asset_type):
+    return ASSET_TYPE_ICONS.get(asset_type, "\U0001F4CB")

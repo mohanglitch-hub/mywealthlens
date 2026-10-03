@@ -47,6 +47,12 @@ Four tables:
                                   period is the calendar year, a
                                   well-known quirk for Indian filers
                                   with foreign assets)
+  5. VestingTranche             — RSU/ESPP vesting events, RSU_ESPP
+                                  holdings only (Batch 9.7, Sep 2026) —
+                                  FMV-at-vest sets both the taxable
+                                  perquisite value and, later, the
+                                  capital-gains cost basis; see the
+                                  table's own docstring
 
 Archive→Restore lifecycle for holdings, matching the rest of the app
 (never a direct hard delete of something with transaction/snapshot
@@ -59,6 +65,9 @@ CBDT-compliant filing document. The Income Tax Department prescribes
 its own conversion rate (SBI's TT buying rate as of the relevant date)
 for actual filing purposes, which can differ from Frankfurter's. This
 is stated plainly on the report itself — see templates/schedule_fa.html.
+The same disclaimer, for the same reason, applies to every other tax-
+adjacent report this module produces (TCS estimate, DTAA/Form 67
+summary, LTCG/STCG classification — Batch 9.4/9.5/9.6, Sep 2026).
 """
 from datetime import datetime
 from models import db
@@ -81,6 +90,41 @@ class InternationalAssetType:
     TICKER_BASED = {US_STOCK, US_ETF, RSU_ESPP}
 
 
+class DocumentType:
+    """Batch 9.3 (Sep 2026) — Document Vault for international holdings.
+    Own list per this module's document-taxonomy convention (mirrors
+    insurance_centre.DocumentType / retirement_centre's equivalent —
+    each module keeps its own, deliberately not shared)."""
+    PURCHASE_CONFIRMATION = "Purchase Confirmation / Statement"
+    ACCOUNT_STATEMENT     = "Account Statement"
+    TAX_DOCUMENT          = "Tax Document (1099 / W-8BEN / Foreign Tax)"
+    OWNERSHIP_DOCUMENT    = "Property / Ownership Document"
+    OTHER_DOCUMENTS       = "Other Documents"
+
+    ALL = [PURCHASE_CONFIRMATION, ACCOUNT_STATEMENT, TAX_DOCUMENT,
+           OWNERSHIP_DOCUMENT, OTHER_DOCUMENTS]
+
+
+class TimelineEvent:
+    """Batch 10.3 (Oct 2026) — event types for a holding's audit trail.
+    Own list per this module's convention (mirrors insurance_centre's
+    TimelineEvent, deliberately not shared)."""
+    CREATED             = "Holding Created"
+    UPDATED             = "Holding Updated"
+    NOMINEE_UPDATED     = "Nominees Updated"
+    VALUE_REFRESHED     = "Value Refreshed"
+    TRANSACTION_ADDED   = "Transaction Added"
+    TRANSACTION_EDITED  = "Transaction Edited"
+    TRANSACTION_DELETED = "Transaction Deleted"
+    VESTING_ADDED       = "Vesting Tranche Added"
+    VESTING_EDITED      = "Vesting Tranche Edited"
+    VESTING_DELETED     = "Vesting Tranche Deleted"
+    DOCUMENT_UPLOADED   = "Document Uploaded"
+    DOCUMENT_DELETED    = "Document Deleted"
+    ARCHIVED            = "Archived"
+    RESTORED            = "Restored"
+
+
 class InternationalTxnType:
     BUY = "BUY"
     SELL = "SELL"
@@ -88,15 +132,29 @@ class InternationalTxnType:
     ALL = [BUY, SELL, DIVIDEND]
 
 
+class VestingPlanType:
+    """Batch 9.7 (Sep 2026) — RSU/ESPP vesting tranches, RSU_ESPP
+    holdings only. Both plan types are tracked the same way (a dated
+    event that grants/purchases shares at a known fair market value),
+    but the tax treatment of the price actually paid differs: RSU
+    grants are free (no purchase_price_native), while ESPP shares are
+    bought at a discount to FMV -- see VestingTranche's own docstring
+    for how that discount becomes taxable perquisite income."""
+    RSU = "RSU"
+    ESPP = "ESPP"
+    ALL = [RSU, ESPP]
+
+
 class RemittancePurpose:
     INVESTMENT_SECURITIES = "Investment in securities/shares"
     INVESTMENT_PROPERTY = "Investment in immovable property"
     MAINTENANCE_OF_RELATIVE = "Maintenance of close relatives abroad"
     EDUCATION = "Education abroad"
+    MEDICAL = "Medical treatment abroad"   # Batch 10.1 (Oct 2026) — has its own TCS rate
     EMPLOYMENT = "Emigration / employment abroad"
     OTHER = "Other"
     ALL = [INVESTMENT_SECURITIES, INVESTMENT_PROPERTY, MAINTENANCE_OF_RELATIVE,
-           EDUCATION, EMPLOYMENT, OTHER]
+           EDUCATION, MEDICAL, EMPLOYMENT, OTHER]
 
 
 # RBI's Liberalised Remittance Scheme annual cap, in USD, per resident
@@ -106,6 +164,13 @@ class RemittancePurpose:
 # change by government notification, so it's kept as a single named
 # constant, easy to find and update if it ever does.
 LRS_ANNUAL_LIMIT_USD = 250_000
+
+# TCS (Tax Collected at Source) on LRS remittances: Batch 9.4 hardcoded
+# one threshold + one rate here. Batch 10.1 (Oct 2026) moved the rules
+# into international_centre/tcs_rules.py — a dated table, because both
+# the threshold (₹7L -> ₹10L from 1 Apr 2025) and the rate (now depends
+# on purpose; education/medical dropped to 2% from 1 Apr 2026) have
+# changed by law and will change again.
 
 
 class InternationalHolding(db.Model):
@@ -149,6 +214,12 @@ class InternationalHolding(db.Model):
     fx_rate_used = db.Column(db.Float, nullable=True)   # native_currency -> USD rate used for usd_value
     fx_rate_date = db.Column(db.Date, nullable=True)
     price_updated_at = db.Column(db.DateTime, nullable=True)
+    value_updated_at = db.Column(db.DateTime, nullable=True)
+    # Batch 10.3 (Oct 2026) — when the holding's VALUE was last set by the
+    # user (creation, or an edit that changed current_value_native). Drives
+    # the "this manually-valued asset hasn't been updated in a while"
+    # nudge. updated_at can't be used for that: it moves on every FX
+    # refresh, even when the user has not touched the value.
 
     invested_native = db.Column(db.Float, nullable=True)  # net cost basis in native currency, from transactions
     xirr            = db.Column(db.Float, nullable=True)  # cached, refreshed alongside price/value
@@ -171,6 +242,19 @@ class InternationalHolding(db.Model):
         "InternationalHoldingNominee", backref="holding", lazy="dynamic",
         cascade="all, delete-orphan",
     )
+    documents = db.relationship(
+        "InternationalHoldingDocument", backref="holding", lazy=True,
+        cascade="all, delete-orphan",
+    )
+    vesting_tranches = db.relationship(
+        "VestingTranche", backref="holding", lazy=True,
+        cascade="all, delete-orphan",
+    )
+    timeline = db.relationship(
+        "InternationalTimeline", backref="holding", lazy="dynamic",
+        cascade="all, delete-orphan",
+        order_by="InternationalTimeline.created_at.desc()",
+    )
 
     def __repr__(self):
         return f"<InternationalHolding {self.name} {self.native_currency}{self.current_value_native}>"
@@ -178,6 +262,14 @@ class InternationalHolding(db.Model):
     @property
     def is_ticker_based(self):
         return self.asset_type in InternationalAssetType.TICKER_BASED
+
+    @property
+    def is_rsu_espp(self):
+        """Batch 9.7 (Sep 2026) — gates the Vesting Tranches section on
+        holding_detail.html, same pattern as is_ticker_based above
+        (avoids hardcoding the asset type's display string in a
+        template)."""
+        return self.asset_type == InternationalAssetType.RSU_ESPP
 
     @property
     def total_nominees_percentage(self):
@@ -236,7 +328,21 @@ class InternationalTransaction(db.Model):
     txn_type = db.Column(db.String(10), nullable=False)  # InternationalTxnType.ALL
     quantity      = db.Column(db.Float, nullable=True)  # null for a DIVIDEND, or a lump-sum bank/property entry
     price_native  = db.Column(db.Float, nullable=True)
-    amount_native = db.Column(db.Float, nullable=False)  # always populated — quantity*price for BUY/SELL, the payout for DIVIDEND
+    amount_native = db.Column(db.Float, nullable=False)  # always populated — quantity*price for BUY/SELL. For a DIVIDEND, the NET amount actually received (after any withholding) — this is what XIRR uses as the real cash flow, unaffected by Batch 9.5 below.
+
+    gross_amount_native  = db.Column(db.Float, nullable=True)
+    tax_withheld_native  = db.Column(db.Float, nullable=True)
+    # Batch 9.5 (Sep 2026) — DIVIDEND only. Optional: most foreign
+    # brokers withhold tax at source (e.g. the US's 25% treaty rate
+    # under the India-US DTAA) before crediting a dividend, so what
+    # actually lands in the account is already net. When given,
+    # gross_amount_native is what was DECLARED (before withholding) and
+    # tax_withheld_native is what was withheld; amount_native (the real
+    # cash flow) is derived as gross - withheld — see
+    # services.add_transaction()/update_transaction(). Left null (as
+    # every dividend before this batch already is) for a manually-
+    # entered net-only dividend, or for BUY/SELL, where they're
+    # meaningless. Powers get_dtaa_summary()'s Form 67 support figures.
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -272,6 +378,23 @@ class RemittanceRecord(db.Model):
     remitting_bank = db.Column(db.String(100), nullable=True)
     notes          = db.Column(db.Text, nullable=True)
 
+    education_loan_funded = db.Column(db.Boolean, nullable=False, default=False)
+    # Batch 10.1 (Oct 2026) — only meaningful when purpose is Education:
+    # an education loan from a financial institution has its own (lower
+    # or nil) TCS rate. Ignored for every other purpose.
+
+    tcs_amount_inr = db.Column(db.Float, nullable=False, default=0.0)
+    # Batch 9.4 (Sep 2026), reworked Batch 10.1 (Oct 2026) — an ESTIMATE
+    # of the TCS on THIS remittance: the portion above the running,
+    # date-ordered aggregate threshold for its financial year, at the
+    # rate for its purpose (see tcs_rules.py). From 10.1 the whole
+    # financial year is recomputed (services.recompute_fy_tcs) after
+    # every add/edit/delete, so the figure is always consistent with
+    # what's currently logged, regardless of entry order. An authorised
+    # dealer (bank) collects the real TCS from the totals IT sees for
+    # your PAN across ALL banks, which this module cannot — treat this
+    # as your own estimate, not your bank's figure.
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -302,3 +425,192 @@ class InternationalValueSnapshot(db.Model):
 
     def __repr__(self):
         return f"<InternationalSnapshot holding={self.holding_id} {self.date} ${self.usd_value}>"
+
+
+class VestingTranche(db.Model):
+    """Batch 9.7 (Sep 2026) — one RSU/ESPP vesting event: a dated grant
+    of shares (RSU) or a discounted purchase (ESPP), RSU_ESPP holdings
+    only. Kept as its own table rather than folded into
+    InternationalTransaction because a vesting event isn't really a
+    BUY -- there's no price "paid" for an RSU grant, and an ESPP
+    purchase's price paid is deliberately NOT its capital-gains cost
+    basis (see below), which InternationalTransaction's BUY handling
+    has no room to represent.
+
+    Tax treatment (India), which is why this table exists:
+      1. PERQUISITE (taxable as salary income, in the FY of vesting):
+         (fmv_native - purchase_price_native) * quantity -- the full
+         value of an RSU grant (purchase_price_native is None/0), or
+         just the discount on an ESPP purchase. See
+         perquisite_value_native below and services.
+         get_vesting_perquisite_summary().
+      2. CAPITAL GAINS (later, when the shares are eventually SOLD):
+         cost basis is FMV at vest, NOT what was actually paid --
+         perquisite tax was already charged on the FMV-vs-paid
+         difference, so taxing it again via a lower capital-gains cost
+         basis would be double taxation. See cost_basis_native below,
+         and services.classify_capital_gains(), which folds these
+         tranches into the same FIFO lot-matching BUY transactions use
+         (Batch 9.6), keyed on vest_date/fmv_native exactly as a BUY is
+         keyed on its own date/price.
+
+    grant_date is optional and purely informational (RSU grant date /
+    ESPP offering-period start) -- every actual tax/FIFO calculation
+    here uses vest_date, the date shares were actually received."""
+    __tablename__ = "international_vesting_tranche"
+    __table_args__ = (
+        db.Index("ix_intl_vesting_holding", "holding_id"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    holding_id = db.Column(db.Integer, db.ForeignKey("international_holding.id"), nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    plan_type  = db.Column(db.String(10), nullable=False, default=VestingPlanType.RSU)  # VestingPlanType.ALL
+    grant_date = db.Column(db.Date, nullable=True)   # informational only — see docstring
+    vest_date  = db.Column(db.Date, nullable=False)  # the date shares actually vested / the ESPP purchase settled
+
+    quantity   = db.Column(db.Float, nullable=False)
+    fmv_native = db.Column(db.Float, nullable=False)  # fair market value PER SHARE at vest, native currency
+
+    purchase_price_native = db.Column(db.Float, nullable=True)
+    # ^ ESPP only: the discounted price actually paid per share. Null
+    #   (treated as 0) for RSU, which is a free grant.
+
+    notes = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def perquisite_value_native(self):
+        """Taxable as salary income in the FY of vesting — see class
+        docstring point 1."""
+        paid = self.purchase_price_native or 0.0
+        return round((self.fmv_native - paid) * self.quantity, 2)
+
+    @property
+    def cost_basis_native(self):
+        """The cost basis a later SALE of these shares uses for capital
+        gains — FMV at vest, not what was actually paid. See class
+        docstring point 2."""
+        return round(self.fmv_native * self.quantity, 2)
+
+    def __repr__(self):
+        return f"<VestingTranche {self.plan_type} {self.vest_date} qty={self.quantity}>"
+
+
+class InternationalHoldingDocument(db.Model):
+    """Batch 9.3 (Sep 2026) — Document Vault for international holdings,
+    closing the last parity gap flagged when this module first shipped
+    (Insurance, Retirement and Wealth all had one; this module had
+    none). Local document metadata only — file bytes never touch the
+    database, same as every other module's Document Vault. Files live
+    at instance/documents/international/<holding_id>/<stored_name>.
+
+    Unlike InsuranceDocument's ondelete="SET NULL" (which keeps a
+    document row around for audit after its policy is hard-deleted),
+    this table CASCADEs on holding delete via the ORM relationship
+    above (cascade="all, delete-orphan") — the same choice
+    RetirementDocument made, for the same reason: like Retirement
+    Centre, this module's own delete_holding_permanently() already
+    requires the holding to be archived first (Archive -> Delete
+    Permanently lifecycle), so there is no risk of silently losing
+    live audit trail data, and simplicity wins.
+
+    iv / is_encrypted: schema-level parity with RetirementDocument's
+    Document Vault client-side encryption columns (Sep 2026 production-
+    readiness work — see static/js/mwl-crypto.js), added here so this
+    module doesn't need a follow-up migration once that feature is
+    switched on for it too. IMPORTANT — confirmed during this batch's
+    audit: the actual browser-side code that would populate these
+    fields on upload/download (referenced in Wealth/Retirement's own
+    route comments as static/js/mwl-doc-encrypt-upload.js) does not
+    exist anywhere in the repo. mwl-crypto.js only exposes the
+    encrypt/decrypt primitives; nothing calls them yet. So today, here
+    exactly as in Wealth/Retirement, is_encrypted is always False and
+    documents are stored as plain bytes — this is a real, pre-existing
+    gap across the whole app, not something introduced or fixed by
+    this batch. Flagged to Mohan; out of scope for Batch 9.3 to fix."""
+    __tablename__ = "international_holding_document"
+    __table_args__ = (
+        db.Index("ix_intl_doc_holding", "holding_id"),
+        db.Index("ix_intl_doc_user",    "user_id"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    holding_id = db.Column(db.Integer,
+                            db.ForeignKey("international_holding.id"),
+                            nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+
+    doc_type      = db.Column(db.String(50), nullable=False)  # DocumentType.ALL
+    title         = db.Column(db.String(255), nullable=True)
+    # ^ user-facing display name, distinct from the uploaded file's own
+    #   filename — falls back to original_name when not provided
+    original_name = db.Column(db.String(255), nullable=False)
+    stored_name   = db.Column(db.String(255), nullable=False)
+    file_path     = db.Column(db.String(500), nullable=False)
+    file_size     = db.Column(db.Integer, nullable=True)
+    notes         = db.Column(db.String(500), nullable=True)
+
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    iv           = db.Column(db.String(64), nullable=True)
+    is_encrypted = db.Column(db.Boolean, default=False, nullable=False)
+
+    @property
+    def display_name(self):
+        return self.title or self.original_name
+
+    @property
+    def file_size_display(self):
+        if not self.file_size:
+            return "Unknown"
+        if self.file_size < 1024:
+            return f"{self.file_size} B"
+        if self.file_size < 1024 * 1024:
+            return f"{self.file_size / 1024:.1f} KB"
+        return f"{self.file_size / (1024*1024):.1f} MB"
+
+    def __repr__(self):
+        return f"<InternationalHoldingDocument {self.original_name}>"
+
+
+class InternationalTimeline(db.Model):
+    """Batch 10.3 (Oct 2026) — audit history for every international
+    holding, shown on the holding detail page. Append-only: services
+    only ever add rows. Mirrors insurance_centre's InsuranceTimeline.
+    Deleted together with its holding (ORM cascade) — an audit trail for
+    something permanently deleted has nothing left to describe."""
+    __tablename__ = "international_timeline"
+    __table_args__ = (
+        db.Index("ix_intl_timeline_holding", "holding_id"),
+    )
+
+    id          = db.Column(db.Integer, primary_key=True)
+    holding_id  = db.Column(db.Integer, db.ForeignKey("international_holding.id"), nullable=False)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    event_type  = db.Column(db.String(50), nullable=False)    # TimelineEvent constants
+    description = db.Column(db.String(500), nullable=False)   # human-readable
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<InternationalTimeline {self.event_type} holding={self.holding_id}>"
+
+
+class InternationalReminderAck(db.Model):
+    """Batch 10.6 (Oct 2026) — remembers which reminders the user has
+    marked done (or dismissed). Reminders themselves are NOT stored: they
+    are computed fresh from holdings, remittances and today's date every
+    time (see services.get_reminders), so they can never go stale. This
+    table only records "the user has dealt with reminder X", keyed by a
+    short period-specific string such as "schedule_fa:2025",
+    "form67:2025" or "estate:over"."""
+    __tablename__ = "international_reminder_ack"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "reminder_key", name="uq_intl_reminder_ack_user_key"),
+    )
+
+    id              = db.Column(db.Integer, primary_key=True)
+    user_id         = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    reminder_key    = db.Column(db.String(60), nullable=False)
+    acknowledged_at = db.Column(db.DateTime, default=datetime.utcnow)

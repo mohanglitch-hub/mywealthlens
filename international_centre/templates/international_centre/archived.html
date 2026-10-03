@@ -3,42 +3,50 @@
 
 {% block content %}
 {% include "international_centre/_confirm_modal.html" %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page">
 <div class="ic-header">
-  <h1 class="ic-title">Archived International Holdings</h1>
+  <div>
+    <h1 class="ic-title">Archived International Holdings</h1>
+    <p style="color:var(--muted); font-size:0.9rem; margin-top:4px;">Archived holdings are hidden from active views but never deleted.</p>
+  </div>
   <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
 </div>
 
 {% if holdings %}
-<div class="ic-card">
-  <div class="ic-table-wrap">
-    <table class="ic-table">
-      <thead><tr><th>Name</th><th>Type</th><th>Value (native)</th><th>Value (USD)</th><th></th></tr></thead>
-      <tbody>
-        {% for h in holdings %}
-        <tr>
-          <td>{{ h.name }}</td>
-          <td>{{ h.asset_type }}</td>
-          <td>{{ h.native_currency }} {{ '{:,.2f}'.format(h.current_value_native) }}</td>
-          <td>{{ format_money_usd(h.usd_value) }}</td>
-          <td style="display:flex; gap:10px;">
-            <form method="POST" action="{{ url_for('international_centre.restore_holding', holding_id=h.id) }}" style="display:inline;">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="submit" class="ic-link-btn" style="color:var(--accent);">Restore</button>
-            </form>
-            <form method="POST" action="{{ url_for('international_centre.delete_holding', holding_id=h.id) }}" style="display:inline;" id="deleteHoldingForm{{ h.id }}">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <button type="button" class="ic-link-btn"
-                      onclick="icConfirmAction(document.getElementById('deleteHoldingForm{{ h.id }}'), 'Delete Holding Permanently?', 'This holding and all its transaction history will be permanently removed. This action cannot be undone.', 'Delete Permanently')">Delete Permanently</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<div class="ar-grid">
+  {% for h in holdings %}
+  <div class="ar-card">
+    <div class="ar-top">
+      <span class="ar-icon">{{ asset_icon(h.asset_type) }}</span>
+      <span class="iu-badge iu-badge-muted">Archived</span>
+    </div>
+    <div>
+      <div class="ar-name">{{ h.name }}</div>
+      <div class="ar-meta">{{ h.asset_type }}{{ ' · ' + h.country if h.country }}</div>
+    </div>
+    <div class="ar-value">{{ format_money_usd(h.usd_value) }}</div>
+    <div class="ar-native">{{ h.native_currency }} {{ '{:,.2f}'.format(h.current_value_native) }}</div>
+    <div class="ar-actions">
+      <form method="POST" action="{{ url_for('international_centre.restore_holding', holding_id=h.id) }}" style="flex:1;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="submit" class="ar-btn ar-btn-restore">↩ Restore</button>
+      </form>
+      <form method="POST" action="{{ url_for('international_centre.delete_holding', holding_id=h.id) }}" style="flex:1;" id="deleteHoldingForm{{ h.id }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <button type="button" class="ar-btn ar-btn-delete"
+                onclick="icConfirmAction(document.getElementById('deleteHoldingForm{{ h.id }}'), 'Delete Holding Permanently?', 'This holding and all its transaction history will be permanently removed. This action cannot be undone.', 'Delete Permanently')">🗑 Delete</button>
+      </form>
+    </div>
   </div>
+  {% endfor %}
 </div>
 {% else %}
-<div class="ic-card ic-empty"><p>No archived holdings.</p></div>
+<div class="iu-empty">
+  <div class="iu-empty-icon">🗄️</div>
+  <h2 class="iu-empty-title">No archived holdings</h2>
+  <p class="iu-empty-desc">Holdings you archive are hidden from your totals and reports but never deleted. They can always be restored from here.</p>
+</div>
 {% endif %}
 
 <style>
@@ -55,5 +63,22 @@
   .ic-table tr:last-child td { border-bottom:none; }
   .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
   .ic-link-btn:hover { text-decoration:underline; }
+  .ar-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:18px; }
+  .ar-card { background:var(--surface); border:1px dashed var(--border); border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:10px; box-shadow:var(--shadow-sm); }
+  .ar-top { display:flex; justify-content:space-between; align-items:flex-start; }
+  .ar-icon { font-size:1.5rem; }
+  .ar-name { font-size:1rem; font-weight:700; color:var(--text); overflow-wrap:anywhere; }
+  .ar-meta { font-size:0.76rem; color:var(--muted); margin-top:2px; }
+  .ar-value { font-size:1.25rem; font-weight:700; color:var(--accent); font-family:var(--font-data); }
+  .ar-native { font-size:0.78rem; color:var(--muted2); font-family:var(--font-data); margin-top:-6px; }
+  .ar-actions { display:flex; gap:10px; margin-top:4px; }
+  .ar-btn { width:100%; border-radius:8px; padding:9px; font-size:0.8rem; font-weight:700; cursor:pointer; border:1px solid; font-family:'Inter',sans-serif; transition:all .2s; }
+  .ar-btn-restore { background:var(--up-bg); color:var(--up); border-color:var(--up); }
+  .ar-btn-restore:hover { background:var(--up); color:#fff; }
+  .ar-btn-delete { background:var(--down-bg); color:var(--down); border-color:var(--down); }
+  .ar-btn-delete:hover { background:var(--down); color:#fff; }
+  @media (max-width:1024px) { .ar-grid { grid-template-columns:repeat(2, 1fr); } }
+  @media (max-width:768px)  { .ar-grid { grid-template-columns:1fr; } }
 </style>
+</div>
 {% endblock %}

@@ -2,13 +2,18 @@
 {% block title %}Remittances — MyWealthLens{% endblock %}
 
 {% block content %}
+{% include "international_centre/_ui.html" %}
 {% include "international_centre/_confirm_modal.html" %}
+<div class="iu-page">
 <div class="ic-header">
   <div>
     <h1 class="ic-title">Remittances (LRS)</h1>
     <p class="ic-subtitle">Money sent abroad under RBI's Liberalised Remittance Scheme.</p>
   </div>
-  <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+  <div class="iu-btn-group">
+    {% set export_key = 'lrs' %}{% set export_params = {'fy': lrs_status.fy_start.year} %}{% include "international_centre/_export_buttons.html" %}
+    <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+  </div>
 </div>
 
 <div class="ic-card">
@@ -28,7 +33,23 @@
   {% elif lrs_status.status == 'warning' %}
   <div class="ic-alert ic-alert-warning">You've used {{ lrs_status.pct_used }}% of this year's LRS limit.</div>
   {% endif %}
-  <div class="ic-disclaimer">This is a tracking aid built from what you've logged here — not a substitute for checking your actual remittance history with your bank/AD. The $250,000 figure is RBI's current published LRS cap and could change by future notification.</div>
+  {% if lrs_status.total_tcs_inr %}
+  <div class="ic-tcs-tile">
+    <span class="ic-tcs-label">Estimated TCS This {{ lrs_status.fy_label }}</span>
+    <span class="ic-tcs-value">₹{{ '{:,.0f}'.format(lrs_status.total_tcs_inr) }}</span>
+  </div>
+  {% endif %}
+  {% if lrs_status.tcs_free_remaining_inr is not none %}
+  <div class="ic-tcs-tile">
+    <span class="ic-tcs-label">Remaining before TCS applies (₹{{ '{:,.0f}'.format(lrs_status.tcs_threshold_inr) }} / FY)</span>
+    <span class="ic-tcs-value">₹{{ '{:,.0f}'.format(lrs_status.tcs_free_remaining_inr) }}</span>
+  </div>
+  {% endif %}
+  <div class="ic-disclaimer">This is a tracking aid built from what you've logged here — not a substitute for checking your actual remittance history with your bank/AD. The $250,000 figure is RBI's current published LRS cap and could change by future notification.
+    {% if lrs_status.tcs_rule %}
+    TCS is estimated using the rules in force today: the first ₹{{ '{:,.0f}'.format(lrs_status.tcs_rule.threshold_inr) }} of aggregate LRS remittances in a financial year carries no TCS; above that, {{ lrs_status.tcs_rule.general_pct|round|int }}% on investment, property, maintenance and other purposes, {{ lrs_status.tcs_rule.edu_medical_pct|round(1) }}% on self-funded education and medical, and {{ lrs_status.tcs_rule.edu_loan_pct|round(1) }}% on education funded by a loan from a financial institution. Rates and thresholds for each remittance follow the rules that applied on its own date.
+    {% endif %}
+    Overseas tour packages are not modelled. Your bank collects the real TCS from your total across all banks, which this page can't see, so treat these figures as an estimate. TCS collected is creditable against your final tax liability — confirm the rates and your figures with a CA.</div>
 </div>
 
 <div class="ic-card">
@@ -45,9 +66,16 @@
     </div>
     <div class="form-group">
       <label>Purpose</label>
-      <select name="purpose" required>
+      <select name="purpose" required id="icPurposeSelect">
         {% for p in purposes %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
       </select>
+    </div>
+    <div class="form-group" id="icLoanField" style="display:none;">
+      <label>Education loan?</label>
+      <label style="display:flex; align-items:center; gap:8px; font-weight:400; font-size:0.82rem;">
+        <input type="checkbox" name="education_loan_funded" value="on" style="width:auto;" />
+        Funded by a loan from a financial institution
+      </label>
     </div>
     <div class="form-group">
       <label>Linked Holding (optional)</label>
@@ -69,14 +97,15 @@
   {% if lrs_status.remittances %}
   <div class="ic-table-wrap">
     <table class="ic-table">
-      <thead><tr><th>Date</th><th>Amount (INR)</th><th>Amount (USD)</th><th>Purpose</th><th>Bank</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>Amount (INR)</th><th>Amount (USD)</th><th>TCS</th><th>Purpose</th><th>Bank</th><th></th></tr></thead>
       <tbody>
         {% for r in lrs_status.remittances %}
         <tr>
           <td>{{ format_date(r.date) }}</td>
           <td>₹{{ '{:,.0f}'.format(r.amount_inr) }}</td>
           <td>${{ '{:,.2f}'.format(r.amount_usd) }}</td>
-          <td>{{ r.purpose }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(r.tcs_amount_inr) if r.tcs_amount_inr else '—' }}</td>
+          <td>{{ r.purpose }}{% if r.education_loan_funded %} <span style="color:var(--muted); font-size:0.75rem;">(loan-funded)</span>{% endif %}</td>
           <td>{{ r.remitting_bank or '—' }}</td>
           <td>
             <form method="POST" action="{{ url_for('international_centre.delete_remittance', remit_id=r.id) }}" style="display:inline;">
@@ -95,6 +124,87 @@
   {% endif %}
 </div>
 
+<div class="ic-card">
+  <div class="section-label">LRS History (Last {{ lrs_history|length }} Years)</div>
+  <div class="ic-chart-wrap"><canvas id="lrsHistoryChart"></canvas></div>
+  <div class="ic-table-wrap" style="margin-top:16px;">
+    <table class="ic-table">
+      <thead><tr><th>Financial Year</th><th>Remittances</th><th>Total (USD)</th><th>Total (INR)</th><th>TCS (INR)</th><th>% of LRS Cap</th><th>Download</th></tr></thead>
+      <tbody>
+        {% for yr in lrs_history %}
+        <tr>
+          <td>{{ yr.fy_label }}</td>
+          <td>{{ yr.count }}</td>
+          <td>${{ '{:,.0f}'.format(yr.total_usd) }}</td>
+          <td>₹{{ '{:,.0f}'.format(yr.total_inr) }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(yr.total_tcs_inr) if yr.total_tcs_inr else '—' }}</td>
+          <td>{{ yr.pct_used }}%</td>
+          <td>{% set export_key = 'lrs' %}{% set export_params = {'fy': yr.fy_start.year} %}{% include "international_centre/_export_buttons.html" %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  // Batch 10.1 (Oct 2026) — the education-loan tick only matters for an
+  // Education remittance (it has its own TCS rate); hide it otherwise.
+  (function () {
+    const sel = document.getElementById('icPurposeSelect');
+    const field = document.getElementById('icLoanField');
+    if (!sel || !field) return;
+    const eduPurpose = {{ education_purpose|tojson }};
+    function sync() {
+      const show = sel.value === eduPurpose;
+      field.style.display = show ? 'flex' : 'none';
+      if (!show) field.querySelector('input[type=checkbox]').checked = false;
+    }
+    sel.addEventListener('change', sync);
+    sync();
+  })();
+</script>
+
+{% if lrs_history %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  // Batch 9.8 (Sep 2026) — multi-year LRS usage trend, same Chart.js
+  // conventions as the International dashboard's own charts.
+  const icIsDark2   = document.documentElement.getAttribute('data-theme') === 'dark';
+  const icGridCol2  = icIsDark2 ? '#1e2130' : '#E2E8F0';
+  const icLabelCol2 = icIsDark2 ? '#64748b' : '#64748B';
+  Chart.defaults.color = icLabelCol2;
+  Chart.defaults.font.family = "'Inter', sans-serif";
+  Chart.defaults.font.size = 11;
+
+  const lrsHistoryLabels = {{ lrs_history | map(attribute='fy_label') | list | tojson }};
+  const lrsHistoryValues = {{ lrs_history | map(attribute='total_usd') | list | tojson }};
+  const lrsHistoryLimit  = {{ lrs_status.limit_usd }};
+
+  new Chart(document.getElementById('lrsHistoryChart'), {
+    type: 'bar',
+    data: {
+      labels: lrsHistoryLabels,
+      datasets: [{
+        label: 'LRS Used (USD)', data: lrsHistoryValues,
+        backgroundColor: '#6366f1cc', borderColor: '#6366f1', borderWidth: 1, borderRadius: 6,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ' $' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' of $' + lrsHistoryLimit.toLocaleString('en-US') + ' cap' } },
+      },
+      scales: {
+        x: { grid: { color: icGridCol2 }, ticks: { color: icLabelCol2 } },
+        y: { grid: { color: icGridCol2 }, ticks: { color: icLabelCol2, callback: v => '$' + v.toLocaleString('en-US') } },
+      },
+    },
+  });
+</script>
+{% endif %}
+
 <style>
   .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
@@ -102,6 +212,7 @@
   .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
   .ic-link:hover { text-decoration:underline; }
   .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
+  .ic-chart-wrap { position:relative; height:220px; }
 
   .ic-gauge-track { width:100%; height:14px; background:var(--surface2); border-radius:7px; overflow:hidden; }
   .ic-gauge-fill { height:100%; background:var(--accent); border-radius:7px; transition:width 0.3s; }
@@ -114,6 +225,9 @@
   .ic-alert-warning { background:var(--warning-bg); color:var(--warning); border:1px solid var(--warning); }
   .ic-alert-down { background:var(--down-bg); color:var(--down); border:1px solid var(--down); }
   .ic-disclaimer { font-size:0.75rem; color:var(--muted2); margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
+  .ic-tcs-tile { display:flex; justify-content:space-between; align-items:center; background:var(--surface2); border-radius:8px; padding:10px 14px; margin-top:14px; }
+  .ic-tcs-label { font-size:0.8rem; color:var(--muted); font-weight:600; }
+  .ic-tcs-value { font-size:0.95rem; color:var(--text); font-weight:700; }
 
   .ic-txn-form { display:flex; gap:14px; flex-wrap:wrap; align-items:end; }
   .ic-txn-form .form-group { margin-bottom:0; min-width:150px; }
@@ -125,4 +239,5 @@
   .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
   .ic-link-btn:hover { text-decoration:underline; }
 </style>
+</div>
 {% endblock %}

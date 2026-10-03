@@ -3,22 +3,36 @@
 
 {% block content %}
 {% include "international_centre/_confirm_modal.html" %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page iu-page--narrow">
 <div class="ic-header">
-  <div>
-    <h1 class="ic-title">{{ holding.name }}</h1>
-    <p class="ic-subtitle">{{ holding.asset_type }}{{ ' · ' + holding.ticker if holding.ticker }}{{ ' · ' + holding.country if holding.country }}</p>
+  <div class="hd-head">
+    <div class="hd-icon" aria-hidden="true">{{ asset_icon(holding.asset_type) }}</div>
+    <div>
+      <div class="hd-type">{{ holding.asset_type }}</div>
+      <h1 class="ic-title">{{ holding.name }}</h1>
+      <div class="hd-badges">
+        {% if holding.ticker %}<span class="iu-badge iu-badge-muted">{{ holding.ticker }}</span>{% endif %}
+        {% if holding.country %}<span class="iu-badge iu-badge-accent">{{ holding.country }}</span>{% endif %}
+        <span class="iu-badge iu-badge-muted">{{ holding.native_currency }}</span>
+        {% if staleness.status != 'fresh' %}<span class="iu-badge iu-badge-warning">{{ 'Price out of date' if staleness.kind == 'price' else 'Value out of date' }}</span>{% endif %}
+        {% if unconverted %}<span class="iu-badge iu-badge-down">No USD rate</span>{% endif %}
+        {% if nominee_gap %}<span class="iu-badge iu-badge-muted">{{ nominee_gap }}</span>{% endif %}
+      </div>
+    </div>
   </div>
-  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+  <div class="iu-btn-group">
     <form method="POST" action="{{ url_for('international_centre.refresh_holding', holding_id=holding.id) }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <button type="submit" class="ic-btn-secondary">Refresh</button>
+      <button type="submit" class="iu-btn">↻ Refresh</button>
     </form>
-    <a href="{{ url_for('international_centre.edit_holding', holding_id=holding.id) }}" class="ic-btn-secondary" style="text-decoration:none;">Edit</a>
+    <a href="{{ url_for('international_centre.edit_holding', holding_id=holding.id) }}" class="iu-btn iu-btn-primary">✏️ Edit</a>
     <form method="POST" action="{{ url_for('international_centre.archive_holding', holding_id=holding.id) }}" style="display:inline;" id="archiveHoldingForm">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-      <button type="button" class="ic-btn-secondary"
+      <button type="button" class="iu-btn"
               onclick="icConfirmAction(document.getElementById('archiveHoldingForm'), 'Archive this holding?', 'You can restore it later from Archived Holdings.', 'Archive')">Archive</button>
     </form>
+    <a href="{{ url_for('international_centre.holdings_list') }}" class="iu-btn">← Back</a>
   </div>
 </div>
 
@@ -38,6 +52,25 @@
     <div class="ic-summary-label">Invested ({{ holding.native_currency }})</div>
     <div class="ic-summary-value">{{ '{:,.2f}'.format(holding.invested_native) if holding.invested_native is not none else '—' }}</div>
   </div>
+  {% if pnl.show %}
+  <div class="ic-summary-card">
+    <div class="ic-summary-label">Gain / Loss ({{ holding.native_currency }})</div>
+    {% if pnl.gain_native is not none %}
+    <div class="ic-summary-value {{ 'ic-up' if pnl.gain_native >= 0 else 'ic-down' }}">{{ '{:+,.2f}'.format(pnl.gain_native) }}</div>
+    <div class="ic-summary-sub {{ 'ic-up' if pnl.gain_pct is not none and pnl.gain_pct >= 0 else ('ic-down' if pnl.gain_pct is not none else '') }}">
+      {% if pnl.gain_pct is not none %}{{ '{:+.2f}'.format(pnl.gain_pct) }}% on net invested{% else %}no net invested amount{% endif %}
+    </div>
+    {% else %}
+    <div class="ic-summary-value ic-muted">—</div>
+    {% endif %}
+    {% if pnl.dividends_native %}<div class="ic-summary-sub">+ {{ '{:,.2f}'.format(pnl.dividends_native) }} dividends received (net)</div>{% endif %}
+  </div>
+  {% endif %}
+  <div class="ic-summary-card" id="icInrCard" data-url="{{ url_for('international_centre.holding_inr_return', holding_id=holding.id) }}" aria-live="polite">
+    <div class="ic-summary-label">Return in INR</div>
+    <div class="ic-summary-value ic-muted" id="icInrValue">…</div>
+    <div class="ic-summary-sub" id="icInrSub">calculating at the exchange rate on each date</div>
+  </div>
   <div class="ic-summary-card">
     <div class="ic-summary-label">XIRR</div>
     {% if holding.xirr is not none %}
@@ -49,12 +82,39 @@
   </div>
 </div>
 
-{% if holding.is_ticker_based %}
-<div class="ic-card" style="font-size:0.85rem; color:var(--muted);">
-  {{ holding.quantity }} units @ {{ '{:,.2f}'.format(holding.live_price_native) if holding.live_price_native else '—' }} {{ holding.native_currency }}/unit
-  {% if holding.price_updated_at %} · price last refreshed {{ format_date(holding.price_updated_at) }}{% endif %}
+<div class="ic-card ic-fresh-card">
+  <div>
+    {% if holding.is_ticker_based %}
+    <div class="ic-fresh-main">{{ holding.quantity }} units @ {{ '{:,.2f}'.format(holding.live_price_native) if holding.live_price_native else '—' }} {{ holding.native_currency }}/unit</div>
+    {% else %}
+    <div class="ic-fresh-main">Manually valued — {{ holding.native_currency }} {{ '{:,.2f}'.format(holding.current_value_native) }}</div>
+    {% endif %}
+    <div class="ic-fresh-sub">{{ staleness.label }}{% if holding.fx_rate_date %} · FX rate as of {{ format_date(holding.fx_rate_date) }}{% endif %}</div>
+  </div>
+  {% if staleness.status != 'fresh' %}
+  <span class="ic-stale-pill">
+    {% if staleness.kind == 'price' %}Price is out of date — use Refresh{% else %}Value hasn't been updated in a while — use Edit{% endif %}
+  </span>
+  {% endif %}
 </div>
-{% endif %}
+
+<div class="ic-card">
+  <div class="section-label">Value History (USD)
+    {% if value_history.change_pct is not none %}
+    <span class="ic-hist-change {{ 'ic-up' if value_history.change_usd >= 0 else 'ic-down' }}">
+      {{ '{:+,.2f}'.format(value_history.change_usd) }} ({{ '{:+.2f}'.format(value_history.change_pct) }}%) since {{ format_date(value_history.points[0].date) }}
+    </span>
+    {% endif %}
+  </div>
+  {% if value_history.points|length >= 2 %}
+  <div class="ic-chart-wrap"><canvas id="valueHistoryChart"></canvas></div>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem;">
+    A value chart appears once at least two daily snapshots exist. Snapshots are recorded by the scheduled daily job
+    (<code>flask international snapshot</code>) — {{ value_history.points|length }} recorded so far.
+  </p>
+  {% endif %}
+</div>
 
 {% if nominees %}
 <div class="ic-card">
@@ -90,6 +150,202 @@
 </div>
 {% endif %}
 
+<div class="ic-card" id="documentsSection">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+    <div class="section-label" style="margin-bottom:0;">Documents
+      {% if documents %}
+      <span style="font-size:0.75rem; color:var(--muted); font-weight:400; margin-left:8px; text-transform:none; letter-spacing:normal;">
+        {{ documents|length }} file{{ 's' if documents|length != 1 else '' }}
+      </span>
+      {% endif %}
+    </div>
+    <button type="button" class="ic-btn-secondary" onclick="icToggleUploadForm()">+ Upload Document</button>
+  </div>
+
+  <div id="icUploadForm" style="display:none; margin-bottom:20px;">
+    <form method="POST" action="{{ url_for('international_centre.upload_document', holding_id=holding.id) }}"
+          enctype="multipart/form-data" data-mwl-encrypt="true">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <div class="ic-txn-form" style="align-items:end;">
+        <div class="form-group">
+          <label>Document Type</label>
+          <select name="doc_type" required>
+            <option value="">— Select Type —</option>
+            {% for dt in doc_types %}<option value="{{ dt }}">{{ dt }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Choose File</label>
+          <input type="file" name="document" required
+                 accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx" />
+        </div>
+        <div class="form-group">
+          <label>Name / Title (optional)</label>
+          <input type="text" name="doc_title" placeholder="e.g. Brokerage Statement Q3 2026" />
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:10px;">
+        <label>Description (optional)</label>
+        <input type="text" name="doc_notes" style="width:100%;" placeholder="e.g. Year-end statement from Interactive Brokers" />
+      </div>
+      <p style="font-size:0.75rem; color:var(--muted2); margin-top:8px;">Allowed: PDF, JPG, PNG, DOC, DOCX, XLS, XLSX · Max size: 25 MB</p>
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px;">Upload</button>
+        <button type="button" class="ic-btn-secondary" onclick="icToggleUploadForm()">Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  {% if documents %}
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead><tr><th>Type</th><th>File Name</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+      <tbody>
+        {% for doc in documents %}
+        {% set ext = doc.original_name.rsplit('.', 1)[-1].lower() if '.' in doc.original_name else '' %}
+        <tr>
+          <td>{{ doc.doc_type }}</td>
+          <td>{{ doc.display_name }}{% if doc.notes %}<div style="font-size:0.75rem; color:var(--muted); margin-top:2px;">{{ doc.notes }}</div>{% endif %}</td>
+          <td>{{ doc.file_size_display }}</td>
+          <td>{{ format_date(doc.uploaded_at) }}</td>
+          <td style="display:flex; gap:10px;">
+            {% if ext in ['pdf','jpg','jpeg','png'] %}
+            <a href="{{ url_for('international_centre.preview_document', doc_id=doc.id) }}" target="_blank" class="ic-link-btn" style="color:var(--accent);">Preview</a>
+            {% endif %}
+            <a href="{{ url_for('international_centre.download_document', doc_id=doc.id) }}" class="ic-link-btn" style="color:var(--accent);">Download</a>
+            <form method="POST" action="{{ url_for('international_centre.delete_document', doc_id=doc.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="next" value="holding_detail" />
+              <button type="button" class="ic-link-btn"
+                      onclick="icConfirmAction(this.form, 'Delete Document?', 'This document will be permanently removed from local storage.', 'Delete Document')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem;">No documents uploaded yet — statements, purchase confirmations, tax forms, etc.</p>
+  {% endif %}
+</div>
+
+{% if holding.is_rsu_espp %}
+<div class="ic-card" id="vestingSection">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
+    <div class="section-label" style="margin-bottom:0;">Vesting Tranches
+      {% if vesting_tranches %}
+      <span style="font-size:0.75rem; color:var(--muted); font-weight:400; margin-left:8px; text-transform:none; letter-spacing:normal;">
+        {{ vesting_tranches|length }} tranche{{ 's' if vesting_tranches|length != 1 else '' }}
+      </span>
+      {% endif %}
+    </div>
+    <a href="{{ url_for('international_centre.vesting_perquisite') }}" class="ic-link" style="font-size:0.82rem;">View Perquisite Report →</a>
+  </div>
+  <p style="font-size:0.78rem; color:var(--muted2); margin-bottom:16px;">
+    Each RSU vest or ESPP purchase, at its fair market value (FMV) on that date. FMV sets both the taxable
+    perquisite value (salary income in the year of vesting) and the eventual capital-gains cost basis when
+    these shares are sold — see the Perquisite Report and Capital Gains report.
+  </p>
+  <form method="POST" action="{{ url_for('international_centre.add_vesting_tranche', holding_id=holding.id) }}" class="ic-txn-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <div class="form-group">
+      <label>Plan Type</label>
+      <select name="plan_type" required onchange="icTogglePurchasePrice(this)">
+        {% for pt in plan_types %}<option value="{{ pt }}">{{ pt }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Grant Date (optional)</label>
+      <input type="date" name="grant_date" max="{{ today }}" />
+    </div>
+    <div class="form-group">
+      <label>Vest Date</label>
+      <input type="date" name="vest_date" required max="{{ today }}" value="{{ today }}" />
+    </div>
+    <div class="form-group">
+      <label>Quantity</label>
+      <input type="number" step="any" name="quantity" required />
+    </div>
+    <div class="form-group">
+      <label>FMV / unit ({{ holding.native_currency }})</label>
+      <input type="number" step="any" name="fmv_native" required />
+    </div>
+    <div class="form-group ic-espp-field" style="display:none;">
+      <label>Price Paid / unit ({{ holding.native_currency }}, ESPP only)</label>
+      <input type="number" step="any" name="purchase_price_native" />
+    </div>
+    <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Add</button>
+  </form>
+
+  {% if vesting_tranches %}
+  <div class="ic-table-wrap" style="margin-top:20px;">
+    <table class="ic-table">
+      <thead><tr><th>Plan</th><th>Vest Date</th><th>Qty</th><th>FMV</th><th>Price Paid</th><th>Perquisite Value</th><th></th></tr></thead>
+      <tbody>
+        {% for v in vesting_tranches %}
+        <tr id="vestRow{{ v.id }}">
+          <td>{{ v.plan_type }}</td>
+          <td>{{ format_date(v.vest_date) }}</td>
+          <td>{{ '{:,.4f}'.format(v.quantity) }}</td>
+          <td>{{ holding.native_currency }} {{ '{:,.2f}'.format(v.fmv_native) }}</td>
+          <td>{{ holding.native_currency + ' ' + '{:,.2f}'.format(v.purchase_price_native) if v.purchase_price_native is not none else '—' }}</td>
+          <td>{{ holding.native_currency }} {{ '{:,.2f}'.format(v.perquisite_value_native) }}</td>
+          <td style="display:flex; gap:10px;">
+            <button type="button" class="ic-link-btn" style="color:var(--accent);"
+                    onclick="icToggleVestEdit({{ v.id }})">Edit</button>
+            <form method="POST" action="{{ url_for('international_centre.delete_vesting_tranche', tranche_id=v.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <button type="button" class="ic-link-btn"
+                      onclick="icConfirmAction(this.form, 'Delete Vesting Tranche?', 'This vesting tranche will be permanently removed and perquisite/capital-gains figures will be recomputed.', 'Delete Tranche')">Delete</button>
+            </form>
+          </td>
+        </tr>
+        <tr id="vestEditRow{{ v.id }}" style="display:none;">
+          <td colspan="7" style="background:var(--surface2);">
+            <form method="POST" action="{{ url_for('international_centre.edit_vesting_tranche', tranche_id=v.id) }}" class="ic-txn-form" style="padding:10px 0;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label>Plan Type</label>
+                <select name="plan_type" required onchange="icTogglePurchasePrice(this)">
+                  {% for pt in plan_types %}<option value="{{ pt }}" {{ 'selected' if pt == v.plan_type }}>{{ pt }}</option>{% endfor %}
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Grant Date (optional)</label>
+                <input type="date" name="grant_date" max="{{ today }}" value="{{ v.grant_date.isoformat() if v.grant_date else '' }}" />
+              </div>
+              <div class="form-group">
+                <label>Vest Date</label>
+                <input type="date" name="vest_date" required max="{{ today }}" value="{{ v.vest_date.isoformat() }}" />
+              </div>
+              <div class="form-group">
+                <label>Quantity</label>
+                <input type="number" step="any" name="quantity" required value="{{ v.quantity }}" />
+              </div>
+              <div class="form-group">
+                <label>FMV / unit ({{ holding.native_currency }})</label>
+                <input type="number" step="any" name="fmv_native" required value="{{ v.fmv_native }}" />
+              </div>
+              <div class="form-group ic-espp-field" style="display:{{ 'flex' if v.plan_type == 'ESPP' else 'none' }};">
+                <label>Price Paid / unit ({{ holding.native_currency }}, ESPP only)</label>
+                <input type="number" step="any" name="purchase_price_native" value="{{ v.purchase_price_native if v.purchase_price_native is not none else '' }}" />
+              </div>
+              <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Save</button>
+              <button type="button" class="ic-btn-secondary" style="align-self:end;" onclick="icToggleVestEdit({{ v.id }})">Cancel</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem; margin-top:16px;">No vesting tranches recorded yet.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="ic-card">
   <div class="section-label">Add Transaction</div>
   <form method="POST" action="{{ url_for('international_centre.add_transaction', holding_id=holding.id) }}" class="ic-txn-form">
@@ -100,7 +356,7 @@
     </div>
     <div class="form-group">
       <label>Type</label>
-      <select name="txn_type" required>
+      <select name="txn_type" required onchange="icToggleDividendFields(this)">
         {% for t in txn_types %}<option value="{{ t }}">{{ t.title() }}</option>{% endfor %}
       </select>
     </div>
@@ -117,6 +373,14 @@
     <div class="form-group">
       <label>Amount ({{ holding.native_currency }})</label>
       <input type="number" step="any" name="amount_native" required />
+    </div>
+    <div class="form-group ic-div-field" style="display:none;">
+      <label>Gross Dividend ({{ holding.native_currency }}, optional)</label>
+      <input type="number" step="any" name="gross_amount_native" />
+    </div>
+    <div class="form-group ic-div-field" style="display:none;">
+      <label>Tax Withheld ({{ holding.native_currency }}, optional)</label>
+      <input type="number" step="any" name="tax_withheld_native" />
     </div>
     <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Add</button>
   </form>
@@ -156,7 +420,7 @@
               </div>
               <div class="form-group">
                 <label>Type</label>
-                <select name="txn_type" required>
+                <select name="txn_type" required onchange="icToggleDividendFields(this)">
                   {% for tt in txn_types %}<option value="{{ tt }}" {{ 'selected' if tt == t.txn_type }}>{{ tt.title() }}</option>{% endfor %}
                 </select>
               </div>
@@ -174,6 +438,14 @@
                 <label>Amount ({{ holding.native_currency }})</label>
                 <input type="number" step="any" name="amount_native" required value="{{ t.amount_native }}" />
               </div>
+              <div class="form-group ic-div-field" style="display:{{ 'flex' if t.txn_type == 'DIVIDEND' else 'none' }};">
+                <label>Gross Dividend ({{ holding.native_currency }}, optional)</label>
+                <input type="number" step="any" name="gross_amount_native" value="{{ t.gross_amount_native if t.gross_amount_native is not none else '' }}" />
+              </div>
+              <div class="form-group ic-div-field" style="display:{{ 'flex' if t.txn_type == 'DIVIDEND' else 'none' }};">
+                <label>Tax Withheld ({{ holding.native_currency }}, optional)</label>
+                <input type="number" step="any" name="tax_withheld_native" value="{{ t.tax_withheld_native if t.tax_withheld_native is not none else '' }}" />
+              </div>
               <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Save</button>
               <button type="button" class="ic-btn-secondary" style="align-self:end;" onclick="icToggleTxnEdit({{ t.id }})">Cancel</button>
             </form>
@@ -185,6 +457,25 @@
   </div>
   {% else %}
   <p style="color:var(--muted); font-size:0.85rem;">No transactions recorded yet — the invested/XIRR figures above use only the value entered when this holding was added.</p>
+  {% endif %}
+</div>
+
+<div class="ic-card">
+  <div class="section-label">Timeline ({{ timeline|length }}{{ '+' if timeline|length >= 25 else '' }})</div>
+  {% if timeline %}
+  <ul class="ic-timeline">
+    {% for e in timeline %}
+    <li>
+      <span class="ic-tl-dot"></span>
+      <div class="ic-tl-body">
+        <div class="ic-tl-head"><span class="ic-tl-type">{{ e.event_type }}</span><span class="ic-tl-date">{{ format_date(e.created_at) }}</span></div>
+        <div class="ic-tl-desc">{{ e.description }}</div>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="color:var(--muted); font-size:0.85rem;">No activity recorded yet. Changes made from now on will appear here.</p>
   {% endif %}
 </div>
 
@@ -214,7 +505,89 @@
   .ic-table tr:last-child td { border-bottom:none; }
   .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
   .ic-link-btn:hover { text-decoration:underline; }
+
+  .hd-head { display:flex; align-items:flex-start; gap:16px; }
+  .hd-icon { font-size:2rem; width:56px; height:56px; display:flex; align-items:center; justify-content:center; background:var(--accent-bg);
+    border-radius:14px; flex-shrink:0; }
+  .hd-type { font-size:0.74rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .hd-badges { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  @media (max-width:768px) { .hd-head { flex-direction:column; } }
+  .ic-fresh-card { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:16px 24px; }
+  .ic-fresh-main { font-size:0.88rem; color:var(--text); font-weight:500; }
+  .ic-fresh-sub { font-size:0.78rem; color:var(--muted); margin-top:3px; }
+  .ic-stale-pill { font-size:0.75rem; font-weight:600; color:var(--warning); background:var(--warning-bg); border:1px solid var(--warning); border-radius:999px; padding:4px 12px; }
+  .ic-chart-wrap { position:relative; height:240px; }
+  .ic-hist-change { font-size:0.75rem; font-weight:600; margin-left:10px; text-transform:none; letter-spacing:normal; font-family:var(--font-data); }
+
+  .ic-timeline { list-style:none; margin:0; padding:0 0 0 6px; border-left:2px solid var(--border); }
+  .ic-timeline li { position:relative; padding:0 0 16px 20px; }
+  .ic-timeline li:last-child { padding-bottom:0; }
+  .ic-tl-dot { position:absolute; left:-9px; top:4px; width:12px; height:12px; border-radius:50%; background:var(--accent); border:2px solid var(--surface); }
+  .ic-tl-head { display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  .ic-tl-type { font-size:0.82rem; font-weight:600; color:var(--text); }
+  .ic-tl-date { font-size:0.74rem; color:var(--muted2); }
+  .ic-tl-desc { font-size:0.82rem; color:var(--muted); margin-top:2px; }
 </style>
+
+<script>
+  // Batch 10.5 (Oct 2026) — this holding's return from the rupee investor's
+  // point of view, fetched after the page loads so a slow exchange-rate
+  // service can never delay it.
+  (function () {
+    var card = document.getElementById('icInrCard');
+    if (!card) return;
+    var val = document.getElementById('icInrValue'), sub = document.getElementById('icInrSub');
+    var fmt = function (n) { return n.toLocaleString('en-IN', { maximumFractionDigits: 0 }); };
+    fetch(card.dataset.url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d.available) { val.textContent = '—'; sub.textContent = d.message || 'Not available.'; return; }
+        var up = d.gain_inr >= 0;
+        val.textContent = (up ? '+' : '-') + '₹' + fmt(Math.abs(d.gain_inr));
+        val.className = 'ic-summary-value ' + (up ? 'ic-up' : 'ic-down');
+        var parts = [];
+        if (d.gain_pct !== null) parts.push((d.gain_pct >= 0 ? '+' : '') + d.gain_pct.toFixed(2) + '% on ₹' + fmt(d.invested_inr) + ' invested');
+        if (d.xirr_inr !== null) parts.push('XIRR ' + d.xirr_inr.toFixed(2) + '% in INR');
+        if (d.currency_effect_pts !== null) parts.push('currency effect ' + (d.currency_effect_pts >= 0 ? '+' : '') + d.currency_effect_pts.toFixed(2) + ' pts vs ' + d.currency);
+        sub.textContent = parts.join(' · ');
+      })
+      .catch(function () { val.textContent = '—'; sub.textContent = 'Couldn\'t load just now.'; });
+  })();
+</script>
+
+{% if value_history.points|length >= 2 %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  // Batch 10.3 (Oct 2026) — value-over-time line from the daily snapshots.
+  (function () {
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    const grid = dark ? '#1e2130' : '#E2E8F0';
+    const label = dark ? '#64748b' : '#64748B';
+    Chart.defaults.color = label;
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 11;
+    const pts = {{ value_history.points|tojson }};
+    new Chart(document.getElementById('valueHistoryChart'), {
+      type: 'line',
+      data: {
+        labels: pts.map(p => p.date),
+        datasets: [{ label: 'Value (USD)', data: pts.map(p => p.usd_value),
+          borderColor: '#6366f1', backgroundColor: '#6366f122', fill: true, tension: 0.25,
+          pointRadius: pts.length > 60 ? 0 : 3 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false },
+          tooltip: { callbacks: { label: c => ' $' + c.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 2 }) } } },
+        scales: {
+          x: { grid: { color: grid }, ticks: { color: label, maxTicksLimit: 8 } },
+          y: { grid: { color: grid }, ticks: { color: label, callback: v => '$' + v.toLocaleString('en-US') } },
+        },
+      },
+    });
+  })();
+</script>
+{% endif %}
 
 <script>
   // Batch 9.2 (Sep 2026) — transaction edit was previously add/delete
@@ -225,5 +598,44 @@
     if (!editRow) return;
     editRow.style.display = editRow.style.display === 'none' ? 'table-row' : 'none';
   }
+
+  // Batch 9.3 (Sep 2026) — Document Vault upload form toggle.
+  function icToggleUploadForm() {
+    const form = document.getElementById('icUploadForm');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+  }
+
+  // Batch 9.5 (Sep 2026) — Gross/Withheld fields are DIVIDEND-only;
+  // show them only when that transaction type is selected, in both
+  // the Add form and any open inline Edit row.
+  function icToggleDividendFields(selectEl) {
+    const show = selectEl.value === 'DIVIDEND';
+    const form = selectEl.closest('form');
+    if (!form) return;
+    form.querySelectorAll('.ic-div-field').forEach(function (el) {
+      el.style.display = show ? 'flex' : 'none';
+    });
+  }
+
+  // Batch 9.7 (Sep 2026) — vesting tranche edit row toggle, mirrors
+  // icToggleTxnEdit() above.
+  function icToggleVestEdit(tranchId) {
+    const editRow = document.getElementById('vestEditRow' + tranchId);
+    if (!editRow) return;
+    editRow.style.display = editRow.style.display === 'none' ? 'table-row' : 'none';
+  }
+
+  // Batch 9.7 (Sep 2026) — Price Paid is ESPP-only (RSU is a free
+  // grant); show it only when that plan type is selected.
+  function icTogglePurchasePrice(selectEl) {
+    const show = selectEl.value === 'ESPP';
+    const form = selectEl.closest('form');
+    if (!form) return;
+    form.querySelectorAll('.ic-espp-field').forEach(function (el) {
+      el.style.display = show ? 'flex' : 'none';
+    });
+  }
 </script>
+</div>
 {% endblock %}

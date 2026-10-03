@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Capital Gains (LTCG/STCG) — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page">
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">Capital Gains Report — {{ summary.fy_label }}</h1>
+    <p class="ic-subtitle">LTCG/STCG classification for realized foreign-equity gains, for the Indian financial year ({{ format_date(summary.fy_start) }} – {{ format_date(summary.fy_end) }}).</p>
+  </div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <form method="GET">
+      <select name="fy" onchange="this.form.submit()">
+        {% for y in range(current_fy_start_year, current_fy_start_year - 6, -1) %}
+        <option value="{{ y }}" {{ 'selected' if y == summary.fy_start.year }}>FY {{ y }}-{{ '%02d' % ((y + 1) % 100) }}</option>
+        {% endfor %}
+      </select>
+    </form>
+    {% set export_key = 'capital_gains' %}{% set export_params = {'fy': summary.fy_start.year} %}{% include "international_centre/_export_buttons.html" %}
+    <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+  </div>
+</div>
+
+<div class="ic-notice">
+  <strong>Not a filing document.</strong> Gains are classified LTCG (long-term) if held for more than 24 calendar
+  months, else STCG (short-term) — the threshold that applies to unlisted foreign equity/funds under Indian tax
+  law (Sec 2(29A)/2(42A)), which is different from the 12-month rule for listed Indian shares. Lots are matched
+  FIFO (first bought, first sold). USD gain figures use each holding's own cached exchange rate — an
+  approximation, not the RBI reference rate on each transaction's actual date. Always confirm final figures with
+  a CA before filing.
+  {% if summary.any_missing_rate %}
+  <br/><br/><strong>Some rows below show "—" for the USD gain</strong> — no exchange rate has been captured yet
+  for that holding.
+  {% endif %}
+</div>
+
+<div class="ic-card" style="margin-bottom:20px; display:flex; gap:32px; flex-wrap:wrap;">
+  <div>
+    <div style="color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">LTCG Total</div>
+    <div style="font-size:1.3rem; font-weight:700; color:var(--text);">${{ '{:,.2f}'.format(summary.ltcg_total_usd) }}</div>
+  </div>
+  <div>
+    <div style="color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">STCG Total</div>
+    <div style="font-size:1.3rem; font-weight:700; color:var(--text);">${{ '{:,.2f}'.format(summary.stcg_total_usd) }}</div>
+  </div>
+</div>
+
+{% if summary.rows %}
+<div class="ic-card">
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead>
+        <tr>
+          <th>Holding</th><th>Sold</th><th>Acquired</th><th>Qty</th>
+          <th>Cost Basis</th><th>Proceeds</th><th>Gain</th><th>Gain (USD approx.)</th><th>Classification</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in summary.rows %}
+        <tr>
+          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=row.holding.id) }}" class="ic-link">{{ row.holding.name }}</a></td>
+          <td>{{ format_date(row.sell_date) }}</td>
+          <td>{{ format_date(row.acquisition_date) }}</td>
+          <td>{{ '{:,.4f}'.format(row.quantity) }}</td>
+          <td>{{ row.currency }} {{ '{:,.2f}'.format(row.cost_basis_native) }}</td>
+          <td>{{ row.currency }} {{ '{:,.2f}'.format(row.proceeds_native) }}</td>
+          <td>{{ row.currency }} {{ '{:,.2f}'.format(row.gain_native) }}</td>
+          <td>{{ '$' + '{:,.2f}'.format(row.gain_usd) if row.gain_usd is not none else '—' }}</td>
+          <td>
+            {% if row.classification == 'LTCG' %}<span class="ic-badge-ok">LTCG</span>{% else %}<span class="ic-badge-warning">STCG</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="ic-card ic-empty"><p>No realized gains (SELL transactions) recorded for {{ summary.fy_label }}.</p></div>
+{% endif %}
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:20px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .ic-link:hover { text-decoration:underline; }
+
+  .ic-notice {
+    background:var(--warning-bg); border:1px solid var(--warning); border-radius:10px;
+    padding:16px 20px; margin-bottom:20px; font-size:0.82rem; color:var(--text2); line-height:1.6;
+  }
+
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); }
+  .ic-empty { text-align:center; color:var(--muted); padding:40px 20px; }
+  .ic-table-wrap { overflow-x:auto; }
+  .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .ic-table th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .ic-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }
+  .ic-table tr:last-child td { border-bottom:none; }
+
+  .ic-badge-ok { background:var(--up-bg); color:var(--up); border-radius:6px; padding:3px 8px; font-size:0.72rem; font-weight:600; }
+  .ic-badge-warning { background:var(--warning-bg); color:var(--warning); border-radius:6px; padding:3px 8px; font-size:0.72rem; font-weight:600; }
+</style>
+</div>
+{% endblock %}
