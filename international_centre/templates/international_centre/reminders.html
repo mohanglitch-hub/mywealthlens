@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Reminders — International Investing — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page">
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">🔔 Reminders</h1>
+    <p class="ic-subtitle">Compliance dates and housekeeping for your foreign holdings, worked out from your own data.</p>
+  </div>
+  <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+</div>
+
+<div class="ic-notice">Dates shown are the <strong>usual statutory ones</strong>. The government extends or changes them from time to time, so always confirm
+  the notified date with your CA or the Income Tax Department. This page is a prompt, not tax advice.</div>
+
+{% if active %}
+<div class="iu-rows">
+  {% for r in active %}
+  <div class="iu-row iu-row--{{ r.level if r.level != 'info' else 'none' }} rm-row">
+    <span class="iu-row-icon">{{ '⚠️' if r.level == 'danger' else ('🔔' if r.level == 'warning' else 'ℹ️') }}</span>
+    <div class="iu-row-main">
+      <div class="iu-row-title iu-row-title--wrap">{{ r.title }}</div>
+      <div class="iu-row-meta">{{ r.message }}</div>
+      {% if r.detail %}<details class="rm-detail"><summary>More detail</summary><p>{{ r.detail }}</p></details>{% endif %}
+    </div>
+    <div class="iu-row-right iu-btn-group">
+      {% if r.url %}<a href="{{ r.url }}" class="iu-btn iu-btn-sm">Open</a>{% endif %}
+      {% if r.ack_key %}
+      <form method="POST" action="{{ url_for('international_centre.reminder_done') }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="key" value="{{ r.ack_key }}" />
+        <button type="submit" class="iu-btn iu-btn-sm">{{ 'Dismiss' if r.kind == 'estate' else 'Mark done' }}</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="iu-empty">
+  <div class="iu-empty-icon">✅</div>
+  <h2 class="iu-empty-title">You're all caught up</h2>
+  <p class="iu-empty-desc">Nothing needs your attention right now. Reminders appear here when a filing window opens, a manually valued holding gets old, or your US-listed holdings approach the US estate-tax threshold.</p>
+</div>
+{% endif %}
+
+{% if done %}
+<div class="iu-section" style="margin-top:28px;">
+  <div class="iu-section-head"><h2 class="iu-section-title">Done / dismissed</h2></div>
+  <div class="iu-rows">
+    {% for r in done %}
+    <div class="iu-row" style="opacity:.7;">
+      <span class="iu-row-icon">✅</span>
+      <div class="iu-row-main">
+        <div class="iu-row-title iu-row-title--wrap">{{ r.title }}</div>
+      </div>
+      <form method="POST" action="{{ url_for('international_centre.reminder_undo') }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+        <input type="hidden" name="key" value="{{ r.ack_key }}" />
+        <button type="submit" class="iu-btn iu-btn-sm">Undo</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:20px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .ic-link:hover { text-decoration:underline; }
+  .ic-notice { background:var(--surface2); border:1px solid var(--border); color:var(--muted); border-radius:10px; padding:12px 16px; font-size:0.82rem; line-height:1.5; margin-bottom:18px; }
+  .rm-row { align-items:flex-start; }
+  .rm-detail { margin-top:8px; font-size:0.78rem; color:var(--muted); }
+  .rm-detail summary { cursor:pointer; color:var(--accent); font-weight:600; }
+  .rm-detail p { margin:6px 0 0; line-height:1.5; }
+</style>
+</div>
+{% endblock %}

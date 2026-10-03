@@ -2,83 +2,209 @@
 {% block title %}International Investing — MyWealthLens{% endblock %}
 
 {% block content %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page">
 <div class="ic-header">
   <div>
     <h1 class="ic-title">International Investing</h1>
     <p class="ic-subtitle">Foreign holdings, tracked in their own currency and anchored to USD.</p>
   </div>
-  <div style="display:flex; gap:10px; flex-wrap:wrap;">
-    <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary" style="text-decoration:none; display:inline-block; width:auto; padding:10px 18px;">+ Add Holding</a>
+  <div class="ic-actions">
+    <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary ic-add-btn">+ Add Holding</a>
     <form method="POST" action="{{ url_for('international_centre.refresh_all') }}" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
       <button type="submit" class="ic-btn-secondary">Refresh Prices</button>
     </form>
+    <a href="{{ url_for('international_centre.holdings_list') }}" class="ic-btn-secondary" style="text-decoration:none;">All Holdings</a>
     <a href="{{ url_for('international_centre.remittances') }}" class="ic-btn-secondary" style="text-decoration:none;">Remittances (LRS)</a>
-    <a href="{{ url_for('international_centre.schedule_fa') }}" class="ic-btn-secondary" style="text-decoration:none;">Schedule FA Report</a>
+    <a href="{{ url_for('international_centre.dividends') }}" class="ic-btn-secondary" style="text-decoration:none;">Dividends</a>
+    <details class="ic-menu" id="icTaxMenu">
+      <summary class="ic-btn-secondary">Tax &amp; Compliance ▾</summary>
+      <div class="ic-menu-panel">
+        <a href="{{ url_for('international_centre.schedule_fa') }}">Schedule FA Report</a>
+        <a href="{{ url_for('international_centre.capital_gains') }}">Capital Gains</a>
+        <a href="{{ url_for('international_centre.dtaa_summary') }}">DTAA / Form 67</a>
+        <a href="{{ url_for('international_centre.vesting_perquisite') }}">RSU/ESPP Perquisite</a>
+      </div>
+    </details>
+    <a href="{{ url_for('international_centre.document_vault') }}" class="ic-btn-secondary" style="text-decoration:none;">Document Vault</a>
   </div>
 </div>
 
-<div class="ic-summary-grid">
-  <div class="ic-summary-card">
-    <div class="ic-summary-label">Total Portfolio Value</div>
-    <div class="ic-summary-value">{{ format_money_usd(totals.total_usd) }}</div>
-    <div class="ic-summary-sub">${{ '{:,.2f}'.format(totals.total_usd) }} USD</div>
-  </div>
-  <div class="ic-summary-card">
-    <div class="ic-summary-label">Invested (approx.)</div>
-    <div class="ic-summary-value">{{ format_money_usd(totals.total_invested_usd_approx) }}</div>
-  </div>
-  <div class="ic-summary-card">
-    <div class="ic-summary-label">Portfolio XIRR</div>
+{% if alerts %}
+<div class="ic-banners" role="region" aria-label="Alerts">
+  {% for a in alerts %}
+  <a href="{{ a.url }}" class="ic-banner ic-banner-{{ a.level }}" role="alert">
+    <span class="ic-banner-icon">{{ '⚠️' if a.level == 'danger' else ('🔔' if a.level == 'warning' else 'ℹ️') }}</span>
+    <span class="ic-banner-text">{{ a.message }}</span>
+    <span class="ic-banner-go">Review →</span>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="iu-stat-grid" role="region" aria-label="Portfolio summary">
+  <a href="{{ url_for('international_centre.holdings_list', sort='value_high') }}" class="iu-stat">
+    <div class="iu-stat-icon">💰</div>
+    <div class="iu-stat-label">Total Portfolio Value</div>
+    <div class="iu-stat-value">{{ format_money_usd(totals.total_usd) }}</div>
+    <div class="iu-stat-sub">${{ '{:,.2f}'.format(totals.total_usd) }} USD · {{ totals.holdings_count }} holding{{ 's' if totals.holdings_count != 1 else '' }}</div>
+    <div class="iu-stat-hint">View holdings →</div>
+  </a>
+  <a href="{{ url_for('international_centre.holdings_list', sort='gain_high') }}" class="iu-stat">
+    <div class="iu-stat-icon">🧾</div>
+    <div class="iu-stat-label">Invested (approx.)</div>
+    <div class="iu-stat-value">{{ format_money_usd(totals.total_invested_usd_approx) }}</div>
+    <div class="iu-stat-sub">net of sales</div>
+    <div class="iu-stat-hint">Sort by gain →</div>
+  </a>
+  <a href="{{ url_for('international_centre.holdings_list', sort='xirr_high') }}" class="iu-stat">
+    <div class="iu-stat-icon">📊</div>
+    <div class="iu-stat-label">Portfolio XIRR (USD)</div>
     {% if portfolio_xirr is not none %}
-      <div class="ic-summary-value {{ 'ic-up' if portfolio_xirr >= 0 else 'ic-down' }}">{{ '%.2f'|format(portfolio_xirr) }}%</div>
-      <div class="ic-summary-sub">approximate — see report notes</div>
+      <div class="iu-stat-value {{ 'iu-up' if portfolio_xirr >= 0 else 'iu-down' }}">{{ '%.2f'|format(portfolio_xirr) }}%</div>
     {% else %}
-      <div class="ic-summary-value ic-muted">—</div>
-      <div class="ic-summary-sub">needs at least one buy/sell across holdings</div>
+      <div class="iu-stat-value iu-muted">—</div>
     {% endif %}
-  </div>
-  <div class="ic-summary-card">
-    <div class="ic-summary-label">LRS Used This {{ lrs_status.fy_label }}</div>
-    <div class="ic-summary-value {{ 'ic-down' if lrs_status.status != 'ok' else '' }}">{{ lrs_status.pct_used }}%</div>
-    <div class="ic-summary-sub">${{ '{:,.0f}'.format(lrs_status.total_usd) }} of ${{ '{:,.0f}'.format(lrs_status.limit_usd) }}</div>
-  </div>
+    <div class="iu-stat-sub" id="icInrXirr" data-url="{{ url_for('international_centre.portfolio_inr_return') }}">{% if holdings %}INR view: calculating…{% else %}needs a buy/sell{% endif %}</div>
+    <div class="iu-stat-hint">Sort by XIRR →</div>
+  </a>
+  <a href="{{ url_for('international_centre.remittances') }}" class="iu-stat {{ 'iu-stat--warning' if lrs_status.status != 'ok' else '' }}">
+    <div class="iu-stat-icon">✈️</div>
+    <div class="iu-stat-label">LRS Used · {{ lrs_status.fy_label }}</div>
+    <div class="iu-stat-value {{ 'iu-down' if lrs_status.status != 'ok' else '' }}">{{ lrs_status.pct_used }}%</div>
+    <div class="iu-stat-sub">${{ '{:,.0f}'.format(lrs_status.total_usd) }} of ${{ '{:,.0f}'.format(lrs_status.limit_usd) }}</div>
+    <div class="iu-stat-hint">View remittances →</div>
+  </a>
+  <a href="{{ url_for('international_centre.reminders') }}" class="iu-stat {{ 'iu-stat--warning' if reminder_count else '' }}">
+    <div class="iu-stat-icon">🔔</div>
+    <div class="iu-stat-label">Reminders</div>
+    <div class="iu-stat-value {{ 'iu-warn' if reminder_count else '' }}">{{ reminder_count }}</div>
+    <div class="iu-stat-sub">{{ 'need attention' if reminder_count else 'all clear' }}</div>
+    <div class="iu-stat-hint">Open reminders →</div>
+  </a>
+  <a href="{{ url_for('international_centre.document_vault') }}" class="iu-stat">
+    <div class="iu-stat-icon">📁</div>
+    <div class="iu-stat-label">Documents Stored</div>
+    <div class="iu-stat-value">{{ doc_count }}</div>
+    <div class="iu-stat-sub">encrypted vault</div>
+    <div class="iu-stat-hint">Open vault →</div>
+  </a>
 </div>
 
 {% if holdings %}
-<div class="ic-card">
-  <div class="section-label">Holdings ({{ holdings|length }})</div>
-  <div class="ic-table-wrap">
-    <table class="ic-table">
-      <thead>
-        <tr>
-          <th>Name</th><th>Type</th><th>Country</th><th>Currency</th>
-          <th>Value (native)</th><th>Value (USD)</th><th>XIRR</th><th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for h in holdings %}
-        <tr>
-          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="ic-link">{{ h.name }}</a></td>
-          <td>{{ h.asset_type }}</td>
-          <td>{{ h.country or '—' }}</td>
-          <td>{{ h.native_currency }}</td>
-          <td>{{ '{:,.2f}'.format(h.current_value_native) }}</td>
-          <td>{{ format_money_usd(h.usd_value) }}</td>
-          <td class="{{ 'ic-up' if h.xirr and h.xirr >= 0 else ('ic-down' if h.xirr else '') }}">
-            {{ '%.2f'|format(h.xirr) + '%' if h.xirr is not none else '—' }}
-          </td>
-          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}" class="ic-link">View</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<div class="iu-section">
+  <div class="iu-section-head"><h2 class="iu-section-title">Asset Categories</h2></div>
+  <div class="iu-cat-grid" role="region" aria-label="Asset categories">
+    {% for c in categories %}
+      {% if c.count %}
+      <a href="{{ url_for('international_centre.holdings_list', asset_type=c.asset_type) }}" class="iu-cat">
+        <div class="iu-cat-icon">{{ asset_icon(c.asset_type) }}</div>
+        <div class="iu-cat-name">{{ c.asset_type }}</div>
+        <div class="iu-cat-count">{{ c.count }} holding{{ 's' if c.count != 1 else '' }}</div>
+        <div class="iu-cat-value">{{ format_money_usd(c.usd_value) }}</div>
+      </a>
+      {% else %}
+      <a href="{{ url_for('international_centre.add_holding', asset_type=c.asset_type) }}" class="iu-cat iu-cat--empty">
+        <div class="iu-cat-icon">{{ asset_icon(c.asset_type) }}</div>
+        <div class="iu-cat-name">{{ c.asset_type }}</div>
+        <div class="iu-cat-count">None yet</div>
+        <div class="iu-cat-add">+ Add</div>
+      </a>
+      {% endif %}
+    {% endfor %}
   </div>
 </div>
+{% endif %}
+
+{% if reminders %}
+<div class="iu-section">
+  <div class="iu-section-head">
+    <h2 class="iu-section-title">🔔 Reminders Centre</h2>
+    <a href="{{ url_for('international_centre.reminders') }}" class="iu-link-sm">View all {{ reminder_count }} →</a>
+  </div>
+  <div class="iu-rows">
+    {% for r in reminders %}
+    <div class="iu-row iu-row--{{ r.level if r.level != 'info' else 'none' }}">
+      <span class="iu-row-icon">{{ '⚠️' if r.level == 'danger' else ('🔔' if r.level == 'warning' else 'ℹ️') }}</span>
+      <div class="iu-row-main">
+        <div class="iu-row-title iu-row-title--wrap">{{ r.title }}</div>
+        <div class="iu-row-meta">{{ r.message }}</div>
+      </div>
+      <div class="iu-row-right iu-btn-group">
+        {% if r.url %}<a href="{{ r.url }}" class="iu-btn iu-btn-sm">Open</a>{% endif %}
+        {% if r.ack_key %}
+        <form method="POST" action="{{ url_for('international_centre.reminder_done') }}" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+          <input type="hidden" name="key" value="{{ r.ack_key }}" />
+          <input type="hidden" name="next" value="dashboard" />
+          <button type="submit" class="iu-btn iu-btn-sm" title="Hide this reminder">{{ 'Dismiss' if r.kind == 'estate' else 'Mark done' }}</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if holdings %}
+<div class="ic-chart-grid">
+  <div class="ic-card">
+    <div class="section-label">Asset Allocation <span class="ic-chart-hint">click a slice to filter</span></div>
+    <div class="ic-chart-wrap"><canvas id="assetAllocationChart" role="img" aria-label="Asset allocation by USD value"></canvas></div>
+  </div>
+  <div class="ic-card">
+    <div class="section-label">Currency Exposure <span class="ic-chart-hint">click a slice to filter</span></div>
+    <div class="ic-chart-wrap"><canvas id="currencyExposureChart" role="img" aria-label="Currency exposure by USD value"></canvas></div>
+  </div>
+</div>
+
+<div class="iu-section">
+  <div class="iu-section-head">
+    <h2 class="iu-section-title">Top Holdings</h2>
+    <a href="{{ url_for('international_centre.holdings_list') }}" class="iu-link-sm">View all {{ holdings|length }} →</a>
+  </div>
+  <div class="iu-rows">
+    {% for h in top_holdings %}
+    <div class="iu-row" tabindex="0" role="link" data-href="{{ url_for('international_centre.holding_detail', holding_id=h.id) }}">
+      <span class="iu-row-icon">{{ asset_icon(h.asset_type) }}</span>
+      <div class="iu-row-main">
+        <div class="iu-row-title">{{ h.name }}{% if h.ticker %} <span class="iu-badge iu-badge-muted">{{ h.ticker }}</span>{% endif %}</div>
+        <div class="iu-row-meta">{{ h.asset_type }}{{ ' · ' + h.country if h.country }} · {{ h.native_currency }} {{ '{:,.2f}'.format(h.current_value_native) }}</div>
+      </div>
+      <div class="iu-row-right">
+        <div class="iu-row-value">{{ format_money_usd(h.usd_value) }}</div>
+        <div class="iu-row-sub {{ 'iu-up' if h.xirr is not none and h.xirr >= 0 else ('iu-down' if h.xirr is not none else '') }}">{{ 'XIRR ' + ('%.2f'|format(h.xirr)) + '%' if h.xirr is not none else 'no XIRR yet' }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% if recent_activity %}
+<div class="iu-section">
+  <div class="iu-section-head"><h2 class="iu-section-title">Recent Activity</h2></div>
+  <div class="iu-rows">
+    {% for a in recent_activity %}
+    <a href="{{ url_for('international_centre.holding_detail', holding_id=a.holding.id) }}" class="iu-row">
+      <span class="iu-row-icon">{{ asset_icon(a.holding.asset_type) }}</span>
+      <div class="iu-row-main">
+        <div class="iu-row-title">{{ a.holding.name }} <span class="iu-badge iu-badge-accent">{{ a.event.event_type }}</span></div>
+        <div class="iu-row-meta">{{ a.event.description }}</div>
+      </div>
+      <div class="iu-row-right"><div class="iu-row-sub">{{ format_date(a.event.created_at) }}</div></div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 {% else %}
-<div class="ic-card ic-empty">
-  <p>No international holdings yet.</p>
-  <a href="{{ url_for('international_centre.add_holding') }}" class="btn-primary" style="text-decoration:none; display:inline-block; width:auto; padding:10px 18px; margin-top:10px;">+ Add your first holding</a>
+<div class="iu-empty" role="region" aria-label="Empty state">
+  <div class="iu-empty-icon">🌍</div>
+  <h2 class="iu-empty-title">No international holdings yet</h2>
+  <p class="iu-empty-desc">Track foreign stocks, ETFs, bank accounts, property and employer shares in their own currency, with Schedule FA, LRS and tax-credit tooling built in.</p>
+  <a href="{{ url_for('international_centre.add_holding') }}" class="iu-btn iu-btn-primary">+ Add your first holding</a>
 </div>
 {% endif %}
 
@@ -86,10 +212,119 @@
   <a href="{{ url_for('international_centre.archived_holdings') }}" class="ic-link">View archived holdings</a>
 </div>
 
+<script>
+  // Batch 10.5: portfolio XIRR from the INR point of view, loaded after the
+  // page so a slow exchange-rate service never delays the dashboard.
+  (function () {
+    var el = document.getElementById('icInrXirr');
+    if (!el || !el.dataset.url || el.textContent.indexOf('calculating') === -1) return;
+    fetch(el.dataset.url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.available && d.xirr_inr !== null && d.xirr_inr !== undefined) {
+          el.textContent = 'In INR: ' + d.xirr_inr.toFixed(2) + '%';
+          el.className += d.xirr_inr >= 0 ? ' iu-up' : ' iu-down';
+          if (d.excluded && d.excluded.length) el.title = d.excluded.length + ' holding(s) left out (no dated buys or no exchange rate)';
+        } else { el.textContent = 'INR view: not enough history'; }
+      })
+      .catch(function () { el.textContent = 'INR view unavailable'; });
+  })();
+</script>
+
+<script>
+  // Batch 10.2: close the Tax & Compliance menu when clicking elsewhere.
+  document.addEventListener('click', function (e) {
+    const m = document.getElementById('icTaxMenu');
+    if (m && m.open && !m.contains(e.target)) m.open = false;
+  });
+</script>
+
+{% if holdings %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+  // Batch 9.8 (Sep 2026) — Asset Allocation + Currency Exposure
+  // doughnut charts, same Chart.js conventions as the main dashboard
+  // (templates/dashboard.html) and Wealth Centre's own charts.
+  const icIsDark    = document.documentElement.getAttribute('data-theme') === 'dark';
+  const icBorderCol = icIsDark ? '#13161f' : '#FFFFFF';
+  const icLabelCol  = icIsDark ? '#64748b' : '#64748B';
+  Chart.defaults.color = icLabelCol;
+  Chart.defaults.font.family = "'Inter', sans-serif";
+  Chart.defaults.font.size = 11;
+
+  const icPalette = ['#6366f1', '#0ea5e9', '#8b5cf6', '#D97706', '#0F766E', '#16A34A', '#F59E0B', '#DC2626', '#64748B', '#7C3AED'];
+
+  const icListUrl = {{ url_for('international_centre.holdings_list')|tojson }};
+
+  function icDoughnut(canvasId, rawData, filterParam) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || !rawData.length) return;
+    const labels = rawData.map(d => d.label);
+    const values = rawData.map(d => d.value);
+    const colors = rawData.map((_, i) => icPalette[i % icPalette.length]);
+    new Chart(canvas, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: icBorderCol, borderWidth: 3, hoverOffset: 6 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '60%',
+        // Batch 10.2: clicking a slice opens the Holdings page filtered to it.
+        onClick: (evt, els) => {
+          if (els.length) window.location = icListUrl + '?' + filterParam + '=' + encodeURIComponent(labels[els[0].index]);
+        },
+        onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        plugins: {
+          legend: { position: 'bottom', labels: { padding: 12, usePointStyle: true, font: { size: 10 } } },
+          tooltip: { callbacks: { label: ctx => {
+            const t = ctx.dataset.data.reduce((a, b) => a + b, 0);
+            return ' $' + ctx.parsed.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' (' + (ctx.parsed / t * 100).toFixed(1) + '%)';
+          } } }
+        }
+      }
+    });
+  }
+
+  icDoughnut('assetAllocationChart', [
+    {% for asset_type, info in by_type.items() %}
+    { label: {{ asset_type|tojson }}, value: {{ info.usd_value|round(2) }} },
+    {% endfor %}
+  ], 'asset_type');
+
+  icDoughnut('currencyExposureChart', [
+    {% for currency, info in by_currency.items() %}
+    { label: {{ currency|tojson }}, value: {{ info.usd_value|round(2) }} },
+    {% endfor %}
+  ], 'currency');
+</script>
+{% endif %}
+
 <style>
   .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:24px; }
   .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
   .ic-subtitle { color:var(--muted); font-size:0.9rem; }
+
+  .ic-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .ic-add-btn { text-decoration:none; display:inline-block; width:auto; padding:10px 18px; }
+
+  .ic-menu { position:relative; }
+  .ic-menu > summary { list-style:none; display:inline-block; user-select:none; }
+  .ic-menu > summary::-webkit-details-marker { display:none; }
+  .ic-menu-panel { position:absolute; right:0; top:calc(100% + 6px); min-width:210px; z-index:50;
+    background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:6px;
+    box-shadow:var(--shadow-sm); display:flex; flex-direction:column; }
+  .ic-menu-panel a { padding:9px 12px; border-radius:6px; color:var(--text); text-decoration:none; font-size:0.85rem; }
+  .ic-menu-panel a:hover { background:var(--surface2); color:var(--accent); }
+
+  .ic-banners { display:flex; flex-direction:column; gap:10px; margin-bottom:20px; }
+  .ic-banner { display:flex; align-items:center; gap:12px; border:1px solid; border-radius:10px; padding:12px 16px;
+    text-decoration:none; font-size:0.85rem; transition:filter 0.15s; }
+  .ic-banner:hover { filter:brightness(0.97); }
+  .ic-banner-danger  { background:var(--down-bg);    border-color:var(--down);    color:var(--down); }
+  .ic-banner-warning { background:var(--warning-bg); border-color:var(--warning); color:var(--warning); }
+  .ic-banner-info    { background:var(--surface);    border-color:var(--border);  color:var(--text); }
+  .ic-banner-text { flex:1; }
+  .ic-banner-go { font-weight:600; white-space:nowrap; font-size:0.78rem; }
+
+  .ic-chart-hint { font-size:0.7rem; font-weight:400; color:var(--muted2); text-transform:none; letter-spacing:normal; margin-left:6px; }
 
   .ic-btn-secondary {
     background:var(--surface); border:1px solid var(--border); border-radius:8px;
@@ -98,17 +333,15 @@
   }
   .ic-btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
 
-  .ic-summary-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px,1fr)); gap:16px; margin-bottom:24px; }
-  .ic-summary-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
-  .ic-summary-label { font-size:0.75rem; color:var(--muted); font-weight:600; letter-spacing:0.05em; text-transform:uppercase; margin-bottom:8px; }
-  .ic-summary-value { font-size:1.4rem; font-weight:700; color:var(--text); font-family:var(--font-data); }
-  .ic-summary-sub { font-size:0.75rem; color:var(--muted2); margin-top:4px; }
   .ic-up { color:var(--up); }
   .ic-down { color:var(--down); }
   .ic-muted { color:var(--muted2); }
 
   .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
   .ic-empty { text-align:center; color:var(--muted); padding:40px 20px; }
+
+  .ic-chart-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:16px; margin-bottom:20px; }
+  .ic-chart-wrap { position:relative; height:260px; }
 
   .ic-table-wrap { overflow-x:auto; }
   .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
@@ -122,7 +355,8 @@
 
   @media (max-width: 768px) {
     .ic-header { flex-direction:column; }
-    .ic-summary-grid { grid-template-columns:1fr 1fr; }
+    .ic-menu-panel { right:auto; left:0; }
   }
 </style>
+</div>
 {% endblock %}

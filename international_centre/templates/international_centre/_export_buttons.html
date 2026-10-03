@@ -1,0 +1,9 @@
+{# Batch 10.4 — PDF / CSV download buttons for a report page.
+   Set before including:  export_key (e.g. 'capital_gains') and
+   export_params (e.g. {'fy': 2025} or {'year': 2025}). #}
+<span class="iu-btn-group" role="group" aria-label="Download this report">
+  <a class="iu-btn iu-btn-sm" href="{{ url_for('international_centre.export_report', report_key=export_key, fmt='pdf', **export_params) }}"
+     title="Download as PDF">⬇ PDF</a>
+  <a class="iu-btn iu-btn-sm" href="{{ url_for('international_centre.export_report', report_key=export_key, fmt='csv', **export_params) }}"
+     title="Download as CSV (opens in Excel)">⬇ CSV</a>
+</span>

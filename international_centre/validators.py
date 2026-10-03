@@ -5,10 +5,12 @@ Pure functions, no DB/network access — return a list of error strings
 (empty list = valid), matching the convention used across every other
 module's validators.py.
 """
+import os
 from datetime import datetime
 
 from international_centre.models import (
     InternationalAssetType, InternationalTxnType, RemittancePurpose,
+    DocumentType, VestingPlanType,
 )
 from fx_rates import SUPPORTED_CURRENCIES
 from wealth.timezone_utils import today_ist
@@ -118,6 +120,30 @@ def validate_transaction(data):
         except ValueError:
             errors.append("Please enter a valid quantity for a buy/sell transaction.")
 
+    # Batch 9.5 (Sep 2026) — optional withholding-tax detail, DIVIDEND only.
+    if txn_type == InternationalTxnType.DIVIDEND:
+        gross_raw = (data.get("gross_amount_native") or "").strip()
+        withheld_raw = (data.get("tax_withheld_native") or "").strip()
+        if gross_raw:
+            try:
+                gross = float(gross_raw)
+                if gross <= 0:
+                    errors.append("Gross dividend amount must be greater than zero.")
+            except ValueError:
+                errors.append("Please enter a valid gross dividend amount.")
+                gross = None
+            if withheld_raw:
+                try:
+                    withheld = float(withheld_raw)
+                    if withheld < 0:
+                        errors.append("Tax withheld cannot be negative.")
+                    elif gross is not None and withheld > gross:
+                        errors.append("Tax withheld cannot exceed the gross dividend amount.")
+                except ValueError:
+                    errors.append("Please enter a valid tax-withheld amount.")
+        elif withheld_raw:
+            errors.append("Enter the gross dividend amount before entering tax withheld.")
+
     return errors
 
 
@@ -144,5 +170,87 @@ def validate_remittance(data):
     purpose = (data.get("purpose") or "").strip()
     if purpose not in RemittancePurpose.ALL:
         errors.append("Please select a valid purpose.")
+
+    return errors
+
+
+def validate_vesting_tranche(data):
+    """data: flat dict with keys plan_type, grant_date (optional),
+    vest_date, quantity, fmv_native, purchase_price_native (optional).
+    Batch 9.7 (Sep 2026)."""
+    errors = []
+
+    plan_type = (data.get("plan_type") or "").strip().upper()
+    if plan_type not in VestingPlanType.ALL:
+        errors.append("Please select a valid plan type (RSU or ESPP).")
+
+    grant_raw = (data.get("grant_date") or "").strip()
+    if grant_raw and not _parse_date(grant_raw):
+        errors.append("Please enter a valid grant date.")
+
+    vest_raw = (data.get("vest_date") or "").strip()
+    vest_date = _parse_date(vest_raw)
+    if not vest_date:
+        errors.append("Please enter a valid vest date.")
+    elif vest_date > today_ist():
+        errors.append("Vest date cannot be in the future.")
+
+    qty_raw = (data.get("quantity") or "").strip()
+    try:
+        quantity = float(qty_raw)
+        if quantity <= 0:
+            errors.append("Quantity must be greater than zero.")
+    except ValueError:
+        errors.append("Please enter a valid quantity.")
+
+    fmv = None
+    fmv_raw = (data.get("fmv_native") or "").strip()
+    try:
+        fmv = float(fmv_raw)
+        if fmv <= 0:
+            errors.append("Fair market value must be greater than zero.")
+    except ValueError:
+        errors.append("Please enter a valid fair market value.")
+
+    price_raw = (data.get("purchase_price_native") or "").strip()
+    if price_raw:
+        try:
+            price = float(price_raw)
+            if price < 0:
+                errors.append("Purchase price cannot be negative.")
+            elif fmv is not None and price > fmv:
+                errors.append("Purchase price cannot exceed the fair market value.")
+        except ValueError:
+            errors.append("Please enter a valid purchase price.")
+
+    return errors
+
+
+def validate_document(file, doc_type):
+    """Validate an uploaded document. file: werkzeug FileStorage.
+    Same allowed-extensions/size-limit rules as every other module's
+    Document Vault (own copy, per convention)."""
+    errors = []
+
+    if not file or not file.filename:
+        errors.append("No file selected.")
+        return errors
+
+    if doc_type not in DocumentType.ALL:
+        errors.append(f"Invalid document type: {doc_type}.")
+
+    allowed = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx", ".xls", ".xlsx"}
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in allowed:
+        errors.append(
+            f"File type '{ext}' not allowed. "
+            f"Allowed: PDF, JPG, JPEG, PNG, DOC, DOCX, XLS, XLSX."
+        )
+
+    file.seek(0, 2)
+    size = file.tell()
+    file.seek(0)
+    if size > 25 * 1024 * 1024:
+        errors.append("File size exceeds 25MB limit.")
 
     return errors
