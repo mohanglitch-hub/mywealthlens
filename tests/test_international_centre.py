@@ -921,7 +921,7 @@ def main():
     # A remittance large enough on its own to cross the ₹10L threshold,
     # against the international_http_test user used throughout section 9.
     r = client.post('/international/remittances/add', data={
-        'csrf_token': remit_csrf2, 'date': '2026-05-10', 'amount_inr': '1500000',
+        'csrf_token': remit_csrf2, 'date': today_ist().isoformat(), 'amount_inr': '1500000',
         'purpose': RemittancePurpose.INVESTMENT_SECURITIES,
     }, follow_redirects=True)
     assert r.status_code == 200
@@ -1375,13 +1375,14 @@ def main():
     assert r.status_code == 200
 
     rem_csrf = get_csrf(client.get('/international/remittances').data)
-    r = client.post('/international/remittances/add', data={'csrf_token': rem_csrf, 'date': '2026-09-01', 'amount_inr': '300000',
+    r = client.post('/international/remittances/add', data={'csrf_token': rem_csrf, 'date': today_ist().isoformat(), 'amount_inr': '300000',
                     'purpose': RemittancePurpose.EDUCATION, 'education_loan_funded': 'on'}, follow_redirects=True)
     assert r.status_code == 200
     rem_body = client.get('/international/remittances').get_data(as_text=True)
-    assert '(loan-funded)' in rem_body and 'icLoanField' in rem_body and 'Remaining before TCS applies' in rem_body or 'Estimated TCS This' in rem_body
+    assert '(loan-funded)' in rem_body and 'icLoanField' in rem_body, "loan-funded education remittance must show on the page for the current FY"
+    assert 'Remaining before TCS applies' in rem_body or 'Estimated TCS This' in rem_body
     r = client.post('/international/remittances/add', data={'csrf_token': get_csrf(client.get('/international/remittances').data),
-                    'date': '2026-09-02', 'amount_inr': '1000', 'purpose': RemittancePurpose.MEDICAL}, follow_redirects=True)
+                    'date': today_ist().isoformat(), 'amount_inr': '1000', 'purpose': RemittancePurpose.MEDICAL}, follow_redirects=True)
     assert 'Please select a valid purpose' not in r.get_data(as_text=True)
     print("PASS: education-loan checkbox and the Medical purpose work end-to-end via real HTTP")
 

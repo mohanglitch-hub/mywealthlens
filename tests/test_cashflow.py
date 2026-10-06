@@ -436,6 +436,28 @@ def _test_csv_import(client, csrf):
 def _run_suite():
     from app import app, db
 
+    # Freeze "today" so this suite never expires. Every date below is in
+    # September 2026, and "forecast to month-end" / "safe to spend" only
+    # exist while the month being viewed IS the real current month - so
+    # once the calendar rolled into October, three checks started failing
+    # on their own. Cashflow looks today up in several places: lazily via
+    # wealth.timezone_utils inside services.py, and through by-name
+    # imports at the top of cashflow_centre's routes, utils (which builds
+    # current_month_key) and validators. All of them are patched here.
+    import datetime as _dt
+    import importlib
+    import wealth.timezone_utils as _tz
+    frozen_today = _dt.date(2026, 9, 23)
+    _tz.today_ist = lambda: frozen_today
+    _patched = []
+    for _mod_name in ("routes", "utils", "validators"):
+        _mod = importlib.import_module(f"cashflow_centre.{_mod_name}")
+        _mod.today_ist = lambda: frozen_today
+        _patched.append(_mod)
+    check("test clock is frozen to 2026-09-23 (results no longer depend on the real date)",
+          _tz.today_ist() == frozen_today and all(m.today_ist() == frozen_today for m in _patched)
+          and _patched[1].current_month_key() == "2026-09")
+
     app.config["TESTING"] = True
     with app.app_context():
         db.drop_all()
