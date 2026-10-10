@@ -29,11 +29,12 @@
   same income, and depends on your full tax computation (slab, other income, deductions) that MyWealthLens has
   no visibility into. Confirm the creditable amount and file Form 67 with a CA before relying on this for a
   return.
-  {% if summary.any_missing_rate %}
-  <br/><br/><strong>Some rows below show "—" for INR figures</strong> — no exchange rate has been captured yet
-  for that holding, so an INR equivalent couldn't be estimated. Native-currency figures are still shown.
-  {% endif %}
+  <br/><br/>Each dividend is converted at the SBI TT buying rate for the last day of the <em>previous month</em>
+  (the Rule 115 convention for income), from a rate typed on that dividend, else your rate book. The rupee total for
+  a holding is left blank if any one of its dividends has no rate. Native-currency figures are always shown.
 </div>
+{% set strip_counts = summary.rates %}{% set strip_badge = summary.rates_badge %}{% set strip_fy = summary.fy_start.year %}
+{% include "international_centre/_rate_strip.html" %}
 
 {% if summary.rows %}
 <div class="ic-card">
@@ -43,7 +44,7 @@
         <tr>
           <th>Holding</th><th>Country</th>
           <th>Gross Dividend</th><th>Tax Withheld</th><th>Net Received</th>
-          <th>Gross (₹ approx.)</th><th>Withheld (₹ approx.)</th>
+          <th>Gross (₹)</th><th>Withheld (₹)</th><th>Rates</th>
         </tr>
       </thead>
       <tbody>
@@ -56,6 +57,12 @@
           <td>{{ row.currency }} {{ '{:,.2f}'.format(row.net_native) }}</td>
           <td>{{ '₹' + '{:,.0f}'.format(row.gross_inr) if row.gross_inr is not none else '—' }}</td>
           <td>{{ '₹' + '{:,.0f}'.format(row.withheld_inr) if row.withheld_inr is not none else '—' }}</td>
+          <td class="rs-sub">{{ row.rates_badge }}
+            <details><summary style="cursor:pointer; color:var(--accent);">Per dividend</summary>
+              {% for e in row.events %}<div>{{ format_date(e.date) }}: {{ row.currency }} {{ '{:,.2f}'.format(e.gross_native) }}
+                {% if e.rate %}× ₹{{ '%.4f'|format(e.rate) }} <span class="rs-pill {{ 'rs-pill-ok' if e.rate_source in ('override','rate_book') else 'rs-pill-est' }}">{{ e.rate_label }}</span>
+                {% else %}<span class="rs-pill rs-pill-miss">{{ e.rate_label }}</span>{% endif %}</div>{% endfor %}
+            </details></td>
         </tr>
         {% endfor %}
       </tbody>
@@ -64,6 +71,7 @@
           <td colspan="5" style="text-align:right; font-weight:600;">Total</td>
           <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_gross_inr) }}</td>
           <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_withheld_inr) }}</td>
+          <td></td>
         </tr>
       </tfoot>
     </table>

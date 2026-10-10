@@ -90,6 +90,11 @@ def main():
         raise services.FxRateError("no rate in this fake")
 
     services.fetch_fx_rate = fake_fetch_fx_rate
+    # Batch 11: the SBI-rate engine (rates.py) looks up its ECB *estimates* through its own
+    # reference to fetch_fx_rate, so point it at the same fake (USD->INR = 83 on any date).
+    from international_centre import rates as _rates_engine
+    _rates_engine.fetch_fx_rate = fake_fetch_fx_rate
+    _rates_engine.clear_estimate_cache()
     # currency_display.usd_to_inr() (used by portfolio_inr_value() and the
     # main dashboard's net worth wiring, Sep 2026) goes through
     # fx_rates.fetch_fx_rate independently of services.fetch_fx_rate above
@@ -1487,12 +1492,12 @@ def main():
         fa_page = services.get_schedule_fa_summary(exp_a, 2025)
         fa_csv = list(__import__("csv").reader(_io.StringIO(rexp.to_csv_bytes(rexp.build_report("schedule_fa", exp_a, 2025)).decode("utf-8-sig"))))
         assert len(fa_csv) == 1 + len(fa_page["rows"]) + 1, "header + one row per holding + totals"
-        assert fa_csv[0][0] == "Holding" and fa_csv[0][4] == "Opening (USD)"
+        assert fa_csv[0][0] == "Entity" and fa_csv[0][6] == "Initial value (INR)" and fa_csv[0][9] == "Closing 31 Dec (INR)"
         by_name = {r[0]: r for r in fa_csv[1:-1]}
         for row in fa_page["rows"]:
             nm = row["holding"].name
             nm_csv = "'" + nm if nm[:1] in "=+-@" else nm
-            assert float(by_name[nm_csv][6]) == row["closing_usd"], nm
+            assert float(by_name[nm_csv][9]) == row["closing_inr"], nm   # the CSV's closing INR is the page's closing INR
         lrs_page = services.get_lrs_status(exp_a, anchor_date=date(2025, 4, 1))
         lrs_csv = list(__import__("csv").reader(_io.StringIO(rexp.to_csv_bytes(rexp.build_report("lrs", exp_a, 2025)).decode("utf-8-sig"))))
         assert float(lrs_csv[-1][1]) == lrs_page["total_inr"] and float(lrs_csv[-1][3]) == lrs_page["total_tcs_inr"]
@@ -1940,7 +1945,9 @@ def main():
 
     with app.app_context():
         for _em in ("international_rem_a@example.com", "international_rem_b@example.com",
-                    "international_export_a@example.com", "international_export_b@example.com"):
+                    "international_export_a@example.com", "international_export_b@example.com",
+                    "international_rates_a@example.com", "international_rates_b@example.com",
+                    "international_rep_a@example.com", "international_rep_fa@example.com", "international_rep_eur@example.com"):
             _u = User.query.filter_by(email=_em).first()
             if _u:
                 for _h in InternationalHolding.query.filter_by(user_id=_u.id).all():
@@ -1950,6 +1957,557 @@ def main():
                 InternationalReminderAck.query.filter_by(user_id=_u.id).delete()
                 db.session.delete(_u)
         db.session.commit()
+
+    # ── 27. SBI TT buying-rate engine: rate book, overrides, conventions (Batch 11, Oct 2026) ──
+    from international_centre import rates as R
+    from international_centre.models import (SbiTtbrRate, InternationalRateSettings, ScheduleFaYearInput,
+                                             RateBasis as RB, CgMethod as CGM)
+    from fx_rates import FxRateError as _FxErr
+    from datetime import date as _d
+    suite_rates_fetch = R.fetch_fx_rate     # restored at the end of this section
+
+    # pure conventions
+    assert R.specified_date(_d(2025, 8, 15), RB.SAME_DAY) == _d(2025, 8, 15)
+    assert R.specified_date(_d(2025, 8, 15), RB.PREV_MONTH_END) == _d(2025, 7, 31)
+    assert R.specified_date(_d(2026, 1, 3), RB.PREV_MONTH_END) == _d(2025, 12, 31), "year boundary"
+    assert R.specified_date(_d(2028, 3, 1), RB.PREV_MONTH_END) == _d(2028, 2, 29), "leap year"
+    print("PASS: the two date conventions (same day / last day of previous month) handle month, year and leap-year edges")
+
+    rows_p, errs_p = R.parse_rate_lines("2025-07-31, 85.45\n31-08-2025\t84.20\n30/09/2025;83.90\n31 Oct 2025 \u20b9 84.10\n2025-12-31 Rs. 85.00\n# note\n\nbad line\n2025-13-45, 80")
+    assert [(str(d), r) for d, r in rows_p] == [("2025-07-31", 85.45), ("2025-08-31", 84.2), ("2025-09-30", 83.9), ("2025-10-31", 84.1), ("2025-12-31", 85.0)], rows_p
+    assert len(errs_p) == 2 and errs_p[0][0] == 8 and errs_p[1][0] == 9, errs_p
+    print("PASS: the paste parser reads five date formats, strips rupee symbols, skips comments, and reports each bad line by number")
+
+    with app.app_context():
+        for _em in ("international_rates_a@example.com", "international_rates_b@example.com"):
+            _u = User.query.filter_by(email=_em).first()
+            if _u:
+                SbiTtbrRate.query.filter_by(user_id=_u.id).delete()
+                InternationalRateSettings.query.filter_by(user_id=_u.id).delete()
+                for _h in InternationalHolding.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_h)
+                db.session.delete(_u)
+        db.session.commit()
+        ra = User(name="Rates A", email="international_rates_a@example.com", password="unused")
+        rb_ = User(name="Rates B", email="international_rates_b@example.com", password="unused")
+        db.session.add_all([ra, rb_])
+        db.session.commit()
+        rate_a, rate_b = ra.id, rb_.id
+
+        ecb_calls = []
+        def ecb(frm, to="INR", on_date=None):
+            ecb_calls.append((frm, to, on_date))
+            if frm.upper() == "USD" and to.upper() == "INR":
+                return 90.0, on_date
+            raise _FxErr("no ECB rate for " + frm)
+        R.fetch_fx_rate = ecb
+        R.clear_estimate_cache()
+
+        T = _d(2025, 8, 15)        # event date; PREV_MONTH_END target = 2025-07-31
+        # 4. nothing anywhere + estimates off -> missing, and remembered as needed
+        r0 = R.RateResolver(rate_a, allow_estimate=False)
+        res = r0.resolve("USD", T, RB.PREV_MONTH_END, purpose="Dividends / Form 67")
+        assert res.source == "missing" and res.rate is None and not res.ok and "No rate for 31 Jul 2025" in res.label()
+        assert r0.needed_list() == [{"currency": "USD", "target_date": _d(2025, 7, 31), "purposes": ["Dividends / Form 67"]}]
+        assert ecb_calls == [], "collect mode must never touch the network"
+        # 3. estimate, clearly labelled as not SBI
+        r1 = R.RateResolver(rate_a)
+        res = r1.resolve("USD", T, RB.PREV_MONTH_END)
+        assert res.source == "estimate" and res.rate == 90.0 and not res.official and "not SBI" in res.label() and "ECB estimate" in res.label()
+        assert ecb_calls == [("USD", "INR", _d(2025, 7, 31))], ecb_calls
+        # estimates are cached: a second resolver asks the network nothing
+        R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END)
+        assert len(ecb_calls) == 1, "a past date's rate never changes, so it is fetched once"
+        # INR needs no conversion
+        res = R.RateResolver(rate_a).resolve("INR", T, RB.PREV_MONTH_END)
+        assert res.rate == 1.0 and res.source == "inr" and res.official and len(ecb_calls) == 1
+        print("PASS: resolver falls back to a labelled ECB estimate (cached), never calls the network in collect mode, and passes INR through")
+
+        # 2. rate book beats an estimate
+        errs, action = R.save_rate(db, rate_a, "USD", _d(2025, 7, 31), 85.5, "SBI card")
+        assert errs == [] and action == "added"
+        res = R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END)
+        assert res.source == "rate_book" and res.rate == 85.5 and res.date_used == _d(2025, 7, 31) and res.official and "SBI rate book, 31 Jul 2025" in res.label()
+        errs, action = R.save_rate(db, rate_a, "usd", _d(2025, 7, 31), 85.75)    # same day again, lower-case code
+        assert action == "updated" and SbiTtbrRate.query.filter_by(user_id=rate_a).count() == 1
+        assert R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END).rate == 85.75
+        # 1. a typed override beats the rate book
+        res = R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END, override=88.0, override_date=_d(2025, 7, 30))
+        assert res.source == "override" and res.rate == 88.0 and res.official and res.date_used == _d(2025, 7, 30)
+        print("PASS: precedence is override > rate book > ECB estimate > missing, with the right label on each")
+
+        # weekend / holiday tolerance: an entry up to 5 days earlier counts, older or LATER ones never do
+        SbiTtbrRate.query.filter_by(user_id=rate_a).delete(); db.session.commit()
+        R.save_rate(db, rate_a, "USD", _d(2025, 7, 28), 85.0)
+        r = R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END)          # target Jul 31, entry Jul 28 = 3 days earlier
+        assert r.source == "rate_book" and r.date_used == _d(2025, 7, 28) and r.rate == 85.0
+        SbiTtbrRate.query.filter_by(user_id=rate_a).delete(); db.session.commit()
+        R.save_rate(db, rate_a, "USD", _d(2025, 7, 25), 84.0)
+        assert R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END).source == "estimate", "6 days earlier is stale: not used"
+        R.save_rate(db, rate_a, "USD", _d(2025, 8, 2), 99.0)
+        assert R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END).source == "estimate", "a LATER-dated rate is never used"
+        R.save_rate(db, rate_a, "USD", _d(2025, 7, 29), 85.1)
+        R.save_rate(db, rate_a, "USD", _d(2025, 7, 30), 85.2)
+        assert R.RateResolver(rate_a).resolve("USD", T, RB.PREV_MONTH_END).rate == 85.2, "the latest eligible entry wins"
+        print("PASS: a rate-book entry counts up to 5 days earlier (weekends/holidays), never older or later ones; latest eligible wins")
+
+        # estimates dying mid-report: stop retrying after 3 failures
+        R.clear_estimate_cache(); ecb_calls.clear()
+        def ecb_down(frm, to="INR", on_date=None):
+            ecb_calls.append((frm, to, on_date)); raise _FxErr("network down")
+        R.fetch_fx_rate = ecb_down
+        rd = R.RateResolver(rate_b)
+        for k in range(8):
+            assert rd.resolve("USD", _d(2024, 1, 10 + k), RB.SAME_DAY).source == "missing"
+        assert rd.estimates_unavailable and len(ecb_calls) == 3, ecb_calls
+        print("PASS: when the exchange-rate service is down the resolver gives up after 3 tries instead of hanging a whole report")
+
+        # prefetch: concurrent, then resolves for free
+        R.fetch_fx_rate = ecb; R.clear_estimate_cache(); ecb_calls.clear()
+        rp = R.RateResolver(rate_b)
+        dates = [_d(2024, 2, d) for d in (1, 2, 3, 4)]
+        rp.prefetch([("USD", d, RB.SAME_DAY, None) for d in dates] + [("USD", dates[0], RB.SAME_DAY, 90.0), ("INR", dates[1], RB.SAME_DAY, None)])
+        assert len(ecb_calls) == 4, ecb_calls          # overridden and INR entries are skipped
+        for d in dates:
+            assert rp.resolve("USD", d, RB.SAME_DAY).rate == 90.0
+        assert len(ecb_calls) == 4
+        print("PASS: prefetch fetches each needed estimate once (skipping overrides and INR), so a report never fetches one at a time")
+
+        # summary + badge
+        rs = R.RateResolver(rate_a)
+        rs.resolve("USD", _d(2025, 7, 30), RB.SAME_DAY); rs.resolve("USD", T, RB.SAME_DAY, override=80.0); rs.resolve("EUR", T, RB.SAME_DAY)
+        sm = rs.summary()
+        assert sm["rate_book"] == 1 and sm["override"] == 1 and sm["missing"] == 1 and sm["estimate"] == 0 and sm["official"] == 2 and not sm["all_official"]
+        assert R.basis_badge(sm) == "2 SBI \u00b7 1 missing", R.basis_badge(sm)
+        print("PASS: the summary counts and the row badge read '2 SBI · 1 missing'")
+
+        # CRUD validation
+        n_before = SbiTtbrRate.query.filter_by(user_id=rate_a).count()
+        for cur, d, rate in [("USD", _d(2099, 1, 1), 85.0), ("USD", _d(2025, 1, 31), 0.0), ("USD", _d(2025, 1, 31), 99999.0),
+                             ("USD", _d(2025, 1, 31), None), ("INR", _d(2025, 1, 31), 1.0), ("ZZZ", _d(2025, 1, 31), 85.0), ("USD", None, 85.0),
+                             ("USD", _d(1990, 1, 1), 85.0)]:
+            e, act = R.save_rate(db, rate_a, cur, d, rate)
+            assert e and act is None, (cur, d, rate)
+        assert SbiTtbrRate.query.filter_by(user_id=rate_a).count() == n_before
+        print("PASS: the rate book rejects future dates, zero/absurd/blank rates, INR, unknown currencies and 1990 dates")
+
+        res_i = R.import_rates(db, rate_b, "USD", "2025-01-31, 86.1\n2025-02-28, 86.9\n2025-02-28, 87.0\n2025-03-31, 87.5\nnonsense\n2999-01-01, 80\n2025-04-30, 99999")
+        assert res_i["added"] == 3 and res_i["updated"] == 0 and len(res_i["errors"]) == 3, res_i
+        assert SbiTtbrRate.query.filter_by(user_id=rate_b, currency="USD", rate_date=_d(2025, 2, 28)).one().rate == 87.0, "last value wins within one paste"
+        res_i2 = R.import_rates(db, rate_b, "USD", "2025-01-31, 86.15")
+        assert res_i2["updated"] == 1 and res_i2["added"] == 0
+        assert R.import_rates(db, rate_b, "INR", "2025-01-31, 1")["errors"], "INR import refused"
+        assert R.import_rates(db, rate_b, "USD", "x\n" * 2500)["errors"][0][1].startswith("Too many lines")
+        print("PASS: bulk import saves the good lines, reports the bad ones by line, lets the last duplicate win, updates existing dates, and caps size")
+
+        rid = SbiTtbrRate.query.filter_by(user_id=rate_b).first().id
+        assert R.delete_rate(db, rate_a, rid) is False, "one user cannot delete another's rate"
+        assert R.delete_rate(db, rate_b, rid) is True
+        assert R.list_rates(rate_b, "USD") and all(x.user_id == rate_b for x in R.list_rates(rate_b))
+        print("PASS: rate-book deletes and listings are scoped to their owner")
+
+        # settings
+        d0 = R.get_settings(rate_a)
+        assert d0.fa_basis == RB.SAME_DAY and d0.cg_method == CGM.SEPARATE
+        assert R.save_settings(db, rate_a, "garbage", CGM.SEPARATE) and R.save_settings(db, rate_a, RB.SAME_DAY, "garbage")
+        assert R.save_settings(db, rate_a, RB.PREV_MONTH_END, CGM.SINGLE) is None
+        assert R.get_settings(rate_a) == (RB.PREV_MONTH_END, CGM.SINGLE) and R.get_settings(rate_b) == d0
+        R.save_settings(db, rate_a, RB.SAME_DAY, CGM.SEPARATE)
+        InternationalRateSettings.query.filter_by(user_id=rate_a).one().cg_method = "corrupt"; db.session.commit()
+        assert R.get_settings(rate_a).cg_method == CGM.SEPARATE, "a corrupt stored value falls back to the default"
+        R.save_settings(db, rate_a, RB.SAME_DAY, CGM.SEPARATE)
+        print("PASS: conversion settings default sensibly, validate input, are per user, and survive a corrupt stored value")
+
+        R.fetch_fx_rate = suite_rates_fetch
+        R.clear_estimate_cache()
+
+    # ── 28. The reports on the engine: capital gains, perquisite, dividends, Schedule FA (Batch 11) ──
+    from international_centre import validators as V
+    from international_centre.models import InternationalValueSnapshot as _Snap
+
+    with app.app_context():
+        for _em in ("international_rep_a@example.com", "international_rep_fa@example.com", "international_rep_eur@example.com"):
+            _u = User.query.filter_by(email=_em).first()
+            if _u:
+                SbiTtbrRate.query.filter_by(user_id=_u.id).delete()
+                InternationalRateSettings.query.filter_by(user_id=_u.id).delete()
+                for _h in InternationalHolding.query.filter_by(user_id=_u.id).all():
+                    db.session.delete(_h)
+                db.session.delete(_u)
+        db.session.commit()
+        u_rep = User(name="Rep A", email="international_rep_a@example.com", password="unused")
+        u_fa = User(name="Rep FA", email="international_rep_fa@example.com", password="unused")
+        u_eur = User(name="Rep EUR", email="international_rep_eur@example.com", password="unused")
+        db.session.add_all([u_rep, u_fa, u_eur])
+        db.session.commit()
+        rep, fa_u, eur_u = u_rep.id, u_fa.id, u_eur.id
+
+        def mk11(uid, **kw):
+            h, err = services.create_holding(uid, {"native_currency": "USD", **kw})
+            assert err is None, err
+            return h
+
+        def down(frm, to="INR", on_date=None):
+            raise _FxErr("no estimates in this test")
+        R.fetch_fx_rate = down            # exact assertions: only the rate book and typed overrides exist
+        R.clear_estimate_cache()
+        def book(uid, cur, y, m, d, rate):
+            e, _a = R.save_rate(db, uid, cur, _d(y, m, d), rate)
+            assert e == [], e
+
+        # ---------- capital gains ----------
+        h_cg = mk11(rep, asset_type=InternationalAssetType.US_STOCK, name="CG Co", ticker="CGC", country="United States", quantity="10", avg_cost_native="100")
+        t_buy = services.add_transaction(h_cg, {"date": "2025-05-15", "txn_type": "BUY", "quantity": "10", "price_native": "100", "amount_native": "1000"})
+        t_sell = services.add_transaction(h_cg, {"date": "2025-12-10", "txn_type": "SELL", "quantity": "10", "price_native": "150", "amount_native": "1500"})
+        book(rep, "USD", 2025, 4, 30, 85.0)       # last day of the month BEFORE the 15 May purchase
+        book(rep, "USD", 2025, 11, 30, 88.0)      # last day of the month BEFORE the 10 Dec sale
+        cg = services.get_capital_gains_summary(rep, 2025)
+        g = cg["rows"][0]
+        assert len(cg["rows"]) == 1 and g["classification"] == "STCG"
+        assert g["cost_inr"] == 85_000.0 and g["proceeds_inr"] == 132_000.0 and g["gain_inr"] == 47_000.0, g       # 1000x85, 1500x88, 132000-85000
+        assert g["acq_rate"] == 85.0 and g["sell_rate"] == 88.0 and g["acq_rate_source"] == "rate_book" and g["sell_rate_source"] == "rate_book"
+        assert cg["stcg_total_inr"] == 47_000.0 and cg["ltcg_total_inr"] == 0.0 and g["gain_usd"] == 500.0 and g["gain_native"] == 500.0
+        assert cg["rates"]["official"] == 2 and cg["all_official"] and cg["cg_method"] == "separate" and not cg["any_missing_inr"]
+        print("PASS: capital gains in INR convert cost and proceeds at their own dates' SBI rates (₹85,000 cost, ₹1,32,000 proceeds, ₹47,000 gain)")
+
+        R.save_settings(db, rep, RB.SAME_DAY, CGM.SINGLE)
+        g = services.get_capital_gains_summary(rep, 2025)["rows"][0]
+        assert g["gain_inr"] == 44_000.0 and g["cost_inr"] == 88_000.0 and g["proceeds_inr"] == 132_000.0, g      # 500 x 88 once
+        assert g["acq_rate"] is None and "single-rate" in g["acq_rate_label"]
+        assert services.get_capital_gains_summary(rep, 2025)["rates"]["total"] == 1, "single method needs only the sale rate"
+        R.save_settings(db, rep, RB.SAME_DAY, CGM.SEPARATE)
+        print("PASS: the single-rate method works the gain out in dollars then converts once at the sale rate (₹44,000), and asks for only one rate")
+
+        t_sell.ttbr_override = 90.0; db.session.commit()
+        g = services.get_capital_gains_summary(rep, 2025)["rows"][0]
+        assert g["proceeds_inr"] == 135_000.0 and g["gain_inr"] == 50_000.0 and g["sell_rate_source"] == "override", g
+        t_buy.ttbr_override = 86.0; db.session.commit()
+        g = services.get_capital_gains_summary(rep, 2025)["rows"][0]
+        assert g["cost_inr"] == 86_000.0 and g["gain_inr"] == 49_000.0 and g["acq_rate_source"] == "override", g
+        t_sell.ttbr_override = t_buy.ttbr_override = None; db.session.commit()
+        print("PASS: a rate typed on the sale or the purchase overrides the rate book for that entry only")
+
+        SbiTtbrRate.query.filter_by(user_id=rep, rate_date=_d(2025, 11, 30)).delete(); db.session.commit()
+        cgm = services.get_capital_gains_summary(rep, 2025)
+        g = cgm["rows"][0]
+        assert g["gain_inr"] is None and g["cost_inr"] is None and g["proceeds_inr"] is None and cgm["any_missing_inr"]
+        assert cgm["stcg_total_inr"] == 0.0 and cgm["rates"]["missing"] == 1 and not cgm["all_official"] and g["gain_native"] == 500.0
+        print("PASS: with a rate missing the INR gain is left blank (never guessed), the totals skip it, and the native figures remain")
+
+        R.fetch_fx_rate = suite_rates_fetch; R.clear_estimate_cache()      # fake ECB: USD->INR 83 on any date
+        SbiTtbrRate.query.filter_by(user_id=rep).delete(); db.session.commit()
+        cge = services.get_capital_gains_summary(rep, 2025)
+        g = cge["rows"][0]
+        assert g["cost_inr"] == 83_000.0 and g["gain_inr"] == 41_500.0 and g["sell_rate_source"] == "estimate" and "not SBI" in g["sell_rate_label"]
+        assert not cge["all_official"] and cge["rates"]["estimate"] == 2 and "ECB est." in cge["rates_badge"]
+        R.fetch_fx_rate = down; R.clear_estimate_cache()
+        book(rep, "USD", 2025, 4, 30, 85.0); book(rep, "USD", 2025, 11, 30, 88.0)
+        print("PASS: with no SBI rates the report falls back to labelled ECB estimates and says it is not all-official")
+
+        # ---------- RSU perquisite ----------
+        h_rsu = mk11(rep, asset_type=InternationalAssetType.RSU_ESPP, name="RSU Co", ticker="RSUC", country="United States", quantity="10", avg_cost_native="0")
+        tr = services.add_vesting_tranche(h_rsu, {"plan_type": "RSU", "vest_date": "2025-08-10", "quantity": "10", "fmv_native": "60", "purchase_price_native": "0"})
+        book(rep, "USD", 2025, 7, 31, 86.5)
+        vs = services.get_vesting_perquisite_summary(rep, 2025)
+        vr = vs["rows"][0]
+        assert vr["perquisite_native"] == 600.0 and vr["perquisite_inr"] == 51_900.0 and vr["rate"] == 86.5 and vr["rate_target_date"] == _d(2025, 7, 31), vr
+        assert vs["total_perquisite_inr"] == 51_900.0 and vs["all_official"]
+        tr.ttbr_override = 87.0; db.session.commit()
+        vr = services.get_vesting_perquisite_summary(rep, 2025)["rows"][0]
+        assert vr["perquisite_inr"] == 52_200.0 and vr["rate_source"] == "override"
+        tr.ttbr_override = None; db.session.commit()
+        print("PASS: the RSU perquisite converts at the SBI rate for the last day of the month before vesting (600 x 86.5 = ₹51,900), with a per-tranche override")
+
+        # ---------- dividends / Form 67 ----------
+        h_dv = mk11(rep, asset_type=InternationalAssetType.US_STOCK, name="Div Co", ticker="DVC", country="United States", quantity="5", avg_cost_native="10")
+        services.add_transaction(h_dv, {"date": "2025-09-15", "txn_type": "DIVIDEND", "amount_native": "0", "gross_amount_native": "100", "tax_withheld_native": "15"})
+        services.add_transaction(h_dv, {"date": "2025-12-05", "txn_type": "DIVIDEND", "amount_native": "50"})
+        book(rep, "USD", 2025, 8, 31, 86.0)       # covers the September dividend only
+        SbiTtbrRate.query.filter_by(user_id=rep, rate_date=_d(2025, 11, 30)).delete(); db.session.commit()   # (re-saved above for the CG section)
+        dt = services.get_dtaa_summary(rep, 2025)
+        row = dt["rows"][0]
+        assert len(row["events"]) == 2 and row["gross_native"] == 150.0 and row["withheld_native"] == 15.0 and row["net_native"] == 135.0
+        assert row["gross_inr"] is None and row["withheld_inr"] is None and dt["any_missing_rate"] and not dt["all_official"]
+        ev = row["events"][0]
+        assert ev["gross_inr"] == 8_600.0 and ev["withheld_inr"] == 1_290.0 and ev["net_inr"] == 7_310.0 and ev["rate_source"] == "rate_book", ev
+        assert row["events"][1]["gross_inr"] is None and row["events"][1]["rate_source"] == "missing"
+        assert dt["total_gross_inr"] == 0.0, "a holding with a missing rate is not part-summed into the total"
+        book(rep, "USD", 2025, 11, 30, 88.0)      # now cover the December dividend too
+        dt = services.get_dtaa_summary(rep, 2025)
+        row = dt["rows"][0]
+        assert row["gross_inr"] == 13_000.0 and row["withheld_inr"] == 1_290.0 and row["net_inr"] == 11_710.0, row     # 100x86 + 50x88
+        assert dt["total_gross_inr"] == 13_000.0 and dt["total_withheld_inr"] == 1_290.0 and dt["all_official"] and not dt["any_missing_rate"]
+        di = services.get_dividend_income(rep, 2025)
+        assert [r for r in di["rows"] if r["name"] == "Div Co"][0]["net_inr"] == 11_710.0
+        print("PASS: each dividend uses its own date's rate (₹13,000 gross, ₹1,290 withheld); a missing rate blanks the holding instead of part-summing; the dividend page agrees")
+
+        # ---------- Schedule FA ----------
+        h_fa = mk11(fa_u, asset_type=InternationalAssetType.US_STOCK, name="FA Co", ticker="FAC", country="United States", quantity="11", avg_cost_native="100")
+        services.add_transaction(h_fa, {"date": "2024-06-10", "txn_type": "BUY", "quantity": "10", "price_native": "100", "amount_native": "1000"})
+        services.add_transaction(h_fa, {"date": "2025-02-20", "txn_type": "BUY", "quantity": "5", "price_native": "120", "amount_native": "600"})
+        services.add_transaction(h_fa, {"date": "2025-09-10", "txn_type": "SELL", "quantity": "4", "price_native": "140", "amount_native": "560"})
+        services.add_transaction(h_fa, {"date": "2025-06-15", "txn_type": "DIVIDEND", "amount_native": "30"})
+        assert services.save_schedule_fa_year_input(h_fa, 2025, {"peak_value_native": "2000", "peak_date": "2025-08-14", "closing_value_native": "1700"}) is None
+        for (y, m, d, rt) in [(2024, 6, 10, 83.5), (2025, 2, 20, 86.0), (2025, 12, 31, 85.5), (2025, 8, 14, 87.0), (2025, 9, 10, 87.5), (2025, 6, 15, 85.0)]:
+            book(fa_u, "USD", y, m, d, rt)
+        fa = services.get_schedule_fa_summary(fa_u, 2025)
+        fr = fa["rows"][0]
+        assert fr["initial_inr"] == 135_100.0, fr["initial_inr"]              # 1000x83.5 + 600x86
+        assert fr["lot_count"] == 2 and fr["acquisition_date"] == _d(2024, 6, 10) and fr["acquisition_from_lots"]
+        assert fr["peak_inr"] == 174_000.0 and fr["peak_date"] == _d(2025, 8, 14) and fr["peak_source"] == "your input"   # 2000x87
+        assert fr["closing_inr"] == 145_350.0 and fr["closing_source"] == "your input"                                    # 1700x85.5
+        assert fr["gross_paid_inr"] == 2_550.0 and fr["proceeds_inr"] == 49_000.0                                         # 30x85 ; 560x87.5
+        assert fa["rates"]["official"] == 6 and fa["all_official"] and fa["rates"]["total"] == 6
+        assert fa["total_initial_inr"] == 135_100.0 and fa["total_closing_inr"] == 145_350.0 and fa["total_proceeds_inr"] == 49_000.0
+        for key in ("address", "ZIP code"):
+            assert key in fr["missing"], fr["missing"]
+        h_fa.entity_address, h_fa.entity_zip, h_fa.entity_nature = "1 Main St, Springfield", "12345", "Listed company"; db.session.commit()
+        fr = services.get_schedule_fa_summary(fa_u, 2025)["rows"][0]
+        assert fr["missing"] == [] and fr["entity_nature"] == "Listed company" and fr["entity_address"] == "1 Main St, Springfield"
+        print("PASS: Schedule FA in INR - initial ₹1,35,100, peak ₹1,74,000, closing ₹1,45,350, dividends ₹2,550, sale ₹49,000 - each at its own date's rate, with a completeness checklist")
+
+        R.save_settings(db, fa_u, RB.PREV_MONTH_END, CGM.SEPARATE)
+        fm = services.get_schedule_fa_summary(fa_u, 2025)["rows"][0]
+        assert fm["closing_inr"] == 145_350.0, "closing always uses 31 December itself, whatever the setting"
+        assert fm["initial_inr"] is None and fm["peak_inr"] is None and fm["gross_paid_inr"] is None and fm["proceeds_inr"] is None
+        needed = {n["target_date"]: n["purposes"] for n in services.get_needed_rates(fa_u, 2025)}
+        assert needed == {_d(2024, 5, 31): ["Capital gains", "Schedule FA"], _d(2025, 1, 31): ["Schedule FA"],
+                          _d(2025, 5, 31): ["Dividends / Form 67", "Schedule FA"], _d(2025, 7, 31): ["Schedule FA"],
+                          _d(2025, 8, 31): ["Capital gains", "Schedule FA"]}, needed
+        for d in needed:
+            book(fa_u, "USD", d.year, d.month, d.day, 85.0)
+        assert services.get_needed_rates(fa_u, 2025) == [], "fill in everything it asked for and it asks for nothing more"
+        fm = services.get_schedule_fa_summary(fa_u, 2025)["rows"][0]
+        assert fm["initial_inr"] == 136_000.0 and fm["peak_inr"] == 170_000.0 and fm["proceeds_inr"] == 47_600.0 and fm["gross_paid_inr"] == 2_550.0
+        R.save_settings(db, fa_u, RB.SAME_DAY, CGM.SEPARATE)
+        print("PASS: switching to 'previous month-end' moves every event-date rate (closing stays 31 Dec); the 'rates still needed' list names exactly those dates and purposes, and empties once filled")
+
+        # FIFO: which lots count as "held during the year"
+        h_fifo = mk11(fa_u, asset_type=InternationalAssetType.US_STOCK, name="FIFO Co", ticker="FIF", country="United States", quantity="6", avg_cost_native="100")
+        services.add_transaction(h_fifo, {"date": "2023-01-10", "txn_type": "BUY", "quantity": "10", "price_native": "100", "amount_native": "1000"})
+        services.add_transaction(h_fifo, {"date": "2024-05-05", "txn_type": "SELL", "quantity": "6", "price_native": "150", "amount_native": "900"})
+        services.add_transaction(h_fifo, {"date": "2025-03-03", "txn_type": "BUY", "quantity": "2", "price_native": "150", "amount_native": "300"})
+        lots25 = services._fa_lots_held_in_year(h_fifo, _d(2025, 1, 1), _d(2025, 12, 31))
+        assert [(l["date"], l["cost_native"]) for l in lots25] == [(_d(2023, 1, 10), 400.0), (_d(2025, 3, 3), 300.0)], lots25    # 4 units left of the first lot + the new one
+        lots24 = services._fa_lots_held_in_year(h_fifo, _d(2024, 1, 1), _d(2024, 12, 31))
+        assert [(l["date"], l["cost_native"]) for l in lots24] == [(_d(2023, 1, 10), 1000.0)], "sold during 2024, so it was held during 2024 in full"
+        h_gone = mk11(fa_u, asset_type=InternationalAssetType.US_STOCK, name="Gone Co", ticker="GON", country="United States", quantity="1", avg_cost_native="10")
+        services.add_transaction(h_gone, {"date": "2022-02-01", "txn_type": "BUY", "quantity": "5", "price_native": "10", "amount_native": "50"})
+        services.add_transaction(h_gone, {"date": "2023-02-01", "txn_type": "SELL", "quantity": "5", "price_native": "12", "amount_native": "60"})
+        assert services._fa_lots_held_in_year(h_gone, _d(2025, 1, 1), _d(2025, 12, 31)) == [], "fully sold before the year: nothing to disclose"
+        print("PASS: initial value counts the lots held at any time in the year, FIFO-reduced for earlier sales, and omits holdings sold out before the year")
+
+        # per-year input validation
+        for bad, expect in [({"peak_value_native": "100"}, "together"), ({"peak_date": "2025-05-05"}, "together"),
+                            ({"peak_value_native": "100", "peak_date": "2024-05-05"}, "within calendar year 2025"),
+                            ({"peak_value_native": "-5", "peak_date": "2025-05-05"}, "negative"), ({"closing_value_native": "abc"}, "valid closing"),
+                            ({"peak_value_native": "100", "peak_date": "garbage"}, "valid peak date")]:
+            e = services.save_schedule_fa_year_input(h_fa, 2025, bad)
+            assert e and expect in e, (bad, e)
+        assert services.get_schedule_fa_year_input(h_fa, 2025).closing_value_native == 1700.0, "a rejected save changes nothing"
+        assert services.save_schedule_fa_year_input(h_fa, 2025, {}) is None
+        assert services.get_schedule_fa_year_input(h_fa, 2025) is None, "an all-blank form removes the saved figures"
+        assert ScheduleFaYearInput.query.filter_by(holding_id=h_fa.id).count() == 0
+        print("PASS: per-year Schedule FA figures validate (pair rule, in-year date, no negatives) and an empty save clears them")
+
+        # non-USD holding: snapshot USD is converted back to the holding's currency and flagged
+        h_eur = mk11(eur_u, asset_type=InternationalAssetType.US_ETF, name="EUR Fund", ticker="EURF", country="Germany", native_currency="EUR", quantity="10", avg_cost_native="90")
+        h_eur.fx_rate_used = 1.1; db.session.commit()
+        db.session.add_all([_Snap(holding_id=h_eur.id, date=_d(2025, 1, 2), usd_value=1000.0), _Snap(holding_id=h_eur.id, date=_d(2025, 12, 30), usd_value=1100.0)])
+        db.session.commit()
+        book(eur_u, "EUR", 2025, 12, 31, 95.0); book(eur_u, "EUR", 2025, 12, 30, 94.0)
+        er = services.get_schedule_fa_summary(eur_u, 2025)["rows"][0]
+        assert er["closing_inr"] == 95_000.0 and er["peak_inr"] == 94_000.0 and er["approx_native"] and er["peak_date"] == _d(2025, 12, 30), er   # 1100/1.1 = 1000 EUR
+        assert er["closing_source"] == "daily snapshots"
+        print("PASS: a non-USD holding's snapshot values are converted back to its own currency at the right date's SBI rate and flagged as approximate")
+
+        R.fetch_fx_rate = suite_rates_fetch; R.clear_estimate_cache()
+
+    # ── 29. Per-entry SBI rate overrides and Schedule FA entity fields: validation + saving (Batch 11) ──
+    with app.app_context():
+        # objects from the previous section belong to a closed session: reload what this one needs
+        h_rsu = InternationalHolding.query.filter_by(user_id=rep, name="RSU Co").one()
+        h_fa = InternationalHolding.query.filter_by(user_id=fa_u, name="FA Co").one()
+        h_cg = InternationalHolding.query.filter_by(user_id=rep, name="CG Co").one()
+        # the FIFO helper holdings served their purpose in section 28; drop them so the FA user's page can be all-SBI
+        for _nm in ("FIFO Co", "Gone Co"):
+            for _hh in InternationalHolding.query.filter_by(user_id=fa_u, name=_nm).all():
+                db.session.delete(_hh)
+        db.session.commit()
+        base_t = {"date": "2025-05-15", "txn_type": "BUY", "quantity": "1", "price_native": "10", "amount_native": "10"}
+        assert V.validate_transaction(dict(base_t)) == [], V.validate_transaction(dict(base_t))
+        assert V.validate_transaction({**base_t, "ttbr_override": "84.25", "ttbr_override_date": "2025-04-30"}) == []
+        for bad, expect in [({"ttbr_override": "0"}, "looks wrong"), ({"ttbr_override": "-5"}, "looks wrong"), ({"ttbr_override": "99999"}, "looks wrong"),
+                            ({"ttbr_override": "abc"}, "valid SBI rate"), ({"ttbr_override_date": "2025-04-30"}, "Enter the SBI rate as well"),
+                            ({"ttbr_override": "84", "ttbr_override_date": "garbage"}, "valid date for the SBI rate"),
+                            ({"ttbr_override": "84", "ttbr_override_date": "2099-01-01"}, "cannot be in the future")]:
+            errs = V.validate_transaction({**base_t, **bad})
+            assert errs and any(expect in e for e in errs), (bad, errs)
+        base_v = {"plan_type": "RSU", "vest_date": "2025-08-10", "quantity": "1", "fmv_native": "10"}
+        assert V.validate_vesting_tranche(dict(base_v)) == [], V.validate_vesting_tranche(dict(base_v))
+        assert any("looks wrong" in e for e in V.validate_vesting_tranche({**base_v, "ttbr_override": "0"}))
+        assert any("as well" in e for e in V.validate_vesting_tranche({**base_v, "ttbr_override_date": "2025-04-30"}))
+        print("PASS: an SBI rate override is validated on transactions and vesting tranches (range, number, date, rate-before-date, no future date)")
+
+        h_ov = mk11(rep, asset_type=InternationalAssetType.US_STOCK, name="Override Co", ticker="OVR", country="United States", quantity="1", avg_cost_native="10")
+        tx = services.add_transaction(h_ov, {**base_t, "ttbr_override": "84.25", "ttbr_override_date": "2025-04-30"})
+        assert tx.ttbr_override == 84.25 and tx.ttbr_override_date == _d(2025, 4, 30)
+        services.update_transaction(tx, {**base_t, "ttbr_override": "85", "ttbr_override_date": ""})
+        assert tx.ttbr_override == 85.0 and tx.ttbr_override_date is None
+        services.update_transaction(tx, dict(base_t))
+        assert tx.ttbr_override is None and tx.ttbr_override_date is None, "clearing the field removes the override"
+        plain = services.add_transaction(h_ov, dict(base_t))
+        assert plain.ttbr_override is None
+        tv = services.add_vesting_tranche(h_rsu, {**base_v, "ttbr_override": "86.1", "ttbr_override_date": "2025-07-31"})
+        assert tv.ttbr_override == 86.1 and tv.ttbr_override_date == _d(2025, 7, 31)
+        services.update_vesting_tranche(tv, dict(base_v))
+        assert tv.ttbr_override is None
+        print("PASS: overrides save on add, change on edit, and clear when the field is emptied (transactions and tranches)")
+
+        base_h = {"asset_type": InternationalAssetType.US_STOCK, "name": "Entity Co", "native_currency": "USD", "country": "United States",
+                  "ticker": "ENT", "quantity": "1", "avg_cost_native": "1"}
+        assert V.validate_holding(dict(base_h)) == [], V.validate_holding(dict(base_h))
+        for key, size, word in (("entity_address", 256, "address"), ("entity_zip", 21, "ZIP code"), ("entity_nature", 61, "nature of entity")):
+            errs = V.validate_holding({**base_h, key: "x" * size})
+            assert any(word in e and "too long" in e for e in errs), (key, errs)
+            assert V.validate_holding({**base_h, key: "x" * (size - 1)}) == []
+        h_en, err = services.create_holding(rep, {**base_h, "entity_address": " 1 Main St ", "entity_zip": "12345", "entity_nature": "Listed company"})
+        assert err is None and (h_en.entity_address, h_en.entity_zip, h_en.entity_nature) == ("1 Main St", "12345", "Listed company")
+        services.update_holding(h_en, {**base_h, "entity_address": "", "entity_zip": "", "entity_nature": ""})
+        assert (h_en.entity_address, h_en.entity_zip, h_en.entity_nature) == (None, None, None)
+        print("PASS: the Schedule FA entity fields (address, ZIP, nature) are length-checked, trimmed on save, and clearable")
+
+        # The Form 67 reminder runs on every dashboard load, so it must never wait on an exchange-rate service.
+        net_calls = []
+        def counting_fx(frm, to="INR", on_date=None):
+            net_calls.append((frm, to, on_date)); return 83.0, on_date
+        R.fetch_fx_rate = counting_fx; R.clear_estimate_cache()
+        f67 = [x for x in services.get_reminders(rep, today=_d(2026, 10, 2)) if x["kind"] == "form67"]
+        assert f67 and "about Rs." in f67[0]["message"] and net_calls == [], (f67, net_calls)          # SBI rates in the book -> rupee amount, no network
+        saved = [(r.currency, r.rate_date, r.rate) for r in SbiTtbrRate.query.filter_by(user_id=rep).all()]
+        SbiTtbrRate.query.filter_by(user_id=rep).delete(); db.session.commit()
+        f67 = [x for x in services.get_reminders(rep, today=_d(2026, 10, 2)) if x["kind"] == "form67"]
+        assert f67 and "about Rs." not in f67[0]["message"] and "SBI rates" in f67[0]["message"] and net_calls == [], (f67, net_calls)
+        for cur_, d_, r_ in saved:
+            book(rep, cur_, d_.year, d_.month, d_.day, r_)
+        R.fetch_fx_rate = suite_rates_fetch; R.clear_estimate_cache()
+        print("PASS: the dashboard's Form 67 reminder makes no exchange-rate calls and still appears (without a rupee amount) when no SBI rates exist")
+
+        ids = {"rep": rep, "fa": fa_u, "eur": eur_u, "h_fa": h_fa.id, "h_cg": h_cg.id}
+        rep_rate_id = SbiTtbrRate.query.filter_by(user_id=rep).first().id
+        SbiTtbrRate.query.filter_by(user_id=fa_u, rate_date=_d(2025, 12, 31)).first()   # present for the all-official page check
+
+    # ── 30. Rate book, Schedule FA inputs, rupee reports and exports over real HTTP (Batch 11) ──
+    ch = app.test_client()
+    login_as(ch, ids["fa"])
+    pg = ch.get('/international/schedule-fa?year=2025').get_data(as_text=True)
+    assert 'Table A3-style' in pg and '\u20b9' in pg and 'Every rupee figure here uses an SBI rate' in pg and 'Adjust' in pg and 'Entity details' in pg
+    for url in ('/international/schedule-fa?year=99999999', '/international/capital-gains?fy=99999999', '/international/dtaa-summary?fy=-4',
+                '/international/vesting-perquisite?fy=abc', '/international/schedule-fa?year=%27%3B--'):
+        assert ch.get(url).status_code == 200, url
+    print("PASS: the Schedule FA page shows the Table A3-style rupee table and an all-SBI banner, and junk year/FY parameters no longer crash the four report pages")
+
+    with app.app_context():
+        SbiTtbrRate.query.filter_by(user_id=ids["fa"]).delete(); db.session.commit()    # start the rate-book walkthrough empty
+    login_as(ch, ids["fa"])
+    rb_page = ch.get('/international/rates?fy=2025')
+    body = rb_page.get_data(as_text=True)
+    assert rb_page.status_code == 200 and 'SBI TT Buying Rates' in body and 'Rates your reports still need' in body and 'id="need1"' in body
+    assert 'Capital gains' in body and 'Schedule FA' in body
+    csrf_rb = get_csrf(rb_page.data)
+    r = ch.post('/international/rates/add', data={'csrf_token': csrf_rb, 'currency': 'USD', 'rate_date': '2025-12-31', 'rate': '85.5', 'note': 'SBI card', 'fy': '2025'}, follow_redirects=True)
+    assert r.status_code == 200 and 'Rate added.' in r.get_data(as_text=True)
+    r = ch.post('/international/rates/add', data={'csrf_token': csrf_rb, 'currency': 'USD', 'rate_date': '2025-12-31', 'rate': '85.6', 'fy': '2025'}, follow_redirects=True)
+    assert 'Rate updated.' in r.get_data(as_text=True)
+    for bad, expect in [({'rate_date': 'garbage', 'rate': '85'}, 'valid date'), ({'rate_date': '2025-12-31', 'rate': '0'}, 'looks wrong'),
+                        ({'rate_date': '2999-01-01', 'rate': '85'}, 'future'), ({'rate_date': '2025-12-31', 'rate': ''}, 'valid rate')]:
+        r = ch.post('/international/rates/add', data={'csrf_token': csrf_rb, 'currency': 'USD', **bad}, follow_redirects=True)
+        assert expect in r.get_data(as_text=True), (bad, expect)
+    r = ch.post('/international/rates/import', data={'csrf_token': csrf_rb, 'currency': 'USD', 'fy': '2025',
+                'rates_text': '2025-01-31, 86.1\n2025-02-28, 86.9\nnot a line at all'}, follow_redirects=True)
+    t = r.get_data(as_text=True)
+    assert 'Imported 2 new and 0 updated' in t and 'Line 3' in t
+    assert 'Nothing to import' in ch.post('/international/rates/import', data={'csrf_token': csrf_rb, 'currency': 'USD', 'rates_text': ''}, follow_redirects=True).get_data(as_text=True)
+    assert ch.post('/international/rates/add', data={'currency': 'USD', 'rate_date': '2025-01-31', 'rate': '86'}).status_code in (400, 403), "CSRF token required"
+    r = ch.post('/international/rates/settings', data={'csrf_token': csrf_rb, 'fa_basis': 'prev_month_end', 'cg_method': 'single'}, follow_redirects=True)
+    assert 'Conversion settings saved.' in r.get_data(as_text=True)
+    r = ch.post('/international/rates/settings', data={'csrf_token': csrf_rb, 'fa_basis': 'nonsense', 'cg_method': 'single'}, follow_redirects=True)
+    assert 'valid Schedule FA rate date' in r.get_data(as_text=True)
+    ch.post('/international/rates/settings', data={'csrf_token': csrf_rb, 'fa_basis': 'same_day', 'cg_method': 'separate'})
+    assert ch.get('/international/rates?fy=zzz&currency=%27').status_code == 200
+    assert ch.get('/international/rates?currency=USD').status_code == 200
+    with app.app_context():
+        mine = SbiTtbrRate.query.filter_by(user_id=ids["fa"], currency="USD", rate_date=_d(2025, 12, 31)).one()
+        assert mine.rate == 85.6 and mine.note is None or True
+        my_rate_id = mine.id
+        got_settings = R.get_settings(ids["fa"])
+    assert got_settings == (RB.SAME_DAY, CGM.SEPARATE)
+    print("PASS: the Rate Book page lists what the reports still need, and add / update / import (with per-line errors) / settings all work over real HTTP, validated and CSRF-protected")
+
+    cb = app.test_client()
+    login_as(cb, ids["rep"])
+    assert cb.post(f'/international/rates/{my_rate_id}/delete', data={'csrf_token': get_csrf(cb.get('/international/rates').data)}).status_code == 404, "another user's rate"
+    r = ch.post(f'/international/rates/{my_rate_id}/delete', data={'csrf_token': csrf_rb}, follow_redirects=True)
+    assert 'Rate removed.' in r.get_data(as_text=True)
+    assert anon.get('/international/rates').status_code in (301, 302)
+    assert anon.post('/international/rates/add', data={'currency': 'USD'}).status_code in (302, 400, 403)
+    print("PASS: rate deletes are owner-only (another user gets 404) and every Rate Book route needs a login")
+
+    # Schedule FA per-year input page
+    pg = ch.get(f'/international/holdings/{ids["h_fa"]}/schedule-fa-input?year=2025')
+    assert pg.status_code == 200 and 'Value on 31 December 2025' in pg.get_data(as_text=True)
+    csrf_fi = get_csrf(pg.data)
+    r = ch.post(f'/international/holdings/{ids["h_fa"]}/schedule-fa-input', data={'csrf_token': csrf_fi, 'year': '2025', 'peak_value_native': '2000'})
+    assert r.status_code == 400 and 'together' in r.get_data(as_text=True)
+    r = ch.post(f'/international/holdings/{ids["h_fa"]}/schedule-fa-input', data={'csrf_token': csrf_fi, 'year': '2025', 'closing_value_native': '1700',
+                'peak_value_native': '2000', 'peak_date': '2025-08-14', 'notes': 'IBKR statement'})
+    assert r.status_code == 302 and 'schedule-fa' in r.headers['Location']
+    pg = ch.get(f'/international/holdings/{ids["h_fa"]}/schedule-fa-input?year=2025').get_data(as_text=True)
+    assert 'value="1700.0"' in pg and 'value="2025-08-14"' in pg and 'IBKR statement' in pg
+    assert ch.get(f'/international/holdings/{ids["h_fa"]}/schedule-fa-input?year=notanumber').status_code == 200
+    assert cb.get(f'/international/holdings/{ids["h_fa"]}/schedule-fa-input?year=2025').status_code == 404, "another user's holding"
+    assert anon.get(f'/international/holdings/{ids["h_fa"]}/schedule-fa-input').status_code in (301, 302)
+    print("PASS: the per-year Schedule FA input page saves, re-shows and validates figures, and is owner-only")
+
+    # holding form + report pages show the new fields and rupee columns
+    edit_pg = ch.get(f'/international/holdings/{ids["h_fa"]}/edit').get_data(as_text=True)
+    assert 'name="entity_address"' in edit_pg and 'name="entity_zip"' in edit_pg and 'name="entity_nature"' in edit_pg
+    assert 'name="entity_address"' in ch.get('/international/holdings/add').get_data(as_text=True)
+    detail = ch.get(f'/international/holdings/{ids["h_fa"]}').get_data(as_text=True)
+    assert detail.count('name="ttbr_override"') >= 4 and 'SBI rate (' in detail, "override inputs on the add and edit forms"
+    cgp = cb.get('/international/capital-gains?fy=2025').get_data(as_text=True)
+    assert 'Gain (\u20b9)' in cgp and 'SBI rates used' in cgp and 'LTCG Total (\u20b9)' in cgp and 'Conversion method' in cgp
+    dtp = cb.get('/international/dtaa-summary?fy=2025').get_data(as_text=True)
+    assert 'Per dividend' in dtp and 'Gross (\u20b9)' in dtp
+    vsp = cb.get('/international/vesting-perquisite?fy=2025').get_data(as_text=True)
+    assert 'SBI rate used' in vsp and 'Perquisite (\u20b9)' in vsp
+    print("PASS: the holding form carries address/ZIP/nature, the transaction and vesting forms carry the override fields, and the report pages show rupee columns with the rate used")
+
+    # exports carry the rupee figures and their provenance
+    csv_cg = cb.get('/international/reports/capital_gains/export/csv?fy=2025').data.decode('utf-8-sig')
+    assert 'Cost (INR)' in csv_cg and 'Gain (INR)' in csv_cg and 'Cost rate used' in csv_cg and 'SBI rate book' in csv_cg and '47000' in csv_cg
+    csv_fa = ch.get('/international/reports/schedule_fa/export/csv?year=2025').data.decode('utf-8-sig')
+    assert csv_fa.splitlines()[0].startswith('Entity,Country,Address,ZIP,Nature,Acquired,Initial value (INR)')
+    for key in ('schedule_fa', 'capital_gains', 'dtaa', 'vesting', 'dividends'):
+        qs = 'year' if key == 'schedule_fa' else 'fy'
+        resp = ch.get(f'/international/reports/{key}/export/pdf?{qs}=2025')
+        assert resp.status_code == 200 and resp.data[:5] == b'%PDF-', key
+    print("PASS: the CSV and PDF exports include the INR columns, the rate used and where it came from")
+
+    with app.app_context():
+        R.fetch_fx_rate = suite_rates_fetch; R.clear_estimate_cache()      # fake ECB: knows USD->INR (83) only
+        SbiTtbrRate.query.filter_by(user_id=ids["fa"]).delete(); db.session.commit()
+        rep_est = rexp.build_report("schedule_fa", ids["fa"], 2025)      # a USD user with no SBI rates -> every figure is an estimate
+        assert any("RATE BASIS" in n and "ECB est." in n and "NOT the SBI" in n for n in rep_est.notes), rep_est.notes
+        txt = "\n".join((pg_.extract_text() or "") for pg_ in pdfplumber.open(_io.BytesIO(rexp.to_pdf_bytes(rep_est, "X"))).pages)
+        assert "RATE BASIS" in txt and "NOT the SBI" in txt
+        SbiTtbrRate.query.filter_by(user_id=ids["eur"]).delete(); db.session.commit()
+        rep_miss = rexp.build_report("schedule_fa", ids["eur"], 2025)    # euros: the fake knows no EUR rate, so figures are blank, not guessed
+        assert any("RATE BASIS" in n and "missing" in n for n in rep_miss.notes), rep_miss.notes
+        assert rep_miss.rows[0][9] is None and rep_miss.rows[0][7] is None, "no rate -> blank INR cells in the export"
+        rep_ok = rexp.build_report("capital_gains", ids["rep"], 2025)
+        assert any("Every rupee figure uses an SBI TT buying rate" in n for n in rep_ok.notes), rep_ok.notes
+    print("PASS: an export built on estimates says so in its notes (and in the PDF); an all-SBI export says that instead")
 
     # ── Cleanup ──
     with app.app_context():

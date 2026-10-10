@@ -84,7 +84,38 @@ def validate_holding(data):
         # to accidentally paste a full account number into.
         errors.append("Please enter only the last few digits of the account number, not the full number.")
 
+    # Batch 11 — Schedule FA Table A3 fields (all optional, length-checked here
+    # because the database columns are bounded).
+    for key, limit, label in (("entity_address", 255, "address"), ("entity_zip", 20, "ZIP code"),
+                              ("entity_nature", 60, "nature of entity")):
+        if len((data.get(key) or "").strip()) > limit:
+            errors.append(f"The {label} is too long (maximum {limit} characters).")
+
     return errors
+
+
+def _validate_ttbr_override(data, errors):
+    """Batch 11 (Oct 2026) — optional per-event SBI TT buying rate
+    (INR per 1 unit of the holding's currency) and the date it belongs to.
+    Shared by transactions and vesting tranches."""
+    raw = (data.get("ttbr_override") or "").strip()
+    date_raw = (data.get("ttbr_override_date") or "").strip()
+    if raw:
+        try:
+            rate = float(raw)
+            if not (0.001 <= rate <= 5000):
+                errors.append("The SBI rate looks wrong; enter rupees per 1 unit of the currency (for example 84.25).")
+        except ValueError:
+            errors.append("Please enter a valid SBI rate, or leave it blank.")
+        if date_raw:
+            d = _parse_date(date_raw)
+            if not d:
+                errors.append("Please enter a valid date for the SBI rate, or leave it blank.")
+            elif d > today_ist():
+                errors.append("The SBI rate's date cannot be in the future.")
+    elif date_raw:
+        errors.append("Enter the SBI rate as well, or clear its date.")
+
 
 
 def validate_transaction(data):
@@ -144,6 +175,7 @@ def validate_transaction(data):
         elif withheld_raw:
             errors.append("Enter the gross dividend amount before entering tax withheld.")
 
+    _validate_ttbr_override(data, errors)
     return errors
 
 
@@ -223,6 +255,7 @@ def validate_vesting_tranche(data):
         except ValueError:
             errors.append("Please enter a valid purchase price.")
 
+    _validate_ttbr_override(data, errors)
     return errors
 
 

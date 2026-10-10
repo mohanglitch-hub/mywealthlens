@@ -27,6 +27,7 @@ from international_centre.models import (
 )
 from international_centre import services
 from international_centre import export as report_export
+from international_centre import rates as sbi_rates
 from international_centre.utils import (
     format_date, COUNTRIES, fy_bounds, asset_icon,
     save_document_file, delete_document_file, secure_file_path,
@@ -460,11 +461,7 @@ def delete_remittance(remit_id):
 @international_bp.route("/schedule-fa")
 @login_required
 def schedule_fa():
-    year_raw = request.args.get("year")
-    try:
-        calendar_year = int(year_raw) if year_raw else today_ist().year
-    except ValueError:
-        calendar_year = today_ist().year
+    calendar_year = report_export.clamp_period(request.args.get("year"), "year")
 
     summary = services.get_schedule_fa_summary(current_user.id, calendar_year)
     return render_template(
@@ -478,12 +475,8 @@ def schedule_fa():
 @international_bp.route("/dtaa-summary")
 @login_required
 def dtaa_summary():
-    fy_raw = request.args.get("fy")
     default_fy_start_year = fy_bounds(today_ist())[0].year
-    try:
-        fy_start_year = int(fy_raw) if fy_raw else default_fy_start_year
-    except ValueError:
-        fy_start_year = default_fy_start_year
+    fy_start_year = report_export.clamp_period(request.args.get("fy"), "fy")
 
     summary = services.get_dtaa_summary(current_user.id, fy_start_year)
     return render_template(
@@ -497,12 +490,8 @@ def dtaa_summary():
 @international_bp.route("/capital-gains")
 @login_required
 def capital_gains():
-    fy_raw = request.args.get("fy")
     default_fy_start_year = fy_bounds(today_ist())[0].year
-    try:
-        fy_start_year = int(fy_raw) if fy_raw else default_fy_start_year
-    except ValueError:
-        fy_start_year = default_fy_start_year
+    fy_start_year = report_export.clamp_period(request.args.get("fy"), "fy")
 
     summary = services.get_capital_gains_summary(current_user.id, fy_start_year)
     return render_template(
@@ -557,12 +546,8 @@ def delete_vesting_tranche(tranche_id):
 @international_bp.route("/vesting-perquisite")
 @login_required
 def vesting_perquisite():
-    fy_raw = request.args.get("fy")
     default_fy_start_year = fy_bounds(today_ist())[0].year
-    try:
-        fy_start_year = int(fy_raw) if fy_raw else default_fy_start_year
-    except ValueError:
-        fy_start_year = default_fy_start_year
+    fy_start_year = report_export.clamp_period(request.args.get("fy"), "fy")
 
     summary = services.get_vesting_perquisite_summary(current_user.id, fy_start_year)
     return render_template(
@@ -670,6 +655,111 @@ def reminder_undo():
         abort(400)
     services.unacknowledge_reminder(current_user.id, key)
     return _reminder_redirect()
+
+
+# ── SBI rate book (Batch 11, Oct 2026) ────────────────────────────────
+
+def _rates_redirect(**extra):
+    args = {k: v for k, v in (("fy", request.form.get("fy") or request.args.get("fy")),
+                              ("currency", request.form.get("filter_currency") or request.args.get("currency")))
+            if v}
+    args.update(extra)
+    return redirect(url_for("international_centre.rate_book", **args))
+
+
+@international_bp.route("/rates")
+@login_required
+def rate_book():
+    default_fy = fy_bounds(today_ist())[0].year
+    fy = report_export.clamp_period(request.args.get("fy"), "fy")
+    currency = (request.args.get("currency") or "").upper().strip()
+    if currency not in SUPPORTED_CURRENCIES or currency == "INR":
+        currency = ""
+    mine = sorted({h.native_currency for h in InternationalHolding.query.filter_by(user_id=current_user.id).all()} - {"INR"})
+    others = sorted(set(SUPPORTED_CURRENCIES) - set(mine) - {"INR"})
+    return render_template(
+        "international_centre/rates.html",
+        settings=sbi_rates.get_settings(current_user.id),
+        basis_labels=sbi_rates.BASIS_LABELS, method_labels=sbi_rates.METHOD_LABELS,
+        book=sbi_rates.list_rates(current_user.id, currency or None),
+        book_currencies=sorted({r.currency for r in sbi_rates.list_rates(current_user.id)}),
+        needed=services.get_needed_rates(current_user.id, fy),
+        my_currencies=mine, other_currencies=others, filter_currency=currency,
+        fy=fy, current_fy_start_year=default_fy, max_gap_days=sbi_rates.MAX_GAP_DAYS,
+        today=today_ist().isoformat(), format_date=format_date,
+    )
+
+
+@international_bp.route("/rates/settings", methods=["POST"])
+@login_required
+def rate_settings_save():
+    from models import db
+    err = sbi_rates.save_settings(db, current_user.id, request.form.get("fa_basis", ""), request.form.get("cg_method", ""))
+    flash(err or "Conversion settings saved.", "error" if err else "success")
+    return _rates_redirect()
+
+
+@international_bp.route("/rates/add", methods=["POST"])
+@login_required
+def rate_add():
+    from models import db
+    rate_date = sbi_rates.parse_any_date(request.form.get("rate_date", ""))
+    rate = sbi_rates.parse_rate_value(request.form.get("rate", ""))
+    errors, action = sbi_rates.save_rate(db, current_user.id, request.form.get("currency", ""), rate_date, rate,
+                                         request.form.get("note"))
+    if errors:
+        for e in errors:
+            flash(e, "error")
+    else:
+        flash(f"Rate {action}.", "success")
+    return _rates_redirect()
+
+
+@international_bp.route("/rates/import", methods=["POST"])
+@login_required
+def rate_import():
+    from models import db
+    result = sbi_rates.import_rates(db, current_user.id, request.form.get("currency", ""), request.form.get("rates_text", ""))
+    if result["added"] or result["updated"]:
+        flash(f"Imported {result['added']} new and {result['updated']} updated rate(s).", "success")
+    for line, msg in result["errors"][:8]:
+        flash((f"Line {line}: " if line else "") + msg, "error")
+    if len(result["errors"]) > 8:
+        flash(f"…and {len(result['errors']) - 8} more problem(s) not shown.", "error")
+    if not (result["added"] or result["updated"] or result["errors"]):
+        flash("Nothing to import - paste one 'date, rate' pair per line.", "error")
+    return _rates_redirect()
+
+
+@international_bp.route("/rates/<int:rate_id>/delete", methods=["POST"])
+@login_required
+def rate_delete(rate_id):
+    from models import db
+    if not sbi_rates.delete_rate(db, current_user.id, rate_id):
+        abort(404)
+    flash("Rate removed.", "success")
+    return _rates_redirect()
+
+
+# ── Schedule FA per-year inputs (Batch 11) ────────────────────────────
+
+@international_bp.route("/holdings/<int:holding_id>/schedule-fa-input", methods=["GET", "POST"])
+@login_required
+def schedule_fa_input(holding_id):
+    holding = _get_holding_or_404(holding_id)
+    calendar_year = report_export.clamp_period(request.values.get("year"), "year")
+    existing = services.get_schedule_fa_year_input(holding, calendar_year)
+    if request.method == "POST":
+        err = services.save_schedule_fa_year_input(holding, calendar_year, request.form)
+        if err:
+            flash(err, "error")
+            return render_template("international_centre/schedule_fa_input.html", holding=holding,
+                                   calendar_year=calendar_year, data=request.form, existing=existing,
+                                   asset_icon=asset_icon), 400
+        flash(f"Schedule FA figures for {calendar_year} saved.", "success")
+        return redirect(url_for("international_centre.schedule_fa", year=calendar_year))
+    return render_template("international_centre/schedule_fa_input.html", holding=holding,
+                           calendar_year=calendar_year, data={}, existing=existing, asset_icon=asset_icon)
 
 
 # ── Documents (Batch 9.3, Sep 2026) ──────────────────────────────────

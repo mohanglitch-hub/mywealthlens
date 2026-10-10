@@ -35,14 +35,23 @@
   {% endif %}
 </div>
 
+{% set strip_counts = summary.rates %}{% set strip_badge = summary.rates_badge %}{% set strip_fy = summary.fy_start.year %}
+{% include "international_centre/_rate_strip.html" %}
 <div class="ic-card" style="margin-bottom:20px; display:flex; gap:32px; flex-wrap:wrap;">
   <div>
-    <div style="color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">LTCG Total</div>
-    <div style="font-size:1.3rem; font-weight:700; color:var(--text);">${{ '{:,.2f}'.format(summary.ltcg_total_usd) }}</div>
+    <div style="color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">LTCG Total (₹)</div>
+    <div style="font-size:1.3rem; font-weight:700; color:var(--text);">₹{{ '{:,.0f}'.format(summary.ltcg_total_inr) }}</div>
+    <div class="rs-sub">≈ ${{ '{:,.2f}'.format(summary.ltcg_total_usd) }} tracking</div>
   </div>
   <div>
-    <div style="color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">STCG Total</div>
-    <div style="font-size:1.3rem; font-weight:700; color:var(--text);">${{ '{:,.2f}'.format(summary.stcg_total_usd) }}</div>
+    <div style="color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">STCG Total (₹)</div>
+    <div style="font-size:1.3rem; font-weight:700; color:var(--text);">₹{{ '{:,.0f}'.format(summary.stcg_total_inr) }}</div>
+    <div class="rs-sub">≈ ${{ '{:,.2f}'.format(summary.stcg_total_usd) }} tracking</div>
+  </div>
+  <div style="flex:1; min-width:240px;">
+    <div style="color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Conversion method</div>
+    <div style="font-size:0.85rem; color:var(--text);">{{ summary.cg_method_label }}</div>
+    <a href="{{ url_for('international_centre.rate_book', fy=summary.fy_start.year) }}" class="ic-link" style="font-size:0.78rem;">Change on the SBI rate book page</a>
   </div>
 </div>
 
@@ -53,7 +62,7 @@
       <thead>
         <tr>
           <th>Holding</th><th>Sold</th><th>Acquired</th><th>Qty</th>
-          <th>Cost Basis</th><th>Proceeds</th><th>Gain</th><th>Gain (USD approx.)</th><th>Classification</th>
+          <th>Cost Basis</th><th>Proceeds</th><th>Gain</th><th>Cost (₹)</th><th>Proceeds (₹)</th><th>Gain (₹)</th><th>SBI rates used</th><th>Classification</th>
         </tr>
       </thead>
       <tbody>
@@ -66,7 +75,13 @@
           <td>{{ row.currency }} {{ '{:,.2f}'.format(row.cost_basis_native) }}</td>
           <td>{{ row.currency }} {{ '{:,.2f}'.format(row.proceeds_native) }}</td>
           <td>{{ row.currency }} {{ '{:,.2f}'.format(row.gain_native) }}</td>
-          <td>{{ '$' + '{:,.2f}'.format(row.gain_usd) if row.gain_usd is not none else '—' }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.cost_inr) if row.cost_inr is not none else '—' }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.proceeds_inr) if row.proceeds_inr is not none else '—' }}</td>
+          <td style="font-weight:600;">{{ '₹' + '{:,.0f}'.format(row.gain_inr) if row.gain_inr is not none else '—' }}</td>
+          <td class="rs-sub">
+            {% if row.acq_rate %}cost ₹{{ '%.4f'|format(row.acq_rate) }} · {{ row.acq_rate_label }}<br/>{% elif row.acq_rate_source == 'missing' %}cost: <span class="rs-pill rs-pill-miss">{{ row.acq_rate_label }}</span><br/>{% endif %}
+            {% if row.sell_rate %}sale ₹{{ '%.4f'|format(row.sell_rate) }} · {{ row.sell_rate_label }}{% else %}sale: <span class="rs-pill rs-pill-miss">{{ row.sell_rate_label }}</span>{% endif %}
+          </td>
           <td>
             {% if row.classification == 'LTCG' %}<span class="ic-badge-ok">LTCG</span>{% else %}<span class="ic-badge-warning">STCG</span>{% endif %}
           </td>

@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}SBI Rate Book — International Investing — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page">
+<div class="ic-header">
+  <div>
+    <h1 class="ic-title">SBI TT Buying Rates</h1>
+    <p class="ic-subtitle">Your own rate book. Tax figures for foreign assets must use the State Bank of India's telegraphic-transfer <em>buying</em> rate, not a market rate. Enter the rates once and every report picks them up.</p>
+  </div>
+  <a href="{{ url_for('international_centre.dashboard') }}" class="ic-link">Back to International Investing</a>
+</div>
+
+<div class="rb-explain">
+  <strong>How a rate is chosen, in order:</strong>
+  a rate you typed on that transaction → this rate book → an ECB market estimate (always labelled <em>not SBI</em>) → left blank.
+  A rate-book entry counts for a date if it is dated that day or up to {{ max_gap_days }} days earlier (weekends and bank holidays).
+  This is a calculator, not tax advice: confirm the figures and conventions with your CA.
+</div>
+
+<div class="ic-card">
+  <div class="section-label">Conversion conventions</div>
+  <form method="POST" action="{{ url_for('international_centre.rate_settings_save') }}" class="rb-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="fy" value="{{ fy }}" />
+    <div class="form-group">
+      <label for="fa_basis">Schedule FA: rate date for acquisition, peak, dividends and sales</label>
+      <select name="fa_basis" id="fa_basis">
+        {% for key, label in basis_labels.items() %}<option value="{{ key }}" {{ 'selected' if key == settings.fa_basis }}>{{ label }}</option>{% endfor %}
+      </select>
+      <small>The form's instructions say the rate on the date of each event. The closing value always uses 31 December itself.</small>
+    </div>
+    <div class="form-group">
+      <label for="cg_method">Capital gains in INR</label>
+      <select name="cg_method" id="cg_method">
+        {% for key, label in method_labels.items() %}<option value="{{ key }}" {{ 'selected' if key == settings.cg_method }}>{{ label }}</option>{% endfor %}
+      </select>
+      <small>Practitioners differ on this. It is one of the questions in the CA brief.</small>
+    </div>
+    <div class="rb-actions"><button type="submit" class="iu-btn iu-btn-primary">Save conventions</button></div>
+  </form>
+  <p class="rb-note">Dividends, Form 67 and the RSU perquisite always use the last day of the previous month, the Rule 115 convention for income and salary.</p>
+</div>
+
+<div class="ic-card">
+  <div class="rb-head">
+    <div class="section-label" style="margin-bottom:0;">Rates your reports still need</div>
+    <form method="GET" class="rb-year">
+      <select name="fy" onchange="this.form.submit()" aria-label="Financial year">
+        {% for y in range(current_fy_start_year, current_fy_start_year - 6, -1) %}
+        <option value="{{ y }}" {{ 'selected' if y == fy }}>FY {{ y }}-{{ '%02d' % ((y + 1) % 100) }}</option>
+        {% endfor %}
+      </select>
+      {% if filter_currency %}<input type="hidden" name="currency" value="{{ filter_currency }}" />{% endif %}
+    </form>
+  </div>
+  {% if needed %}
+  <p class="rb-note">For FY {{ fy }}-{{ '%02d' % ((fy + 1) % 100) }} (and Schedule FA for calendar year {{ fy }}). Type each SBI rate and press Save. Reports then show it as an SBI rate.</p>
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead><tr><th>Currency</th><th>Rate date</th><th>Used for</th><th class="ic-num">SBI TT buying rate (₹ per 1)</th><th></th></tr></thead>
+      <tbody>
+        {% for n in needed %}
+        <tr>
+          <td><strong>{{ n.currency }}</strong></td>
+          <td>{{ format_date(n.target_date) }}</td>
+          <td>{{ n.purposes|join(', ') }}</td>
+          <td class="ic-num"><input type="number" step="any" min="0" name="rate" form="need{{ loop.index }}" required class="rb-inline" aria-label="Rate for {{ n.currency }} on {{ n.target_date.isoformat() }}" /></td>
+          <td>
+            <form id="need{{ loop.index }}" method="POST" action="{{ url_for('international_centre.rate_add') }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="currency" value="{{ n.currency }}" />
+              <input type="hidden" name="rate_date" value="{{ n.target_date.isoformat() }}" />
+              <input type="hidden" name="note" value="entered from SBI card" />
+              <input type="hidden" name="fy" value="{{ fy }}" />
+              <button type="submit" class="iu-btn iu-btn-sm">Save</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="rb-ok">✓ Nothing missing for this year. Every rate the reports need is covered by your rate book or typed on a transaction.</p>
+  {% endif %}
+</div>
+
+<div class="rb-two">
+  <div class="ic-card">
+    <div class="section-label">Add or update one rate</div>
+    <form method="POST" action="{{ url_for('international_centre.rate_add') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <input type="hidden" name="fy" value="{{ fy }}" />
+      <div class="form-group"><label>Currency</label>
+        <select name="currency" required>
+          {% for c in my_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          {% if my_currencies and other_currencies %}<option disabled>──────</option>{% endif %}
+          {% for c in other_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select></div>
+      <div class="form-group"><label>Date the rate is for</label><input type="date" name="rate_date" max="{{ today }}" required /></div>
+      <div class="form-group"><label>SBI TT buying rate (₹ per 1 unit)</label><input type="number" step="any" min="0" name="rate" required placeholder="e.g. 84.25" /></div>
+      <div class="form-group"><label>Note (optional)</label><input type="text" name="note" maxlength="100" placeholder="e.g. SBI card 31 Aug 2025" /></div>
+      <button type="submit" class="iu-btn iu-btn-primary">Save rate</button>
+    </form>
+  </div>
+  <div class="ic-card">
+    <div class="section-label">Paste many at once</div>
+    <form method="POST" action="{{ url_for('international_centre.rate_import') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+      <input type="hidden" name="fy" value="{{ fy }}" />
+      <div class="form-group"><label>Currency</label>
+        <select name="currency" required>
+          {% for c in my_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          {% if my_currencies and other_currencies %}<option disabled>──────</option>{% endif %}
+          {% for c in other_currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select></div>
+      <div class="form-group"><label>One "date, rate" per line</label>
+        <textarea name="rates_text" rows="7" placeholder="2025-07-31, 85.45&#10;31-08-2025, 84.20&#10;30/09/2025, 83.90"></textarea>
+        <small>Dates as 2025-07-31, 31-08-2025, 31/08/2025 or 31 Aug 2025. A rate already saved for a date is updated. Good lines are saved even if others fail.</small></div>
+      <button type="submit" class="iu-btn iu-btn-primary">Import rates</button>
+    </form>
+  </div>
+</div>
+
+<div class="ic-card">
+  <div class="rb-head">
+    <div class="section-label" style="margin-bottom:0;">Your saved rates ({{ book|length }})</div>
+    {% if book_currencies|length > 1 %}
+    <form method="GET" class="rb-year">
+      <input type="hidden" name="fy" value="{{ fy }}" />
+      <select name="currency" onchange="this.form.submit()" aria-label="Filter by currency">
+        <option value="">All currencies</option>
+        {% for c in book_currencies %}<option value="{{ c }}" {{ 'selected' if c == filter_currency }}>{{ c }}</option>{% endfor %}
+      </select>
+    </form>
+    {% endif %}
+  </div>
+  {% if book %}
+  <div class="ic-table-wrap">
+    <table class="ic-table">
+      <thead><tr><th>Currency</th><th>Date</th><th class="ic-num">Rate (₹)</th><th>Note</th><th></th></tr></thead>
+      <tbody>
+        {% for r in book %}
+        <tr>
+          <td><strong>{{ r.currency }}</strong></td><td>{{ format_date(r.rate_date) }}</td>
+          <td class="ic-num">{{ '%.4f'|format(r.rate) }}</td><td>{{ r.note or '—' }}</td>
+          <td>
+            <form method="POST" action="{{ url_for('international_centre.rate_delete', rate_id=r.id) }}" style="display:inline;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <input type="hidden" name="fy" value="{{ fy }}" />
+              <input type="hidden" name="filter_currency" value="{{ filter_currency }}" />
+              <button type="submit" class="iu-btn iu-btn-sm" style="color:var(--down);" aria-label="Delete rate">Delete</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="rb-note">No rates saved yet. SBI publishes its card rates daily; month-end dates cover most reports.</p>
+  {% endif %}
+</div>
+</div>
+
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:18px; }
+  .ic-title { font-size:1.5rem; font-weight:700; color:var(--text); margin-bottom:4px; }
+  .ic-subtitle { color:var(--muted); font-size:0.9rem; max-width:680px; line-height:1.5; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .ic-link:hover { text-decoration:underline; }
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); margin-bottom:20px; }
+  .rb-explain { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:12px 16px; font-size:0.82rem; line-height:1.55; color:var(--muted); margin-bottom:18px; }
+  .rb-explain strong { color:var(--text); }
+  .rb-grid { display:grid; grid-template-columns:1fr 1fr auto; gap:16px; align-items:end; }
+  .rb-grid select { width:100%; }
+  .rb-grid small { display:block; color:var(--muted2); font-size:0.74rem; margin-top:4px; line-height:1.4; }
+  .rb-actions { padding-bottom:2px; }
+  .rb-note { color:var(--muted); font-size:0.8rem; margin:10px 0 0; line-height:1.5; }
+  .rb-ok { color:var(--up); font-size:0.88rem; margin:6px 0 0; }
+  .rb-head { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .rb-two { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  .rb-two .form-group { margin-bottom:12px; }
+  .rb-two input, .rb-two select, .rb-two textarea, .rb-grid select, .rb-year select, .rb-inline {
+    background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:9px 10px; color:var(--text);
+    font-size:0.85rem; font-family:'Inter',sans-serif; width:100%; }
+  .rb-year select { width:auto; }
+  .rb-inline { width:130px; text-align:right; font-family:var(--font-data); }
+  .rb-two small { display:block; color:var(--muted2); font-size:0.74rem; margin-top:4px; line-height:1.4; }
+  .ic-table-wrap { overflow-x:auto; }
+  .ic-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  .ic-table th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:.05em; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .ic-table td { padding:10px 12px; border-bottom:1px solid var(--border); color:var(--text); }
+  .ic-table tr:last-child td { border-bottom:none; }
+  .ic-num { text-align:right !important; font-family:var(--font-data); white-space:nowrap; }
+  @media (max-width:768px) { .rb-grid, .rb-two { grid-template-columns:1fr; } }
+</style>
+{% endblock %}

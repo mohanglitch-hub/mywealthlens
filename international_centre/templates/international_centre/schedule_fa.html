@@ -23,49 +23,90 @@
 </div>
 
 <div class="ic-notice">
-  <strong>Not a filing document.</strong> These figures are a tracking aid built from what you've recorded in
-  MyWealthLens and Frankfurter's published exchange rates — they are <em>not</em> the CBDT-prescribed conversion
-  (the Income Tax Department requires SBI's TT buying rate as of the relevant date for actual Schedule FA
-  filing, which can differ from what's shown here). Use this to see what you'll need to report and to spot
-  holdings with gaps in tracked history — always confirm the final figures with a CA before filing.
+  <strong>A working aid, not a filing document.</strong> This lays out what Schedule FA, Table A3 (foreign equity and
+  debt interests) asks for, holding by holding, in rupees. Each value uses the SBI TT buying rate for its date: the
+  acquisition date for the initial value, the peak date for the peak, and 31 December for the closing value.
+  Dividends and sale proceeds use the rate for each payment or sale. {{ summary.fa_basis_label }} (change this on the
+  SBI rate book page). Confirm everything, and the form's exact date convention, with a CA before filing.
   {% if summary.any_incomplete %}
-  <br/><br/><strong>Some rows below are marked "incomplete"</strong> — value history wasn't tracked for the
-  full year (the daily snapshot job needs to run consistently across the year to capture a true peak value).
-  Those rows fall back to the holding's current value for opening/peak/closing, which is an approximation, not
-  the actual peak.
+  <br/><br/><strong>Some rows have an incomplete value history.</strong> The app only knows a holding's value from the
+  days it has tracked it. For those, the peak and closing values fall back to the current value unless you type the
+  broker's figures in with <em>Adjust</em>.
   {% endif %}
 </div>
+{% set strip_counts = summary.rates %}{% set strip_badge = summary.rates_badge %}{% set strip_fy = summary.calendar_year %}
+{% include "international_centre/_rate_strip.html" %}
 
 {% if summary.rows %}
 <div class="ic-card">
+  <div class="section-label">Table A3-style: each holding, in ₹</div>
   <div class="ic-table-wrap">
     <table class="ic-table">
       <thead>
         <tr>
-          <th>Holding</th><th>Country</th><th>Acquired</th>
-          <th>Opening (USD)</th><th>Peak (USD)</th><th>Closing (USD)</th>
-          <th>Gross Sale Proceeds (USD)</th><th>Tracked</th>
+          <th>Entity</th><th>Country</th><th>Nature</th><th>Acquired</th>
+          <th>Initial value (₹)</th><th>Peak value (₹)</th><th>Closing 31 Dec (₹)</th>
+          <th>Gross paid / credited (₹)</th><th>Gross sale proceeds (₹)</th><th>Rates</th>
         </tr>
       </thead>
       <tbody>
         {% for row in summary.rows %}
         <tr>
-          <td><a href="{{ url_for('international_centre.holding_detail', holding_id=row.holding.id) }}" class="ic-link">{{ row.holding.name }}</a></td>
+          <td style="white-space:normal; min-width:200px;">
+            <a href="{{ url_for('international_centre.holding_detail', holding_id=row.holding.id) }}" class="ic-link">{{ row.entity_name }}</a>
+            <div class="rs-sub">{{ row.entity_address or 'address not entered' }}{% if row.entity_zip %} · {{ row.entity_zip }}{% endif %}</div>
+            {% if row.missing %}<div class="rs-sub" style="color:var(--warning);">Still needed: {{ row.missing|join('; ') }}</div>{% endif %}
+            <a href="{{ url_for('international_centre.schedule_fa_input', holding_id=row.holding.id, year=summary.calendar_year) }}" class="ic-link" style="font-size:0.74rem;">{{ 'Edit figures' if row.has_input else 'Adjust' }}</a>
+            · <a href="{{ url_for('international_centre.edit_holding', holding_id=row.holding.id) }}" class="ic-link" style="font-size:0.74rem;">Entity details</a>
+          </td>
           <td>{{ row.country }}</td>
-          <td>{{ format_date(row.acquisition_date) if row.acquisition_date else '—' }}</td>
+          <td>{{ row.entity_nature }}</td>
+          <td>{{ format_date(row.acquisition_date) if row.acquisition_date else '—' }}{% if row.lot_count > 1 %}<div class="rs-sub">earliest of {{ row.lot_count }} lots</div>{% endif %}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.initial_inr) if row.initial_inr is not none else '—' }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.peak_inr) if row.peak_inr is not none else '—' }}<div class="rs-sub">{{ format_date(row.peak_date) }} · {{ row.peak_source }}</div></td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.closing_inr) if row.closing_inr is not none else '—' }}<div class="rs-sub">{{ row.closing_source }}{% if row.approx_native %} · converted back from USD, approximate{% endif %}</div></td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.gross_paid_inr) if row.gross_paid_inr is not none else '—' }}</td>
+          <td>{{ '₹' + '{:,.0f}'.format(row.proceeds_inr) if row.proceeds_inr is not none else '—' }}</td>
+          <td class="rs-sub">{{ row.rates_badge }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="4" style="text-align:right; font-weight:600;">Total</td>
+          <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_initial_inr) }}</td>
+          <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_peak_inr) }}</td>
+          <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_closing_inr) }}</td>
+          <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_gross_paid_inr) }}</td>
+          <td style="font-weight:600;">₹{{ '{:,.0f}'.format(summary.total_proceeds_inr) }}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+  <p class="rs-sub" style="margin-top:12px;">One row per holding. If your CA prefers a row per purchase lot, ask them. This page does not yet cover Table A1 (bank accounts: account number, opening date, interest), A2 (the brokerage account's own totals) or Table B (immovable property).</p>
+</div>
+
+<details class="ic-card" style="margin-top:20px;">
+  <summary style="cursor:pointer; font-weight:600;">Tracking view in USD (the app's own snapshots, not tax figures)</summary>
+  <div class="ic-table-wrap" style="margin-top:14px;">
+    <table class="ic-table">
+      <thead><tr><th>Holding</th><th>Opening (USD)</th><th>Peak (USD)</th><th>Closing (USD)</th><th>Gross Sale Proceeds (USD)</th><th>Tracked</th></tr></thead>
+      <tbody>
+        {% for row in summary.rows %}
+        <tr>
+          <td>{{ row.holding.name }}</td>
           <td>${{ '{:,.2f}'.format(row.opening_usd) }}</td>
           <td>${{ '{:,.2f}'.format(row.peak_usd) }}</td>
           <td>${{ '{:,.2f}'.format(row.closing_usd) }}</td>
           <td>{{ '$' + '{:,.2f}'.format(row.gross_proceeds_usd) if row.gross_proceeds_usd else '—' }}</td>
-          <td>
-            {% if row.data_complete %}<span class="ic-badge-ok">Full year</span>{% else %}<span class="ic-badge-warning">Incomplete</span>{% endif %}
-          </td>
+          <td>{% if row.data_complete %}<span class="ic-badge-ok">Full year</span>{% else %}<span class="ic-badge-warning">Incomplete</span>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-</div>
+</details>
 {% else %}
 <div class="ic-card ic-empty"><p>No active holdings to report for {{ summary.calendar_year }}.</p></div>
 {% endif %}

@@ -275,6 +275,14 @@
       <label>Price Paid / unit ({{ holding.native_currency }}, ESPP only)</label>
       <input type="number" step="any" name="purchase_price_native" />
     </div>
+    <div class="form-group ic-ov">
+      <label title="Only if your CA gave you a specific SBI rate for this entry. Otherwise your rate book is used.">SBI rate (₹, optional)</label>
+      <input type="number" step="any" min="0" name="ttbr_override" placeholder="₹ per 1 {{ holding.native_currency }}" value="" />
+    </div>
+    <div class="form-group ic-ov">
+      <label>Rate's date (optional)</label>
+      <input type="date" name="ttbr_override_date" value="" />
+    </div>
     <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Add</button>
   </form>
 
@@ -331,6 +339,14 @@
                 <label>Price Paid / unit ({{ holding.native_currency }}, ESPP only)</label>
                 <input type="number" step="any" name="purchase_price_native" value="{{ v.purchase_price_native if v.purchase_price_native is not none else '' }}" />
               </div>
+              <div class="form-group ic-ov">
+                <label title="Only if your CA gave you a specific SBI rate for this entry. Otherwise your rate book is used.">SBI rate (₹, optional)</label>
+                <input type="number" step="any" min="0" name="ttbr_override" placeholder="₹ per 1 {{ holding.native_currency }}" value="{{ v.ttbr_override if v.ttbr_override is not none else '' }}" />
+              </div>
+              <div class="form-group ic-ov">
+                <label>Rate's date (optional)</label>
+                <input type="date" name="ttbr_override_date" value="{{ v.ttbr_override_date.isoformat() if v.ttbr_override_date else '' }}" />
+              </div>
               <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Save</button>
               <button type="button" class="ic-btn-secondary" style="align-self:end;" onclick="icToggleVestEdit({{ v.id }})">Cancel</button>
             </form>
@@ -381,6 +397,14 @@
     <div class="form-group ic-div-field" style="display:none;">
       <label>Tax Withheld ({{ holding.native_currency }}, optional)</label>
       <input type="number" step="any" name="tax_withheld_native" />
+    </div>
+    <div class="form-group ic-ov">
+      <label title="Only if your CA gave you a specific SBI rate for this entry. Otherwise your rate book is used.">SBI rate (₹, optional)</label>
+      <input type="number" step="any" min="0" name="ttbr_override" placeholder="₹ per 1 {{ holding.native_currency }}" value="" />
+    </div>
+    <div class="form-group ic-ov">
+      <label>Rate's date (optional)</label>
+      <input type="date" name="ttbr_override_date" value="" />
     </div>
     <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Add</button>
   </form>
@@ -446,6 +470,14 @@
                 <label>Tax Withheld ({{ holding.native_currency }}, optional)</label>
                 <input type="number" step="any" name="tax_withheld_native" value="{{ t.tax_withheld_native if t.tax_withheld_native is not none else '' }}" />
               </div>
+              <div class="form-group ic-ov">
+                <label title="Only if your CA gave you a specific SBI rate for this entry. Otherwise your rate book is used.">SBI rate (₹, optional)</label>
+                <input type="number" step="any" min="0" name="ttbr_override" placeholder="₹ per 1 {{ holding.native_currency }}" value="{{ t.ttbr_override if t.ttbr_override is not none else '' }}" />
+              </div>
+              <div class="form-group ic-ov">
+                <label>Rate's date (optional)</label>
+                <input type="date" name="ttbr_override_date" value="{{ t.ttbr_override_date.isoformat() if t.ttbr_override_date else '' }}" />
+              </div>
               <button type="submit" class="btn-primary" style="width:auto; padding:10px 20px; align-self:end;">Save</button>
               <button type="button" class="ic-btn-secondary" style="align-self:end;" onclick="icToggleTxnEdit({{ t.id }})">Cancel</button>
             </form>
@@ -503,6 +535,8 @@
   .ic-table th { text-align:left; padding:10px 12px; color:var(--muted); font-weight:600; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid var(--border); }
   .ic-table td { padding:12px; border-bottom:1px solid var(--border); color:var(--text); }
   .ic-table tr:last-child td { border-bottom:none; }
+  .ic-ov label { font-size:0.72rem; }
+  .ic-ov input { max-width:150px; }
   .ic-link-btn { background:none; border:none; color:var(--down); cursor:pointer; font-size:0.8rem; padding:0; }
   .ic-link-btn:hover { text-decoration:underline; }
 

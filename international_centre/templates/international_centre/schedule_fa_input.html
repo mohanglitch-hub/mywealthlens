@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Schedule FA figures — {{ holding.name }} — MyWealthLens{% endblock %}
+
+{% block content %}
+{% include "international_centre/_ui.html" %}
+<div class="iu-page iu-page--narrow">
+<div class="ic-header">
+  <div>
+    <div class="fi-type">{{ asset_icon(holding.asset_type) }} {{ holding.asset_type }}</div>
+    <h1 class="ic-title">{{ holding.name }}: Schedule FA, {{ calendar_year }}</h1>
+    <p class="ic-subtitle">Optional. The app only knows your holding's value from the days it has been tracking it, in USD. If you have your broker's year-end statement, type its figures here, in <strong>{{ holding.native_currency }}</strong>, and the report will use them instead.</p>
+  </div>
+  <a href="{{ url_for('international_centre.schedule_fa', year=calendar_year) }}" class="ic-link">Back to Schedule FA</a>
+</div>
+
+<div class="ic-card">
+  <form method="POST" action="{{ url_for('international_centre.schedule_fa_input', holding_id=holding.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+    <input type="hidden" name="year" value="{{ calendar_year }}" />
+    <div class="form-group">
+      <label for="closing_value_native">Value on 31 December {{ calendar_year }} ({{ holding.native_currency }})</label>
+      <input type="number" step="any" min="0" id="closing_value_native" name="closing_value_native"
+             value="{{ data.get('closing_value_native', existing.closing_value_native if existing and existing.closing_value_native is not none else '') }}" />
+    </div>
+    <div class="fi-two">
+      <div class="form-group">
+        <label for="peak_value_native">Highest value during {{ calendar_year }} ({{ holding.native_currency }})</label>
+        <input type="number" step="any" min="0" id="peak_value_native" name="peak_value_native"
+               value="{{ data.get('peak_value_native', existing.peak_value_native if existing and existing.peak_value_native is not none else '') }}" />
+      </div>
+      <div class="form-group">
+        <label for="peak_date">Date of that highest value</label>
+        <input type="date" id="peak_date" name="peak_date" min="{{ calendar_year }}-01-01" max="{{ calendar_year }}-12-31"
+               value="{{ data.get('peak_date', existing.peak_date.isoformat() if existing and existing.peak_date else '') }}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="notes">Note (optional)</label>
+      <input type="text" id="notes" name="notes" maxlength="200" placeholder="e.g. from Interactive Brokers annual statement"
+             value="{{ data.get('notes', existing.notes if existing and existing.notes else '') }}" />
+    </div>
+    <p class="fi-note">Enter the peak value and its date together, or neither. Leaving everything blank removes your figures and goes back to the app's own snapshot-based numbers.</p>
+    <div class="iu-btn-group">
+      <button type="submit" class="iu-btn iu-btn-primary">Save</button>
+      <a href="{{ url_for('international_centre.schedule_fa', year=calendar_year) }}" class="iu-btn">Cancel</a>
+    </div>
+  </form>
+</div>
+</div>
+<style>
+  .ic-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-bottom:20px; }
+  .ic-title { font-size:1.4rem; font-weight:700; color:var(--text); margin:4px 0; }
+  .ic-subtitle { color:var(--muted); font-size:0.88rem; max-width:620px; line-height:1.5; }
+  .ic-link { color:var(--accent); text-decoration:none; font-weight:500; }
+  .fi-type { font-size:0.74rem; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .ic-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:24px; box-shadow:var(--shadow-sm); }
+  .ic-card input { width:100%; background:var(--surface2); border:1px solid var(--border); border-radius:8px; padding:9px 10px; color:var(--text); font-size:0.88rem; font-family:'Inter',sans-serif; }
+  .ic-card .form-group { margin-bottom:14px; }
+  .ic-card label { display:block; font-size:0.8rem; font-weight:600; color:var(--text); margin-bottom:6px; }
+  .fi-two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .fi-note { font-size:0.78rem; color:var(--muted); line-height:1.5; margin:0 0 16px; }
+  @media (max-width:640px) { .fi-two { grid-template-columns:1fr; } }
+</style>
+{% endblock %}

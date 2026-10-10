@@ -135,90 +135,114 @@ _ASSUMPTION_NOTE = ("Tracking aid built from what you have recorded in MyWealthL
                     "Confirm all figures with a Chartered Accountant before filing.")
 
 
+_RATES_NOTE_ALL_OK = "Every rupee figure uses an SBI TT buying rate (typed on the entry or from the SBI rate book)."
+
+
+def _rates_note(summary):
+    """One line saying where the rupee figures' rates came from, for every report."""
+    counts = summary["rates"]
+    if counts["total"] and counts["official"] == counts["total"]:
+        return _RATES_NOTE_ALL_OK
+    if not counts["total"]:
+        return "No currency conversion was needed for this period."
+    return ("RATE BASIS: " + summary["rates_badge"] + ". An ECB estimate is a market reference rate, NOT the SBI TT "
+            "buying rate a tax return needs, and a missing rate leaves the figure blank. Enter SBI rates in the "
+            "SBI rate book in MyWealthLens, then download again.")
+
+
+def _label_of(rate, label):
+    return f"{rate:.4f} ({label})" if rate else label
+
+
 def build_schedule_fa(user_id, year):
     s = services.get_schedule_fa_summary(user_id, year)
-    rows = [[r["holding"].name, r["country"], r["holding"].asset_type, r["acquisition_date"],
-             r["opening_usd"], r["peak_usd"], r["closing_usd"], r["gross_proceeds_usd"] or None,
-             "Full year" if r["data_complete"] else "Incomplete"] for r in s["rows"]]
-    notes = [_ASSUMPTION_NOTE,
-             "Values are in USD using Frankfurter's published rates - NOT the SBI TT buying rate the Income Tax "
-             "Department requires for the actual Schedule FA filing, so converted figures can differ."]
+    rows = [[r["entity_name"], r["country"], r["entity_address"], r["entity_zip"], r["entity_nature"],
+             r["acquisition_date"], r["initial_inr"], r["peak_inr"], r["peak_date"], r["closing_inr"],
+             r["gross_paid_inr"], r["proceeds_inr"], r["rates_badge"],
+             ("; ".join(r["missing"]) if r["missing"] else "")] for r in s["rows"]]
+    notes = [_ASSUMPTION_NOTE, _rates_note(s),
+             f"Layout follows Schedule FA, Table A3 (foreign equity and debt interests), one row per holding. "
+             f"Rate dates: {s['fa_basis_label']} for the acquisition, peak, dividend and sale figures; the closing "
+             "value uses 31 December itself. Confirm the form's exact date convention and the figures with a CA.",
+             "Table A1 (bank accounts), A2 (brokerage-account totals) and B (property) are not covered by this export."]
     if s["any_incomplete"]:
-        notes.append("Rows marked Incomplete lack a full year of daily snapshots; their opening/peak/closing fall back "
-                     "to the current value and the peak is an approximation.")
+        notes.append("Rows with an incomplete value history use the current value for peak/closing unless broker "
+                     "figures were typed in; check them before use.")
     return ReportData(
         key="schedule_fa", title="Schedule FA Report",
         period=f"Calendar year {year} (1 Jan - 31 Dec {year})",
-        columns=[Column("Holding", TEXT, 2.4), Column("Country", TEXT, 1.2), Column("Type", TEXT, 1.6),
-                 Column("Acquired", DATE, 1.1), Column("Opening (USD)", MONEY, 1.2),
-                 Column("Peak (USD)", MONEY, 1.2), Column("Closing (USD)", MONEY, 1.2),
-                 Column("Gross proceeds (USD)", MONEY, 1.3), Column("Tracked", TEXT, 1.0)],
+        columns=[Column("Entity", TEXT, 1.9), Column("Country", TEXT, 1.0), Column("Address", TEXT, 1.9),
+                 Column("ZIP", TEXT, 0.95), Column("Nature", TEXT, 1.4), Column("Acquired", DATE, 1.0),
+                 Column("Initial value (INR)", MONEY, 1.2), Column("Peak value (INR)", MONEY, 1.2),
+                 Column("Peak date", DATE, 1.0), Column("Closing 31 Dec (INR)", MONEY, 1.2),
+                 Column("Gross paid (INR)", MONEY, 1.1), Column("Sale proceeds (INR)", MONEY, 1.1),
+                 Column("Rates", TEXT, 1.0), Column("Still needed", TEXT, 1.6)],
         rows=rows,
-        totals=[["Total", "", "", "", _sum(r[4] for r in rows), _sum(r[5] for r in rows),
-                 _sum(r[6] for r in rows), _sum(r[7] for r in rows), ""]] if rows else None,
+        totals=[["Total", "", "", "", "", "", s["total_initial_inr"], s["total_peak_inr"], "", s["total_closing_inr"],
+                 s["total_gross_paid_inr"], s["total_proceeds_inr"], "", ""]] if rows else None,
         notes=notes, filename_part=str(year))
 
 
 def build_capital_gains(user_id, fy_start_year):
     s = services.get_capital_gains_summary(user_id, fy_start_year)
     rows = [[g["holding"].name, g["sell_date"], g["acquisition_date"], g["quantity"], g["currency"],
-             g["cost_basis_native"], g["proceeds_native"], g["gain_native"], g["gain_usd"], g["classification"]]
-            for g in s["rows"]]
-    notes = [_ASSUMPTION_NOTE,
-             "Lots are matched FIFO. Holding period for LTCG: more than 24 months for unlisted foreign shares/funds "
-             "per the module's classification. Gain (USD) uses the holding's current exchange rate, not the rate on the "
-             "date of each transaction - an approximation, not the CBDT rate."]
-    if s["any_missing_rate"]:
-        notes.append("Some rows have no USD figure because no exchange rate was available.")
-    totals = [["LTCG total (USD)", "", "", None, "", None, None, None, s["ltcg_total_usd"], ""],
-              ["STCG total (USD)", "", "", None, "", None, None, None, s["stcg_total_usd"], ""]] if rows else None
+             g["cost_basis_native"], g["proceeds_native"], g["gain_native"],
+             g["cost_inr"], g["proceeds_inr"], g["gain_inr"],
+             _label_of(g["acq_rate"], g["acq_rate_label"]), _label_of(g["sell_rate"], g["sell_rate_label"]),
+             g["classification"]] for g in s["rows"]]
+    notes = [_ASSUMPTION_NOTE, _rates_note(s),
+             "Conversion method: " + s["cg_method_label"] + ". Practitioners differ on this point; confirm with a CA. "
+             "Rates are for the last day of the month before each acquisition and sale (Rule 115).",
+             "Lots are matched FIFO. LTCG = held more than 24 months (the module's classification for unlisted "
+             "foreign shares/funds). The USD figures in the app are tracking approximations and are not in this export."]
+    totals = [["LTCG total (INR)", "", "", None, "", None, None, None, None, None, s["ltcg_total_inr"], "", "", ""],
+              ["STCG total (INR)", "", "", None, "", None, None, None, None, None, s["stcg_total_inr"], "", "", ""]] if rows else None
     return ReportData(
         key="capital_gains", title="Capital Gains (LTCG / STCG)", period=s["fy_label"],
-        columns=[Column("Holding", TEXT, 2.2), Column("Sold", DATE, 1.1), Column("Acquired", DATE, 1.1),
-                 Column("Qty", QTY, 0.9), Column("Ccy", TEXT, 0.6), Column("Cost basis", MONEY, 1.2),
-                 Column("Proceeds", MONEY, 1.2), Column("Gain", MONEY, 1.1), Column("Gain (USD)", MONEY, 1.1),
-                 Column("Class", TEXT, 0.9)],
+        columns=[Column("Holding", TEXT, 2.0), Column("Sold", DATE, 1.0), Column("Acquired", DATE, 1.0),
+                 Column("Qty", QTY, 0.8), Column("Ccy", TEXT, 0.5), Column("Cost basis", MONEY, 1.0),
+                 Column("Proceeds", MONEY, 1.0), Column("Gain", MONEY, 0.9),
+                 Column("Cost (INR)", MONEY, 1.1), Column("Proceeds (INR)", MONEY, 1.1), Column("Gain (INR)", MONEY, 1.1),
+                 Column("Cost rate used", TEXT, 1.6), Column("Sale rate used", TEXT, 1.6), Column("Class", TEXT, 0.7)],
         rows=rows, totals=totals, notes=notes, filename_part=s["fy_label"].replace(" ", ""))
 
 
 def build_dtaa(user_id, fy_start_year):
     s = services.get_dtaa_summary(user_id, fy_start_year)
     rows = [[r["holding"].name, r["country"], r["currency"], r["gross_native"], r["withheld_native"],
-             r["net_native"], r["gross_inr"], r["withheld_inr"]] for r in s["rows"]]
-    notes = [_ASSUMPTION_NOTE,
-             "INR figures bridge native -> USD -> INR using each holding's cached exchange rate, NOT the SBI TT buying "
-             "rate on each dividend's date that an actual Form 67 / Form 44 filing requires. Gross is shown as the net "
-             "amount for older dividends where no gross/withholding was recorded."]
-    if s["any_missing_rate"]:
-        notes.append("Some rows have no INR figure because no exchange rate was available.")
+             r["net_native"], r["gross_inr"], r["withheld_inr"], r["rates_badge"]] for r in s["rows"]]
+    notes = [_ASSUMPTION_NOTE, _rates_note(s),
+             "Each dividend is converted at the SBI TT buying rate for the last day of the previous month (Rule 115, "
+             "income). A holding's rupee total is blank if any of its dividends has no rate. Gross is shown as the net "
+             "amount for older dividends where no gross/withholding was recorded. This lists the input figures for "
+             "Form 67 (Form 44 from FY 2026-27); it does not compute the foreign tax credit."]
     return ReportData(
         key="dtaa", title="DTAA / Foreign Tax Credit (Form 67)", period=s["fy_label"],
-        columns=[Column("Holding", TEXT, 2.4), Column("Country", TEXT, 1.3), Column("Ccy", TEXT, 0.6),
-                 Column("Gross dividend", MONEY, 1.3), Column("Tax withheld", MONEY, 1.3),
-                 Column("Net received", MONEY, 1.3), Column("Gross (INR approx.)", MONEY, 1.5),
-                 Column("Withheld (INR approx.)", MONEY, 1.5)],
+        columns=[Column("Holding", TEXT, 2.2), Column("Country", TEXT, 1.2), Column("Ccy", TEXT, 0.6),
+                 Column("Gross dividend", MONEY, 1.2), Column("Tax withheld", MONEY, 1.2),
+                 Column("Net received", MONEY, 1.2), Column("Gross (INR)", MONEY, 1.3),
+                 Column("Withheld (INR)", MONEY, 1.3), Column("Rates", TEXT, 1.2)],
         rows=rows,
-        totals=[["Total (INR approx.)", "", "", None, None, None, s["total_gross_inr"], s["total_withheld_inr"]]] if rows else None,
+        totals=[["Total (INR)", "", "", None, None, None, s["total_gross_inr"], s["total_withheld_inr"], ""]] if rows else None,
         notes=notes, filename_part=s["fy_label"].replace(" ", ""))
 
 
 def build_vesting(user_id, fy_start_year):
     s = services.get_vesting_perquisite_summary(user_id, fy_start_year)
     rows = [[r["holding"].name, r["plan_type"], r["vest_date"], r["quantity"], r["currency"], r["fmv_native"],
-             r["purchase_price_native"], r["perquisite_native"], r["perquisite_inr"]] for r in s["rows"]]
-    notes = [_ASSUMPTION_NOTE,
-             "Perquisite = (fair market value - price paid) x quantity, taxed as salary in India at vest. INR uses the "
-             "holding's cached exchange rate, not the SBI TT buying rate on the vest date that Form 12BA / your "
-             "employer uses."]
-    if s["any_missing_rate"]:
-        notes.append("Some rows have no INR figure because no exchange rate was available.")
+             r["purchase_price_native"], r["perquisite_native"], r["perquisite_inr"],
+             _label_of(r["rate"], r["rate_label"])] for r in s["rows"]]
+    notes = [_ASSUMPTION_NOTE, _rates_note(s),
+             "Perquisite = (fair market value - price paid) x quantity, taxed as salary in India at vest, converted at "
+             "the SBI TT buying rate on the last day of the month before the vest month (Rule 115, salary). Your "
+             "employer's Form 12BA / Form 16 figure is what counts for filing."]
     return ReportData(
         key="vesting", title="RSU / ESPP Perquisite", period=s["fy_label"],
-        columns=[Column("Holding", TEXT, 2.2), Column("Plan", TEXT, 0.8), Column("Vest date", DATE, 1.1),
-                 Column("Qty", QTY, 0.8), Column("Ccy", TEXT, 0.6), Column("FMV / unit", MONEY, 1.1),
-                 Column("Paid / unit", MONEY, 1.1), Column("Perquisite", MONEY, 1.2),
-                 Column("Perquisite (INR approx.)", MONEY, 1.5)],
-        rows=rows, totals=[["Total (INR approx.)", "", None, None, "", None, None, None, s["total_perquisite_inr"]]] if rows else None,
+        columns=[Column("Holding", TEXT, 2.0), Column("Plan", TEXT, 0.7), Column("Vest date", DATE, 1.0),
+                 Column("Qty", QTY, 0.8), Column("Ccy", TEXT, 0.5), Column("FMV / unit", MONEY, 1.0),
+                 Column("Paid / unit", MONEY, 1.0), Column("Perquisite", MONEY, 1.1),
+                 Column("Perquisite (INR)", MONEY, 1.2), Column("SBI rate used", TEXT, 1.8)],
+        rows=rows, totals=[["Total (INR)", "", None, None, "", None, None, None, s["total_perquisite_inr"], ""]] if rows else None,
         notes=notes, filename_part=s["fy_label"].replace(" ", ""))
 
 
@@ -249,8 +273,10 @@ def build_dividends(user_id, fy_start_year):
     rows = [[r["name"], r["country"], r["currency"], r["payments"], r["gross_native"], r["withheld_native"],
              r["net_native"], r["net_usd"], r["net_inr"], r["ttm_yield_pct"]] for r in s["rows"]]
     notes = [_ASSUMPTION_NOTE,
-             "USD and INR figures use each holding's cached exchange rate (approximate). Yield = dividends received in "
-             "the last 12 months / current value, in the holding's own currency."]
+             "The INR figures convert each dividend at the SBI TT buying rate for the last day of the previous month "
+             "(from a rate typed on the dividend, else your SBI rate book, else a labelled ECB estimate); the USD "
+             "figure is a tracking approximation. Yield = dividends received in the last 12 months / current value, "
+             "in the holding's own currency."]
     return ReportData(
         key="dividends", title="Dividend Income", period=s["fy_label"],
         columns=[Column("Holding", TEXT, 2.2), Column("Country", TEXT, 1.2), Column("Ccy", TEXT, 0.6),

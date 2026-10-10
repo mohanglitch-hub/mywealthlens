@@ -145,6 +145,29 @@ class VestingPlanType:
     ALL = [RSU, ESPP]
 
 
+class RateBasis:
+    """Batch 11 (Oct 2026) — which date's SBI TT buying rate converts a
+    foreign-currency amount to INR. Two conventions appear in practice and
+    in the sources, so the module offers both instead of silently picking
+    one: the rate ON the event's own date, or the rate on the last day of
+    the MONTH BEFORE the event (the Rule 115 convention for income, gains
+    and salary perquisites). Which one applies to which figure is spelled
+    out in rates.py and in the CA brief."""
+    SAME_DAY = "same_day"
+    PREV_MONTH_END = "prev_month_end"
+    ALL = [SAME_DAY, PREV_MONTH_END]
+
+
+class CgMethod:
+    """How a capital gain is converted to INR (a point practitioners
+    disagree on — see rates.py): convert cost and proceeds SEPARATELY at
+    their own dates' rates, or compute the gain in the foreign currency
+    and convert it once at the sale date's rate."""
+    SEPARATE = "separate"
+    SINGLE = "single"
+    ALL = [SEPARATE, SINGLE]
+
+
 class RemittancePurpose:
     INVESTMENT_SECURITIES = "Investment in securities/shares"
     INVESTMENT_PROPERTY = "Investment in immovable property"
@@ -197,6 +220,14 @@ class InternationalHolding(db.Model):
     broker_or_institution = db.Column(db.String(200), nullable=True)  # "Interactive Brokers", "Chase Bank"
     account_number_masked = db.Column(db.String(50), nullable=True)   # last 4 digits only, by convention — never the full number
 
+    # Batch 11 (Oct 2026) — Schedule FA, Table A3 wants the foreign
+    # entity's address, ZIP and nature (company / fund / bank ...), none
+    # of which the app stored before. All optional; the Schedule FA
+    # report lists what is still missing per holding.
+    entity_address = db.Column(db.String(255), nullable=True)
+    entity_zip     = db.Column(db.String(20), nullable=True)
+    entity_nature  = db.Column(db.String(60), nullable=True)
+
     native_currency = db.Column(db.String(3), nullable=False, default="USD")  # fx_rates.SUPPORTED_CURRENCIES
 
     # Ticker-based holdings: driven by quantity + price. Manually-valued
@@ -248,6 +279,10 @@ class InternationalHolding(db.Model):
     )
     vesting_tranches = db.relationship(
         "VestingTranche", backref="holding", lazy=True,
+        cascade="all, delete-orphan",
+    )
+    schedule_fa_inputs = db.relationship(
+        "ScheduleFaYearInput", backref="holding", lazy=True,
         cascade="all, delete-orphan",
     )
     timeline = db.relationship(
@@ -343,6 +378,14 @@ class InternationalTransaction(db.Model):
     # every dividend before this batch already is) for a manually-
     # entered net-only dividend, or for BUY/SELL, where they're
     # meaningless. Powers get_dtaa_summary()'s Form 67 support figures.
+
+    ttbr_override      = db.Column(db.Float, nullable=True)
+    ttbr_override_date = db.Column(db.Date, nullable=True)
+    # Batch 11 (Oct 2026) — an SBI TT buying rate (INR per 1 unit of the
+    # holding's currency) typed in for THIS event, e.g. a figure the CA
+    # gave. When set it beats the rate book and any estimate for every INR
+    # conversion of this transaction. `ttbr_override_date` is only a note
+    # of which date the rate belongs to.
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -478,6 +521,13 @@ class VestingTranche(db.Model):
     #   (treated as 0) for RSU, which is a free grant.
 
     notes = db.Column(db.String(500), nullable=True)
+
+    ttbr_override      = db.Column(db.Float, nullable=True)
+    ttbr_override_date = db.Column(db.Date, nullable=True)
+    # Batch 11 — same meaning as on InternationalTransaction: an explicit
+    # SBI TT buying rate for this vesting event (perquisite and capital-
+    # gains cost basis both use it).
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     @property
@@ -614,3 +664,56 @@ class InternationalReminderAck(db.Model):
     user_id         = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     reminder_key    = db.Column(db.String(60), nullable=False)
     acknowledged_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class SbiTtbrRate(db.Model):
+    """Batch 11 (Oct 2026) — the user's own "rate book": SBI TT buying
+    rates (INR per 1 unit of `currency`) for specific dates, typed in or
+    pasted from SBI's published card rates. Enter the month-end rates once
+    and every transaction picks its rate up automatically (see rates.py).
+    Per user because it is their reference data, never shared."""
+    __tablename__ = "international_sbi_rate"
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "currency", "rate_date", name="uq_intl_sbi_rate"),
+        db.Index("ix_intl_sbi_rate_lookup", "user_id", "currency", "rate_date"),
+    )
+
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    currency   = db.Column(db.String(3), nullable=False)
+    rate_date  = db.Column(db.Date, nullable=False)
+    rate       = db.Column(db.Float, nullable=False)
+    note       = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class InternationalRateSettings(db.Model):
+    """Batch 11 — the two conversion conventions practitioners disagree
+    on, as per-user settings with documented defaults (rates.py)."""
+    __tablename__ = "international_rate_settings"
+
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, unique=True)
+    fa_basis  = db.Column(db.String(20), nullable=False, default=RateBasis.SAME_DAY)
+    cg_method = db.Column(db.String(20), nullable=False, default=CgMethod.SEPARATE)
+
+
+class ScheduleFaYearInput(db.Model):
+    """Batch 11 — figures for one holding and one calendar year that the
+    app cannot work out by itself (it only keeps daily USD snapshots from
+    the day tracking started): the broker's year-end value, the peak value
+    and its date. All in the holding's own currency. Optional; when set
+    they replace the snapshot-derived Schedule FA figures."""
+    __tablename__ = "international_schedule_fa_input"
+    __table_args__ = (
+        db.UniqueConstraint("holding_id", "calendar_year", name="uq_intl_fa_input"),
+    )
+
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    holding_id    = db.Column(db.Integer, db.ForeignKey("international_holding.id"), nullable=False)
+    calendar_year = db.Column(db.Integer, nullable=False)
+    peak_date            = db.Column(db.Date, nullable=True)
+    peak_value_native    = db.Column(db.Float, nullable=True)
+    closing_value_native = db.Column(db.Float, nullable=True)
+    notes         = db.Column(db.String(200), nullable=True)

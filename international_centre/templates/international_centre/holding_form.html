@@ -92,6 +92,28 @@
       </div>
     </div>
 
+    <!-- Batch 11: Schedule FA, Table A3 asks for the foreign entity's address, ZIP and nature.
+         All optional - the Schedule FA report lists what is still missing per holding. -->
+    <div class="form-group">
+      <label>Entity address (for Schedule FA)</label>
+      <input type="text" name="entity_address" maxlength="255"
+             value="{{ holding.entity_address if holding and holding.entity_address else data.get('entity_address', '') }}"
+             placeholder="e.g. One Apple Park Way, Cupertino, California" />
+    </div>
+    <div class="ic-form-row">
+      <div class="form-group">
+        <label>ZIP / postal code</label>
+        <input type="text" name="entity_zip" maxlength="20"
+               value="{{ holding.entity_zip if holding and holding.entity_zip else data.get('entity_zip', '') }}" placeholder="e.g. 95014" />
+      </div>
+      <div class="form-group">
+        <label>Nature of entity</label>
+        <input type="text" name="entity_nature" maxlength="60"
+               value="{{ holding.entity_nature if holding and holding.entity_nature else data.get('entity_nature', '') }}"
+               placeholder="e.g. Listed company, Mutual fund, Bank" />
+      </div>
+    </div>
+
     <div class="form-group">
       <label>Notes</label>
       <textarea name="notes" rows="2">{{ holding.notes if holding else data.get('notes', '') }}</textarea>

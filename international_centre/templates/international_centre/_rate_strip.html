@@ -1,0 +1,32 @@
+{# Batch 11 — one-glance honesty banner for any report that shows rupee figures.
+   Set before including:  strip_counts (summary.rates), strip_badge (summary.rates_badge), strip_fy (int). #}
+{% set _all_ok = strip_counts.total and strip_counts.official == strip_counts.total %}
+<div class="rs-strip {{ 'rs-ok' if _all_ok else ('rs-none' if not strip_counts.total else 'rs-warn') }}" role="status">
+  <div class="rs-text">
+    {% if not strip_counts.total %}
+      No currency conversion was needed for this period.
+    {% elif _all_ok %}
+      ✓ <strong>Every rupee figure here uses an SBI rate</strong> ({{ strip_counts.official }} from your rate book or typed on a transaction).
+    {% else %}
+      <strong>Not every rupee figure uses an SBI rate:</strong> {{ strip_badge }}.
+      An <em>ECB estimate</em> is a market rate, not the SBI TT buying rate a tax return needs; a blank means no rate was available.
+    {% endif %}
+  </div>
+  {% if strip_counts.total and not _all_ok %}
+  <a href="{{ url_for('international_centre.rate_book', fy=strip_fy) }}" class="iu-btn iu-btn-sm">Enter SBI rates</a>
+  {% else %}
+  <a href="{{ url_for('international_centre.rate_book', fy=strip_fy) }}" class="iu-btn iu-btn-sm">SBI rate book</a>
+  {% endif %}
+</div>
+<style>
+  .rs-strip { display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; border:1px solid var(--border);
+    border-radius:10px; padding:12px 16px; margin-bottom:18px; font-size:0.82rem; line-height:1.5; background:var(--surface); }
+  .rs-ok   { border-color:var(--up); background:var(--up-bg); }
+  .rs-warn { border-color:var(--warning); background:var(--warning-bg); }
+  .rs-text { flex:1; min-width:240px; color:var(--text); }
+  .rs-pill { display:inline-block; font-size:0.68rem; font-weight:600; border-radius:999px; padding:1px 8px; border:1px solid var(--border); color:var(--muted); background:var(--surface2); white-space:nowrap; }
+  .rs-pill-ok { color:var(--up); border-color:var(--up); background:var(--up-bg); }
+  .rs-pill-est { color:var(--warning); border-color:var(--warning); background:var(--warning-bg); }
+  .rs-pill-miss { color:var(--down); border-color:var(--down); background:var(--down-bg); }
+  .rs-sub { font-size:0.72rem; color:var(--muted); line-height:1.4; }
+</style>

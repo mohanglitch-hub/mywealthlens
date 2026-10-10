@@ -32,11 +32,12 @@ from international_centre.models import (
     InternationalHolding, InternationalTransaction, RemittanceRecord,
     InternationalValueSnapshot, InternationalHoldingNominee,
     InternationalHoldingDocument, VestingTranche, InternationalTimeline,
-    InternationalReminderAck,
+    InternationalReminderAck, ScheduleFaYearInput, RateBasis, CgMethod,
     InternationalAssetType, InternationalTxnType, RemittancePurpose,
     TimelineEvent, LRS_ANNUAL_LIMIT_USD,
 )
 from international_centre import tcs_rules
+from international_centre import rates
 from international_centre.utils import (
     fy_bounds, fy_label, calendar_year_bounds, fetch_ticker_price, is_long_term,
 )
@@ -180,6 +181,9 @@ def create_holding(user_id, data, multi_data=None):
         country=(data.get("country") or "").strip() or None,
         broker_or_institution=(data.get("broker_or_institution") or "").strip() or None,
         account_number_masked=(data.get("account_number_masked") or "").strip() or None,
+        entity_address=(data.get("entity_address") or "").strip() or None,
+        entity_zip=(data.get("entity_zip") or "").strip() or None,
+        entity_nature=(data.get("entity_nature") or "").strip() or None,
         native_currency=data["native_currency"].strip().upper(),
         notes=(data.get("notes") or "").strip() or None,
     )
@@ -237,6 +241,9 @@ def update_holding(holding, data, multi_data=None):
     holding.country = (data.get("country") or "").strip() or None
     holding.broker_or_institution = (data.get("broker_or_institution") or "").strip() or None
     holding.account_number_masked = (data.get("account_number_masked") or "").strip() or None
+    holding.entity_address = (data.get("entity_address") or "").strip() or None
+    holding.entity_zip = (data.get("entity_zip") or "").strip() or None
+    holding.entity_nature = (data.get("entity_nature") or "").strip() or None
     holding.native_currency = data["native_currency"].strip().upper()
     holding.notes = (data.get("notes") or "").strip() or None
 
@@ -655,7 +662,7 @@ def _usd_rate(holding):
     return holding.fx_rate_used or (1.0 if holding.native_currency == "USD" else None)
 
 
-def get_dividend_income(user_id, fy_start_year):
+def get_dividend_income(user_id, fy_start_year, resolver=None):
     """Dividend income for the Indian FY starting 1 Apr `fy_start_year`.
 
     Same approximation path as get_dtaa_summary() (native -> USD via the
@@ -668,8 +675,8 @@ def get_dividend_income(user_id, fy_start_year):
     `ttm_yield_pct` = dividends received in the last 12 months, gross, over
     the holding's CURRENT value in its own currency — a trailing yield on
     today's value, not a yield on cost."""
-    import currency_display
     fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    resolver = resolver or rates.RateResolver(user_id)
     today = today_ist()
     ttm_start = today - timedelta(days=365)
     holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
@@ -702,12 +709,20 @@ def get_dividend_income(user_id, fy_start_year):
         gross_native = sum(gross_of(t) for t in fy_divs)
         withheld_native = sum((t.tax_withheld_native or 0.0) for t in fy_divs)
         net_native = sum(t.amount_native for t in fy_divs)
+        # Batch 11: rupee figures per dividend at the SBI rate for ITS date (see rates.py)
+        resolver.prefetch([(h.native_currency, t.date, _PME, t.ttbr_override) for t in fy_divs])
+        inr_res = [resolver.resolve(h.native_currency, t.date, _PME, override=t.ttbr_override,
+                                    purpose="Dividend income", override_date=t.ttbr_override_date)
+                   for t in fy_divs]
+        if all(r.ok for r in inr_res):
+            net_inr = round(sum(t.amount_native * r.rate for t, r in zip(fy_divs, inr_res)), 2)
+            withheld_inr = round(sum((t.tax_withheld_native or 0.0) * r.rate for t, r in zip(fy_divs, inr_res)), 2)
+        else:
+            net_inr = withheld_inr = None
         if rate is None:
-            net_usd = net_inr = withheld_inr = None
+            net_usd = None
         else:
             net_usd = round(net_native * rate, 2)
-            net_inr = currency_display.usd_to_inr(net_usd)
-            withheld_inr = currency_display.usd_to_inr(round(withheld_native * rate, 2))
             for t in fy_divs:
                 key = (t.date.year, t.date.month)
                 month_net_usd[key] = month_net_usd.get(key, 0.0) + t.amount_native * rate
@@ -821,8 +836,8 @@ def _inr_return_inputs(holding):
 
 def _inr_flows(holding, txns):
     """Per-transaction INR cash flows + today's INR value. Raises FxRateError."""
-    rates = _inr_rates_for(holding.native_currency, sorted({t.date for t in txns}))
-    flows = [{"date": t.date, "txn_type": t.txn_type, "amount_native": t.amount_native * rates[t.date]} for t in txns]
+    dated_rates = _inr_rates_for(holding.native_currency, sorted({t.date for t in txns}))
+    flows = [{"date": t.date, "txn_type": t.txn_type, "amount_native": t.amount_native * dated_rates[t.date]} for t in txns]
     current_inr = (holding.current_value_native or 0.0) * _latest_inr_rate(holding.native_currency)
     return flows, current_inr
 
@@ -1026,9 +1041,14 @@ def get_reminders(user_id, today=None):
     # 2. Foreign tax credit (Form 67 / Form 44) — latest completed FYs with tax withheld.
     last_fy = fy_bounds(today)[0].year - 1
     for fy in (last_fy, last_fy - 1):
-        summary = get_dtaa_summary(user_id, fy)
-        if not summary["total_withheld_inr"]:
+        # No network here: this runs on every dashboard load, so it must never wait on an exchange-rate
+        # service. It only needs to know whether foreign tax was withheld (native amounts), and shows the
+        # rupee figure only when the user's own SBI rate book can produce it.
+        summary = get_dtaa_summary(user_id, fy, resolver=rates.RateResolver(user_id, allow_estimate=False))
+        if not any(r["withheld_native"] for r in summary["rows"]):
             continue
+        amount_text = (f"about Rs. {summary['total_withheld_inr']:,.0f}" if summary["total_withheld_inr"]
+                       else "foreign tax (enter your SBI rates to see the rupee amount)")
         outer = _date(fy + 2, 3, 31)               # end of the assessment year
         if fy != last_fy and today > outer:
             continue                                # an older year whose window is long gone: not a reminder any more
@@ -1043,7 +1063,7 @@ def get_reminders(user_id, today=None):
         key = f"form67:{fy}"
         items.append({"key": key, "ack_key": key, "kind": "form67", "level": level,
                       "title": f"{form} - foreign tax credit, {summary['fy_label']}",
-                      "message": f"You had about Rs. {summary['total_withheld_inr']:,.0f} of foreign tax withheld on dividends in {summary['fy_label']}. "
+                      "message": f"You had {amount_text} withheld on dividends in {summary['fy_label']}. "
                                  f"Claim credit with {form}. {tail}",
                       "detail": ("From tax year 2026-27 the form is renumbered Form 44 under the Income-tax Act, 2025. "
                                  "INR is approximate - the filing needs the SBI TT buying rate on each date." if fy >= 2025 else
@@ -1117,6 +1137,16 @@ def _resolve_dividend_amount(data):
     return round(gross - withheld, 2), gross, withheld
 
 
+def _parse_ttbr_override(data):
+    """(rate or None, date or None) from the optional override form fields.
+    Already validated by validators._validate_ttbr_override."""
+    raw = (data.get("ttbr_override") or "").strip()
+    if not raw:
+        return None, None
+    d_raw = (data.get("ttbr_override_date") or "").strip()
+    return float(raw), (datetime.strptime(d_raw, "%Y-%m-%d").date() if d_raw else None)
+
+
 def add_transaction(holding, data):
     db = _db()
     txn_type = data["txn_type"].strip().upper()
@@ -1136,6 +1166,7 @@ def add_transaction(holding, data):
         gross_amount_native=gross,
         tax_withheld_native=withheld,
     )
+    txn.ttbr_override, txn.ttbr_override_date = _parse_ttbr_override(data)
     db.session.add(txn)
     db.session.flush()
     recompute_holding_financials(holding)
@@ -1160,6 +1191,7 @@ def update_transaction(txn, data):
     txn.amount_native = amount_native
     txn.gross_amount_native = gross
     txn.tax_withheld_native = withheld
+    txn.ttbr_override, txn.ttbr_override_date = _parse_ttbr_override(data)
     recompute_holding_financials(txn.holding)
     log_timeline(txn.holding, TimelineEvent.TRANSACTION_EDITED,
                  f"{txn_type} on {txn.date:%d %b %Y} edited — now {_money(txn.holding.native_currency, amount_native)}")
@@ -1202,6 +1234,7 @@ def add_vesting_tranche(holding, data):
                                 if (data.get("purchase_price_native") or "").strip() else None),
         notes=(data.get("notes") or "").strip() or None,
     )
+    tranche.ttbr_override, tranche.ttbr_override_date = _parse_ttbr_override(data)
     db.session.add(tranche)
     log_timeline(holding, TimelineEvent.VESTING_ADDED,
                  f"{tranche.plan_type} tranche added — {tranche.quantity:g} units vesting "
@@ -1221,6 +1254,7 @@ def update_vesting_tranche(tranche, data):
     tranche.purchase_price_native = (float(data["purchase_price_native"])
                                       if (data.get("purchase_price_native") or "").strip() else None)
     tranche.notes = (data.get("notes") or "").strip() or None
+    tranche.ttbr_override, tranche.ttbr_override_date = _parse_ttbr_override(data)
     log_timeline(tranche.holding, TimelineEvent.VESTING_EDITED,
                  f"{tranche.plan_type} tranche edited — {tranche.quantity:g} units, vest {tranche.vest_date:%d %b %Y}")
     db.session.commit()
@@ -1233,56 +1267,6 @@ def delete_vesting_tranche(tranche):
                  f"{tranche.plan_type} tranche deleted — {tranche.quantity:g} units, vest {tranche.vest_date:%d %b %Y}")
     db.session.delete(tranche)
     db.session.commit()
-
-
-def get_vesting_perquisite_summary(user_id, fy_start_year):
-    """RSU/ESPP vesting tranches and their taxable PERQUISITE value
-    -- (FMV_at_vest - price_paid) * quantity -- which Indian tax law
-    treats as SALARY income in the FY the shares actually vested (a
-    completely separate, earlier event from any capital gain realized
-    when those shares are later sold -- see classify_capital_gains(),
-    which uses this same FMV as the eventual cost basis). Scoped to the
-    Indian FY starting 1 Apr `fy_start_year`, matching TCS/DTAA/capital
-    gains' own FY-based reporting. Same 'not a filing document, confirm
-    with a CA' honesty as every other tax-adjacent report in this
-    module -- the actual perquisite value your employer reports is
-    whatever they put on your Form 12BA/Form 16, which may value FMV
-    differently (e.g. the closing price on a specific exchange on the
-    vest date) than what's entered here."""
-    import currency_display
-    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
-    holdings = (InternationalHolding.query
-                .filter_by(user_id=user_id, asset_type=InternationalAssetType.RSU_ESPP)
-                .all())
-
-    rows = []
-    any_missing_rate = False
-    for h in holdings:
-        tranches = [v for v in h.vesting_tranches if fy_start <= v.vest_date <= fy_end]
-        if not tranches:
-            continue
-        rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else None)
-        for v in tranches:
-            if rate is None:
-                any_missing_rate = True
-                perquisite_inr = None
-            else:
-                perquisite_inr = currency_display.usd_to_inr(round(v.perquisite_value_native * rate, 2))
-            rows.append({
-                "holding": h, "tranche": v, "currency": h.native_currency,
-                "plan_type": v.plan_type, "vest_date": v.vest_date, "quantity": v.quantity,
-                "fmv_native": v.fmv_native, "purchase_price_native": v.purchase_price_native or 0.0,
-                "perquisite_native": v.perquisite_value_native, "perquisite_inr": perquisite_inr,
-            })
-
-    rows.sort(key=lambda r: r["vest_date"])
-    total_perquisite_inr = sum(r["perquisite_inr"] for r in rows if r["perquisite_inr"] is not None)
-
-    return {
-        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
-        "rows": rows, "total_perquisite_inr": round(total_perquisite_inr, 2),
-        "any_missing_rate": any_missing_rate,
-    }
 
 
 # ── Remittances (LRS) ───────────────────────────────────────────────
@@ -1457,59 +1441,541 @@ def get_lrs_history(user_id, years=5, anchor_date=None):
 
 # ── Schedule FA ─────────────────────────────────────────────────────
 
-def get_schedule_fa_summary(user_id, calendar_year):
-    """Per-holding opening/peak/closing USD value for the given
-    CALENDAR year (Schedule FA's own reporting period — see models.py's
-    module docstring), plus gross sale proceeds within that year.
-    data_complete on a row is a rough signal (a snapshot near both the
-    start and end of the year), not a guarantee — a genuinely
-    incomplete year (module just started, or the scheduled job hasn't
-    been run consistently) falls back to the holding's CURRENT value
-    for all three figures, clearly flagged as incomplete rather than
-    silently presented as accurate."""
-    year_start, year_end = calendar_year_bounds(calendar_year)
-    holdings = get_holdings(user_id, archived=False)
-    rows = []
+# ── Reports on the SBI rate engine (Batch 11, Oct 2026) ───────────────
+#
+# Every INR figure below goes through rates.RateResolver, which answers
+# "which SBI TT buying rate, from where?" for each event (override > rate
+# book > ECB estimate > missing). Each row carries the rate it used and a
+# label for its source, so the page and the exports can show their working.
+# USD figures further down are unchanged: they remain the module's
+# tracking anchor and are NOT tax figures.
 
+_PME = RateBasis.PREV_MONTH_END
+
+
+def get_vesting_perquisite_summary(user_id, fy_start_year, resolver=None):
+    """RSU/ESPP vesting tranches and their taxable PERQUISITE value
+    -- (FMV_at_vest - price_paid) * quantity -- which Indian tax law
+    treats as SALARY income in the FY the shares actually vested (a
+    completely separate, earlier event from any capital gain realized
+    when those shares are later sold -- see classify_capital_gains(),
+    which uses this same FMV as the eventual cost basis). Scoped to the
+    Indian FY starting 1 Apr `fy_start_year`.
+
+    Batch 11: each tranche's INR value now uses the SBI TT buying rate on
+    the last day of the month before the vest month (the Rule 115 salary
+    convention), taken from a rate typed on the tranche, then the user's
+    rate book, then an ECB estimate (labelled as such). The figure your
+    employer reports on Form 12BA / Form 16 is what counts for filing;
+    this is a cross-check, not a replacement."""
+    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    resolver = resolver or rates.RateResolver(user_id)
+    holdings = (InternationalHolding.query
+                .filter_by(user_id=user_id, asset_type=InternationalAssetType.RSU_ESPP)
+                .all())
+    pairs = [(h, v) for h in holdings for v in h.vesting_tranches if fy_start <= v.vest_date <= fy_end]
+    resolver.prefetch([(h.native_currency, v.vest_date, _PME, v.ttbr_override) for h, v in pairs])
+
+    rows, results = [], []
+    for h, v in pairs:
+        inr, res = resolver.convert(v.perquisite_value_native, h.native_currency, v.vest_date, _PME,
+                                    override=v.ttbr_override, purpose="RSU/ESPP perquisite",
+                                    override_date=v.ttbr_override_date)
+        results.append(res)
+        rows.append({
+            "holding": h, "tranche": v, "currency": h.native_currency,
+            "plan_type": v.plan_type, "vest_date": v.vest_date, "quantity": v.quantity,
+            "fmv_native": v.fmv_native, "purchase_price_native": v.purchase_price_native or 0.0,
+            "perquisite_native": v.perquisite_value_native, "perquisite_inr": inr,
+            "rate": res.rate, "rate_source": res.source, "rate_label": res.label(),
+            "rate_official": res.official, "rate_target_date": res.target_date,
+        })
+
+    rows.sort(key=lambda r: r["vest_date"])
+    total_perquisite_inr = sum(r["perquisite_inr"] for r in rows if r["perquisite_inr"] is not None)
+    counts = rates.summarize_results(results)
+    return {
+        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
+        "rows": rows, "total_perquisite_inr": round(total_perquisite_inr, 2),
+        "any_missing_rate": any(r["perquisite_inr"] is None for r in rows),
+        "rates": counts, "rates_badge": rates.basis_badge(counts),
+        "all_official": bool(rows) and counts["official"] == counts["total"],
+    }
+
+
+def get_dtaa_summary(user_id, fy_start_year, resolver=None):
+    """Per-holding gross dividend / tax withheld / net received for the
+    Indian FY starting 1 Apr `fy_start_year`, in native currency and in
+    INR.
+
+    Batch 11: the INR figures are now built dividend by dividend, each at
+    the SBI TT buying rate for ITS OWN date (last day of the previous
+    month, the Rule 115 convention for income), from a rate typed on that
+    dividend, else the user's rate book, else a labelled ECB estimate. A
+    holding's INR total is left blank rather than part-summed if any one
+    of its dividends has no rate. `events` carries the per-dividend
+    working so the page can show it."""
+    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    resolver = resolver or rates.RateResolver(user_id)
+    holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
+
+    plan = []
+    for h in holdings:
+        divs = sorted([t for t in h.transactions
+                       if t.txn_type == InternationalTxnType.DIVIDEND and fy_start <= t.date <= fy_end],
+                      key=lambda t: (t.date, t.id))
+        if divs:
+            plan.append((h, divs))
+    resolver.prefetch([(h.native_currency, d.date, _PME, d.ttbr_override) for h, divs in plan for d in divs])
+
+    rows, results = [], []
+    for h, divs in plan:
+        events, row_results = [], []
+        for d in divs:
+            gross_n = d.gross_amount_native if d.gross_amount_native is not None else d.amount_native
+            withheld_n = d.tax_withheld_native or 0.0
+            res = resolver.resolve(h.native_currency, d.date, _PME, override=d.ttbr_override,
+                                   purpose="Dividends / Form 67", override_date=d.ttbr_override_date)
+            row_results.append(res)
+            events.append({
+                "date": d.date, "gross_native": round(gross_n, 2), "withheld_native": round(withheld_n, 2),
+                "net_native": round(d.amount_native, 2), "rate": res.rate, "rate_label": res.label(),
+                "rate_source": res.source,
+                "gross_inr": round(gross_n * res.rate, 2) if res.ok else None,
+                "withheld_inr": round(withheld_n * res.rate, 2) if res.ok else None,
+                "net_inr": round(d.amount_native * res.rate, 2) if res.ok else None,
+            })
+        results.extend(row_results)
+        complete = all(e["gross_inr"] is not None for e in events)
+        counts = rates.summarize_results(row_results)
+        rows.append({
+            "holding": h, "country": h.country or "—", "currency": h.native_currency,
+            "gross_native": round(sum(e["gross_native"] for e in events), 2),
+            "withheld_native": round(sum(e["withheld_native"] for e in events), 2),
+            "net_native": round(sum(e["net_native"] for e in events), 2),
+            "gross_inr": round(sum(e["gross_inr"] for e in events), 2) if complete else None,
+            "withheld_inr": round(sum(e["withheld_inr"] for e in events), 2) if complete else None,
+            "net_inr": round(sum(e["net_inr"] for e in events), 2) if complete else None,
+            "events": events, "rates": counts, "rates_badge": rates.basis_badge(counts),
+        })
+
+    total_gross_inr = sum(r["gross_inr"] for r in rows if r["gross_inr"] is not None)
+    total_withheld_inr = sum(r["withheld_inr"] for r in rows if r["withheld_inr"] is not None)
+    counts = rates.summarize_results(results)
+    return {
+        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
+        "rows": rows,
+        "total_gross_inr": round(total_gross_inr, 2), "total_withheld_inr": round(total_withheld_inr, 2),
+        "any_missing_rate": any(r["gross_inr"] is None for r in rows),
+        "rates": counts, "rates_badge": rates.basis_badge(counts),
+        "all_official": bool(rows) and counts["official"] == counts["total"],
+    }
+
+
+def get_capital_gains_summary(user_id, fy_start_year, resolver=None):
+    """LTCG/STCG-classified realized gains across every ticker-based
+    holding, for SELLs falling in the Indian FY starting 1 Apr
+    `fy_start_year` (capital gains tax follows the year the asset was
+    SOLD, not a calendar year).
+
+    Batch 11: rupee figures. Per the user's `cg_method` setting the cost
+    and the sale proceeds are converted SEPARATELY, each at the SBI TT
+    buying rate for its own date (last day of the previous month - the
+    Rule 115 convention), or the gain is worked out in the foreign
+    currency and converted ONCE at the sale date's rate. Sources disagree
+    on which is right, which is why it is a setting and a question for
+    the CA. A row's INR figures are blank (never guessed) when a needed
+    rate is missing. `gain_usd` is kept as before: an approximation at the
+    holding's current cached rate, for tracking only."""
+    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
+    settings = rates.get_settings(user_id)
+    single = settings.cg_method == CgMethod.SINGLE
+    resolver = resolver or rates.RateResolver(user_id)
+    holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
+
+    per_holding = []
+    for h in holdings:
+        gains = [g for g in classify_capital_gains(h) if fy_start <= g["sell_date"] <= fy_end]
+        if gains:
+            per_holding.append((h, gains))
+
+    prefetch = []
+    for h, gains in per_holding:
+        for g in gains:
+            prefetch.append((h.native_currency, g["sell_date"], _PME, g["sell_ref"].ttbr_override))
+            if not single:
+                prefetch.append((h.native_currency, g["acquisition_date"], _PME, g["acq_ref"].ttbr_override))
+    resolver.prefetch(prefetch)
+
+    rows, results = [], []
+    any_missing_rate = False
+    for h, gains in per_holding:
+        usd_rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else None)
+        for g in gains:
+            g["holding"] = h
+            g["currency"] = h.native_currency
+            if usd_rate is None:
+                any_missing_rate = True
+                g["gain_usd"] = None
+            else:
+                g["gain_usd"] = round(g["gain_native"] * usd_rate, 2)
+
+            sell_res = resolver.resolve(h.native_currency, g["sell_date"], _PME,
+                                        override=g["sell_ref"].ttbr_override, purpose="Capital gains",
+                                        override_date=g["sell_ref"].ttbr_override_date)
+            results.append(sell_res)
+            acq_res = None
+            if single:
+                if sell_res.ok:
+                    g["cost_inr"] = round(g["cost_basis_native"] * sell_res.rate, 2)
+                    g["proceeds_inr"] = round(g["proceeds_native"] * sell_res.rate, 2)
+                    g["gain_inr"] = round(g["gain_native"] * sell_res.rate, 2)
+                else:
+                    g["cost_inr"] = g["proceeds_inr"] = g["gain_inr"] = None
+            else:
+                acq_res = resolver.resolve(h.native_currency, g["acquisition_date"], _PME,
+                                           override=g["acq_ref"].ttbr_override, purpose="Capital gains",
+                                           override_date=g["acq_ref"].ttbr_override_date)
+                results.append(acq_res)
+                if sell_res.ok and acq_res.ok:
+                    g["cost_inr"] = round(g["cost_basis_native"] * acq_res.rate, 2)
+                    g["proceeds_inr"] = round(g["proceeds_native"] * sell_res.rate, 2)
+                    g["gain_inr"] = round(g["proceeds_inr"] - g["cost_inr"], 2)
+                else:
+                    g["cost_inr"] = g["proceeds_inr"] = g["gain_inr"] = None
+            g["sell_rate"], g["sell_rate_label"], g["sell_rate_source"] = sell_res.rate, sell_res.label(), sell_res.source
+            g["acq_rate"] = acq_res.rate if acq_res else None
+            g["acq_rate_label"] = acq_res.label() if acq_res else "Not used (single-rate method)"
+            g["acq_rate_source"] = acq_res.source if acq_res else None
+            g["rates_ok"] = g["gain_inr"] is not None
+            rows.append(g)
+
+    rows.sort(key=lambda g: g["sell_date"], reverse=True)
+
+    def total(cls, key):
+        return round(sum(g[key] for g in rows if g["classification"] == cls and g[key] is not None), 2)
+
+    counts = rates.summarize_results(results)
+    return {
+        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
+        "rows": rows,
+        "ltcg_total_usd": total("LTCG", "gain_usd"), "stcg_total_usd": total("STCG", "gain_usd"),
+        "ltcg_total_inr": total("LTCG", "gain_inr"), "stcg_total_inr": total("STCG", "gain_inr"),
+        "any_missing_rate": any_missing_rate,
+        "any_missing_inr": any(g["gain_inr"] is None for g in rows),
+        "cg_method": settings.cg_method, "cg_method_label": rates.METHOD_LABELS[settings.cg_method],
+        "rates": counts, "rates_badge": rates.basis_badge(counts),
+        "all_official": bool(rows) and counts["official"] == counts["total"],
+    }
+
+
+# ── Schedule FA in rupees (Batch 11) ─────────────────────────────────
+
+# What "nature of entity" to suggest when the user hasn't filled it in.
+_DEFAULT_ENTITY_NATURE = {
+    InternationalAssetType.US_STOCK: "Listed company",
+    InternationalAssetType.US_ETF: "Exchange-traded fund",
+    InternationalAssetType.INTL_MUTUAL_FUND: "Mutual fund",
+    InternationalAssetType.RSU_ESPP: "Listed company (employer)",
+    InternationalAssetType.FOREIGN_BANK_ACCOUNT: "Bank",
+    InternationalAssetType.FOREIGN_REAL_ESTATE: "Immovable property",
+    InternationalAssetType.FOREIGN_BOND: "Bond issuer",
+}
+
+
+def get_schedule_fa_year_input(holding, calendar_year):
+    return ScheduleFaYearInput.query.filter_by(holding_id=holding.id, calendar_year=calendar_year).first()
+
+
+def save_schedule_fa_year_input(holding, calendar_year, data):
+    """Upsert the optional per-year figures. Returns an error string or None.
+    An all-blank form deletes the row (back to snapshot-derived figures)."""
+    db = _db()
+
+    def num(key, label):
+        raw = (data.get(key) or "").strip()
+        if not raw:
+            return None, None
+        try:
+            val = float(raw)
+        except ValueError:
+            return None, f"Please enter a valid {label}."
+        if val < 0:
+            return None, f"The {label} cannot be negative."
+        return val, None
+
+    peak_value, err = num("peak_value_native", "peak value")
+    if err:
+        return err
+    closing_value, err = num("closing_value_native", "closing value")
+    if err:
+        return err
+    peak_raw = (data.get("peak_date") or "").strip()
+    peak_date = None
+    if peak_raw:
+        try:
+            peak_date = datetime.strptime(peak_raw, "%Y-%m-%d").date()
+        except ValueError:
+            return "Please enter a valid peak date."
+        y_start, y_end = calendar_year_bounds(calendar_year)
+        if not (y_start <= peak_date <= y_end):
+            return f"The peak date must fall within calendar year {calendar_year}."
+    if (peak_value is None) != (peak_date is None):
+        return "Enter the peak value and the peak date together, or leave both blank."
+    notes = (data.get("notes") or "").strip()[:200] or None
+
+    row = get_schedule_fa_year_input(holding, calendar_year)
+    if peak_value is None and closing_value is None and not notes:
+        if row:
+            db.session.delete(row)
+            db.session.commit()
+        return None
+    if not row:
+        row = ScheduleFaYearInput(user_id=holding.user_id, holding_id=holding.id, calendar_year=calendar_year)
+        db.session.add(row)
+    row.peak_value_native, row.peak_date = peak_value, peak_date
+    row.closing_value_native, row.notes = closing_value, notes
+    db.session.commit()
+    return None
+
+
+def _fa_lots_held_in_year(h, year_start, year_end):
+    """Acquisition lots the holding held at ANY point in the calendar year,
+    as [{'date', 'cost_native', 'ref'}] - what Schedule FA's "initial value
+    of investment" is built from. For ticker-based holdings this is the lots
+    still open on 1 January (partly-sold lots count only their remaining
+    quantity, FIFO) plus everything acquired during the year, even if sold
+    again within it. Other holdings use their dated BUY amounts."""
+    if not h.is_ticker_based:
+        return [{"date": t.date, "cost_native": t.amount_native, "ref": t}
+                for t in h.transactions if t.txn_type == InternationalTxnType.BUY and t.date <= year_end]
+
+    events = []
+    for t in h.transactions:
+        if t.txn_type == InternationalTxnType.BUY and t.quantity and t.quantity > 0:
+            events.append((t.date, 0, t.id, "BUY", t))
+        elif t.txn_type == InternationalTxnType.SELL and t.quantity and t.quantity > 0:
+            events.append((t.date, 1, t.id, "SELL", t))
+    for v in h.vesting_tranches:
+        if v.quantity and v.quantity > 0:
+            events.append((v.vest_date, 0, v.id, "VEST", v))
+    events.sort(key=lambda e: (e[0], e[1], e[2]))
+
+    lots = deque()
+    held = []
+    for ev_date, _rank, _id, kind, obj in events:
+        if ev_date > year_end:
+            break
+        if kind in ("BUY", "VEST"):
+            unit = obj.amount_native / obj.quantity if kind == "BUY" else obj.fmv_native
+            lot = {"date": ev_date, "qty": obj.quantity, "unit_cost": unit, "ref": obj}
+            if ev_date < year_start:
+                lots.append(lot)
+            else:
+                held.append({"date": ev_date, "cost_native": round(obj.quantity * unit, 2), "ref": obj})
+        elif kind == "SELL" and ev_date < year_start:
+            remaining = obj.quantity
+            while remaining > 1e-9 and lots:
+                take = min(remaining, lots[0]["qty"])
+                lots[0]["qty"] -= take
+                remaining -= take
+                if lots[0]["qty"] <= 1e-9:
+                    lots.popleft()
+    carried = [{"date": l["date"], "cost_native": round(l["qty"] * l["unit_cost"], 2), "ref": l["ref"]} for l in lots]
+    return sorted(carried + held, key=lambda x: x["date"])
+
+
+def get_schedule_fa_summary(user_id, calendar_year, resolver=None):
+    """Per-holding Schedule FA (Table A3-style) figures for the given
+    CALENDAR year (Schedule FA's own reporting period).
+
+    The USD columns (opening/peak/closing/proceeds) are the module's
+    tracking figures from the daily snapshots, unchanged and NOT tax
+    figures. Batch 11 adds the rupee columns the form actually asks for:
+      initial value ... cost of every lot held in the year, each at the SBI
+                         TT buying rate for its acquisition date
+      peak value ...... on the peak date's rate
+      closing value ... on the 31 December rate (always that date itself)
+      gross paid ...... dividends/interest credited in the year, each on its date
+      gross proceeds .. sales in the year, each on its date
+    "Its date" follows the user's `fa_basis` setting (the day itself, per
+    the form's instructions, or the last day of the previous month, per
+    Rule 115). Peak and closing come from the per-year inputs the user
+    typed (broker statement figures in the holding's own currency) when
+    present, else from the daily USD snapshots - converted back to the
+    holding's currency, an approximation flagged on the row for non-USD
+    holdings. Any figure whose rate is missing is blank, never guessed."""
+    year_start, year_end = calendar_year_bounds(calendar_year)
+    settings = rates.get_settings(user_id)
+    basis = settings.fa_basis
+    resolver = resolver or rates.RateResolver(user_id)
+    holdings = get_holdings(user_id, archived=False)
+    inputs = {i.holding_id: i for i in ScheduleFaYearInput.query.filter_by(
+        user_id=user_id, calendar_year=calendar_year).all()}
+
+    # Pass 1: gather everything each row needs, and every rate it will ask for.
+    plans, prefetch = [], []
     for h in holdings:
         snapshots = (InternationalValueSnapshot.query
                      .filter_by(holding_id=h.id)
                      .filter(InternationalValueSnapshot.date >= year_start,
                              InternationalValueSnapshot.date <= year_end)
-                     .order_by(InternationalValueSnapshot.date)
-                     .all())
+                     .order_by(InternationalValueSnapshot.date).all())
         if snapshots:
-            opening = snapshots[0].usd_value
-            closing = snapshots[-1].usd_value
-            peak = max(s.usd_value for s in snapshots)
+            opening, closing = snapshots[0].usd_value, snapshots[-1].usd_value
+            peak_snap = max(snapshots, key=lambda s: s.usd_value)
+            peak, peak_snap_date = peak_snap.usd_value, peak_snap.date
             data_complete = (snapshots[0].date <= year_start + timedelta(days=10) and
-                              snapshots[-1].date >= year_end - timedelta(days=10))
+                             snapshots[-1].date >= year_end - timedelta(days=10))
         else:
             opening = closing = peak = h.usd_value or 0.0
+            peak_snap_date = None
             data_complete = False
 
-        sell_txns_in_year = [t for t in h.transactions
-                              if t.txn_type == InternationalTxnType.SELL and year_start <= t.date <= year_end]
-        gross_proceeds_usd = 0.0
-        if sell_txns_in_year:
-            rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else 1.0)
-            gross_proceeds_usd = round(sum(t.amount_native for t in sell_txns_in_year) * rate, 2)
+        sells = sorted([t for t in h.transactions
+                        if t.txn_type == InternationalTxnType.SELL and year_start <= t.date <= year_end],
+                       key=lambda t: (t.date, t.id))
+        divs = sorted([t for t in h.transactions
+                       if t.txn_type == InternationalTxnType.DIVIDEND and year_start <= t.date <= year_end],
+                      key=lambda t: (t.date, t.id))
+        lots = _fa_lots_held_in_year(h, year_start, year_end)
+        inp = inputs.get(h.id)
+        peak_date = inp.peak_date if (inp and inp.peak_date) else (peak_snap_date or year_end)
+        cur = h.native_currency
+        for lot in lots:
+            prefetch.append((cur, lot["date"], basis, lot["ref"].ttbr_override))
+        for t in sells + divs:
+            prefetch.append((cur, t.date, basis, t.ttbr_override))
+        prefetch.append((cur, peak_date, basis, None))
+        prefetch.append((cur, year_end, RateBasis.SAME_DAY, None))
+        plans.append(dict(h=h, opening=opening, closing=closing, peak=peak, data_complete=data_complete,
+                          peak_snap_date=peak_snap_date, sells=sells, divs=divs, lots=lots, inp=inp,
+                          peak_date=peak_date, have_snapshots=bool(snapshots)))
+    resolver.prefetch(prefetch)
 
-        buy_dates = [t.date for t in h.transactions if t.txn_type == InternationalTxnType.BUY]
-        acquisition_date = min(buy_dates) if buy_dates else (h.created_at.date() if h.created_at else None)
+    # Pass 2: convert and assemble.
+    rows, all_results = [], []
+    for pl in plans:
+        h, inp, cur = pl["h"], pl["inp"], pl["h"].native_currency
+        row_results = []
+
+        def conv(amount, when, b, override=None, odate=None):
+            inr, res = resolver.convert(amount, cur, when, b, override=override, purpose="Schedule FA",
+                                        override_date=odate)
+            row_results.append(res)
+            return inr
+
+        def to_native(usd):
+            """Snapshot USD -> holding currency (exact for USD holdings)."""
+            if cur == "USD":
+                return usd, False
+            if h.fx_rate_used:
+                return usd / h.fx_rate_used, True
+            return None, True
+
+        approx_native = False
+        # closing
+        if inp and inp.closing_value_native is not None:
+            closing_native, closing_src = inp.closing_value_native, "your input"
+        else:
+            closing_native, approx = to_native(pl["closing"])
+            approx_native |= approx
+            closing_src = "daily snapshots" if pl["have_snapshots"] else "current value (no snapshots)"
+        # peak
+        if inp and inp.peak_value_native is not None:
+            peak_native, peak_src = inp.peak_value_native, "your input"
+        else:
+            peak_native, approx = to_native(pl["peak"])
+            approx_native |= approx
+            peak_src = "daily snapshots" if pl["have_snapshots"] else "current value (no snapshots)"
+
+        closing_inr = conv(closing_native, year_end, RateBasis.SAME_DAY) if closing_native is not None else None
+        peak_inr = conv(peak_native, pl["peak_date"], basis) if peak_native is not None else None
+
+        lots = pl["lots"]
+        initial_inr = None
+        if lots:
+            parts = [conv(l["cost_native"], l["date"], basis, l["ref"].ttbr_override, l["ref"].ttbr_override_date)
+                     for l in lots]
+            initial_inr = round(sum(parts), 2) if all(p is not None for p in parts) else None
+        acq_dates = [l["date"] for l in lots]
+        acquisition_date = min(acq_dates) if acq_dates else None
+
+        paid_parts = [conv(t.gross_amount_native if t.gross_amount_native is not None else t.amount_native,
+                           t.date, basis, t.ttbr_override, t.ttbr_override_date) for t in pl["divs"]]
+        gross_paid_inr = (round(sum(paid_parts), 2) if all(p is not None for p in paid_parts) else None) if paid_parts else 0.0
+        proceeds_parts = [conv(t.amount_native, t.date, basis, t.ttbr_override, t.ttbr_override_date)
+                          for t in pl["sells"]]
+        proceeds_inr = (round(sum(proceeds_parts), 2) if all(p is not None for p in proceeds_parts) else None) if proceeds_parts else 0.0
+
+        # legacy USD tracking figure for proceeds (kept as before)
+        gross_proceeds_usd = 0.0
+        if pl["sells"]:
+            usd_rate = h.fx_rate_used or 1.0
+            gross_proceeds_usd = round(sum(t.amount_native for t in pl["sells"]) * usd_rate, 2)
+
+        # what is still missing before this row could be copied into the form
+        nature = (h.entity_nature or "").strip()
+        missing = []
+        if not (h.entity_address or "").strip():
+            missing.append("address")
+        if not (h.entity_zip or "").strip():
+            missing.append("ZIP code")
+        if not nature:
+            missing.append("nature of entity (using a suggested default)")
+        if h.asset_type not in (InternationalAssetType.FOREIGN_BANK_ACCOUNT, InternationalAssetType.FOREIGN_REAL_ESTATE):
+            if not lots:
+                missing.append("dated buy/vest transactions (needed for initial value and acquisition date)")
+        if not (inp and inp.peak_date) and not pl["peak_snap_date"]:
+            missing.append("peak date")
+        counts = rates.summarize_results(row_results)
+        all_results.extend(row_results)
 
         rows.append({
             "holding": h, "country": h.country or "—", "asset_type": h.asset_type,
-            "acquisition_date": acquisition_date,
-            "opening_usd": round(opening or 0, 2), "peak_usd": round(peak or 0, 2),
-            "closing_usd": round(closing or 0, 2), "gross_proceeds_usd": gross_proceeds_usd,
-            "data_complete": data_complete,
+            "entity_name": h.name, "entity_address": h.entity_address or "", "entity_zip": h.entity_zip or "",
+            "entity_nature": nature or _DEFAULT_ENTITY_NATURE.get(h.asset_type, "—"),
+            "acquisition_date": acquisition_date or (h.created_at.date() if h.created_at else None),
+            "acquisition_from_lots": bool(acq_dates), "lot_count": len(lots),
+            "opening_usd": round(pl["opening"] or 0, 2), "peak_usd": round(pl["peak"] or 0, 2),
+            "closing_usd": round(pl["closing"] or 0, 2), "gross_proceeds_usd": gross_proceeds_usd,
+            "data_complete": pl["data_complete"],
+            "initial_inr": initial_inr, "peak_inr": peak_inr, "closing_inr": closing_inr,
+            "peak_date": pl["peak_date"], "peak_source": peak_src, "closing_source": closing_src,
+            "gross_paid_inr": gross_paid_inr, "proceeds_inr": proceeds_inr,
+            "approx_native": approx_native, "has_input": inp is not None,
+            "missing": missing, "rates": counts, "rates_badge": rates.basis_badge(counts),
         })
 
+    def tot(key):
+        return round(sum(r[key] for r in rows if r[key] is not None), 2)
+
+    counts = rates.summarize_results(all_results)
     return {
         "calendar_year": calendar_year, "rows": rows,
         "any_incomplete": any(not r["data_complete"] for r in rows),
+        "total_initial_inr": tot("initial_inr"), "total_peak_inr": tot("peak_inr"),
+        "total_closing_inr": tot("closing_inr"), "total_gross_paid_inr": tot("gross_paid_inr"),
+        "total_proceeds_inr": tot("proceeds_inr"),
+        "any_missing_inr": any(r[k] is None for r in rows for k in ("peak_inr", "closing_inr")),
+        "fa_basis": basis, "fa_basis_label": rates.BASIS_LABELS[basis],
+        "rates": counts, "rates_badge": rates.basis_badge(counts),
+        "all_official": bool(rows) and counts["official"] == counts["total"] and counts["total"] > 0,
     }
+
+
+def get_needed_rates(user_id, fy_start_year):
+    """The SBI rates the user has NOT yet entered (and that no typed
+    override covers) for one tax year: every rate the Schedule FA (the
+    calendar year ending in this FY), capital gains, dividend/Form 67 and
+    RSU perquisite reports would ask for. Runs the real report functions in
+    'collect' mode (no network), so it can never disagree with them."""
+    resolver = rates.RateResolver(user_id, allow_estimate=False)
+    get_schedule_fa_summary(user_id, fy_start_year, resolver=resolver)
+    get_capital_gains_summary(user_id, fy_start_year, resolver=resolver)
+    get_dtaa_summary(user_id, fy_start_year, resolver=resolver)
+    get_vesting_perquisite_summary(user_id, fy_start_year, resolver=resolver)
+    return resolver.needed_list()
 
 
 # ── Scheduled snapshot job ──────────────────────────────────────────
@@ -1652,57 +2118,6 @@ def vault_summary(user_id):
 # losses. The report gives the two INPUT figures Form 67 actually asks
 # for and stops there — same honesty as Schedule FA's own disclaimer.
 
-def get_dtaa_summary(user_id, fy_start_year):
-    """Per-holding gross dividend / tax withheld / net received for the
-    Indian FY starting 1 Apr `fy_start_year`, in both native currency
-    and an approximate INR equivalent (bridged native -> USD -> INR via
-    the holding's own cached fx_rate_used and currency_display's
-    usd_to_inr(), same approximation path as portfolio_inr_value() —
-    NOT the CBDT-prescribed SBI TT buying rate on each dividend's own
-    date, which is what an actual Form 67 filing requires)."""
-    import currency_display
-    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
-    holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
-
-    rows = []
-    any_missing_rate = False
-    for h in holdings:
-        divs = [t for t in h.transactions
-                if t.txn_type == InternationalTxnType.DIVIDEND and fy_start <= t.date <= fy_end]
-        if not divs:
-            continue
-
-        gross_native = sum((d.gross_amount_native if d.gross_amount_native is not None else d.amount_native) for d in divs)
-        withheld_native = sum((d.tax_withheld_native or 0.0) for d in divs)
-        net_native = sum(d.amount_native for d in divs)
-
-        rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else None)
-        if rate is None:
-            any_missing_rate = True
-            gross_inr = withheld_inr = net_inr = None
-        else:
-            gross_inr = currency_display.usd_to_inr(round(gross_native * rate, 2))
-            withheld_inr = currency_display.usd_to_inr(round(withheld_native * rate, 2))
-            net_inr = currency_display.usd_to_inr(round(net_native * rate, 2))
-
-        rows.append({
-            "holding": h, "country": h.country or "—", "currency": h.native_currency,
-            "gross_native": round(gross_native, 2), "withheld_native": round(withheld_native, 2),
-            "net_native": round(net_native, 2),
-            "gross_inr": gross_inr, "withheld_inr": withheld_inr, "net_inr": net_inr,
-        })
-
-    total_gross_inr = sum(r["gross_inr"] for r in rows if r["gross_inr"] is not None)
-    total_withheld_inr = sum(r["withheld_inr"] for r in rows if r["withheld_inr"] is not None)
-
-    return {
-        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
-        "rows": rows,
-        "total_gross_inr": round(total_gross_inr, 2), "total_withheld_inr": round(total_withheld_inr, 2),
-        "any_missing_rate": any_missing_rate,
-    }
-
-
 # ── Capital Gains Classification: LTCG / STCG (Batch 9.6, Sep 2026) ──
 # Indian tax rule for foreign (unlisted) equity/funds: LONG-term if
 # held for MORE than 24 months, else SHORT-term — a materially
@@ -1754,10 +2169,10 @@ def classify_capital_gains(holding):
     for event_date, _rank, _id, kind, obj in events:
         if kind == "BUY":
             if obj.quantity and obj.quantity > 0:
-                lots.append({"date": obj.date, "qty": obj.quantity, "unit_cost": obj.amount_native / obj.quantity})
+                lots.append({"date": obj.date, "qty": obj.quantity, "unit_cost": obj.amount_native / obj.quantity, "ref": obj})
         elif kind == "VEST":
             if obj.quantity and obj.quantity > 0:
-                lots.append({"date": obj.vest_date, "qty": obj.quantity, "unit_cost": obj.fmv_native})
+                lots.append({"date": obj.vest_date, "qty": obj.quantity, "unit_cost": obj.fmv_native, "ref": obj})
         elif kind == "SELL":
             t = obj
             if not t.quantity or t.quantity <= 0:
@@ -1775,6 +2190,8 @@ def classify_capital_gains(holding):
                     "cost_basis_native": round(matched_qty * lot["unit_cost"], 2),
                     "proceeds_native": round(matched_qty * unit_proceeds, 2),
                     "gain_native": round(matched_qty * (unit_proceeds - lot["unit_cost"]), 2),
+                    # Batch 11: the source events, so each can carry its own SBI rate override
+                    "acq_ref": lot["ref"], "sell_ref": t,
                 })
                 lot["qty"] -= matched_qty
                 qty_to_sell -= matched_qty
@@ -1790,42 +2207,3 @@ def classify_capital_gains(holding):
             # philosophy as the rest of this module.
 
     return gains
-
-
-def get_capital_gains_summary(user_id, fy_start_year):
-    """LTCG/STCG-classified realized gains across every ticker-based
-    holding, for SELLs falling in the Indian FY starting 1 Apr
-    `fy_start_year` (capital gains tax follows the year the asset was
-    SOLD, not a calendar year). gain_usd on each row is an
-    approximation via the holding's own cached fx_rate_used, same
-    caveat as portfolio_usd_xirr()."""
-    fy_start, fy_end = fy_bounds(_date(fy_start_year, 4, 1))
-    holdings = InternationalHolding.query.filter_by(user_id=user_id).all()
-
-    rows = []
-    any_missing_rate = False
-    for h in holdings:
-        gains = [g for g in classify_capital_gains(h) if fy_start <= g["sell_date"] <= fy_end]
-        if not gains:
-            continue
-        rate = h.fx_rate_used or (1.0 if h.native_currency == "USD" else None)
-        for g in gains:
-            g["holding"] = h
-            g["currency"] = h.native_currency
-            if rate is None:
-                any_missing_rate = True
-                g["gain_usd"] = None
-            else:
-                g["gain_usd"] = round(g["gain_native"] * rate, 2)
-        rows.extend(gains)
-
-    rows.sort(key=lambda g: g["sell_date"], reverse=True)
-    ltcg_total_usd = sum(g["gain_usd"] for g in rows if g["classification"] == "LTCG" and g["gain_usd"] is not None)
-    stcg_total_usd = sum(g["gain_usd"] for g in rows if g["classification"] == "STCG" and g["gain_usd"] is not None)
-
-    return {
-        "fy_label": fy_label(_date(fy_start_year, 4, 1)), "fy_start": fy_start, "fy_end": fy_end,
-        "rows": rows,
-        "ltcg_total_usd": round(ltcg_total_usd, 2), "stcg_total_usd": round(stcg_total_usd, 2),
-        "any_missing_rate": any_missing_rate,
-    }
